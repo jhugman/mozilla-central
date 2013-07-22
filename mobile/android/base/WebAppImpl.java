@@ -5,26 +5,30 @@
 
 package org.mozilla.gecko;
 
-import android.content.Intent;
-import android.os.Bundle;
-import android.util.Log;
-import android.view.View;
-import android.view.MenuItem;
-import android.widget.TextView;
-import android.widget.RelativeLayout;
+import java.io.File;
+import java.net.MalformedURLException;
+import java.net.URL;
+
+import org.mozilla.gecko.webapps.WebAppRegistry;
+
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.PackageManager.NameNotFoundException;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
-import android.view.animation.AnimationUtils;
-import android.view.animation.Animation;
-import android.widget.ImageView;
+import android.os.Bundle;
+import android.util.Log;
 import android.view.Display;
-
-import java.net.URL;
-import java.io.File;
+import android.view.View;
+import android.view.animation.Animation;
+import android.view.animation.AnimationUtils;
+import android.widget.ImageView;
+import android.widget.TextView;
 
 public class WebAppImpl extends GeckoApp {
     private static final String LOGTAG = "GeckoWebAppImpl";
@@ -35,7 +39,7 @@ public class WebAppImpl extends GeckoApp {
 
     private View mSplashscreen;
 
-    protected int getIndex() { return 0; }
+    protected int getIndex() { return -1; }
 
     @Override
     public int getLayout() { return R.layout.web_app; }
@@ -48,11 +52,13 @@ public class WebAppImpl extends GeckoApp {
     {
         super.onCreate(savedInstanceState);
 
-        mSplashscreen = (RelativeLayout) findViewById(R.id.splashscreen);
+        mSplashscreen = findViewById(R.id.splashscreen);
         if (!GeckoThread.checkLaunchState(GeckoThread.LaunchState.GeckoRunning)) {
             overridePendingTransition(R.anim.grow_fade_in_center, android.R.anim.fade_out);
             showSplash();
         }
+
+        new WebAppRegistry().rebuildRegistry(getApplicationContext());
 
         String action = getIntent().getAction();
         Bundle extras = getIntent().getExtras();
@@ -61,7 +67,19 @@ public class WebAppImpl extends GeckoApp {
 
         mTitlebarText = (TextView)findViewById(R.id.webapp_title);
         mTitlebar = findViewById(R.id.webapp_titlebar);
-        if (!action.startsWith(ACTION_WEBAPP_PREFIX)) {
+        String packageName = extras.getString("packageName");
+        Log.d(LOGTAG, "2. Package name is " + packageName);
+        if (packageName != null) {
+            if (getIndex() == -1) {
+                // we're not installed yet.
+                Log.i(LOGTAG, "App " + packageName + " isn't installed yet");
+                try {
+                    installWebApp(packageName);
+                } catch (Exception e) {
+                    Log.e(LOGTAG, "Can't install " + packageName);
+                }
+            }
+        } else if (!action.startsWith(ACTION_WEBAPP_PREFIX)) {
             Log.e(LOGTAG, "WebApp launch, but intent action is " + action + "!");
             return;
         }
@@ -72,7 +90,7 @@ public class WebAppImpl extends GeckoApp {
             mOrigin = new URL(origin);
         } catch (java.net.MalformedURLException ex) {
             // If we can't parse the this is an app protocol, just settle for not having an origin
-            if (!origin.startsWith("app://")) {
+            if (origin == null || !origin.startsWith("app://")) {
                 return;
             }
 
@@ -83,6 +101,30 @@ public class WebAppImpl extends GeckoApp {
             } catch (java.net.MalformedURLException ex2) {
                 Log.e(LOGTAG, "Unable to parse intent url: ", ex);
             }
+        }
+    }
+
+    private void installWebApp(String packageName) throws NameNotFoundException, MalformedURLException {
+        ApplicationInfo app = getPackageManager()
+                .getApplicationInfo(packageName,
+                        PackageManager.GET_META_DATA);
+
+        Bundle metadata = app.metaData;
+
+        String type = metadata.getString("webapp");
+
+        if ("hosted".equals(type)) {
+            String manifestUrlString = metadata.getString("manifestUrl");
+
+            assert manifestUrlString != null;
+            URL manifestUrl = new URL(manifestUrlString);
+
+            Log.d(LOGTAG, "Installing " + packageName + " from " + manifestUrl);
+            new WebAppRegistry().addApk(this, packageName);
+        } else if ("packaged".equals(type)) {
+
+        } else {
+
         }
     }
 
@@ -123,7 +165,7 @@ public class WebAppImpl extends GeckoApp {
         Display display = getWindowManager().getDefaultDisplay();
         gd.setGradientCenter(0.5f, 0.5f);
         gd.setGradientRadius(Math.max(display.getWidth()/2, display.getHeight()/2));
-        mSplashscreen.setBackgroundDrawable((Drawable)gd);
+        mSplashscreen.setBackgroundDrawable(gd);
 
         // look for a logo.png in the profile dir and show it. If we can't find a logo show nothing
         File profile = getProfile().getDir();

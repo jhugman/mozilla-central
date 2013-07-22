@@ -119,6 +119,7 @@ this.DOMApplicationRegistry = {
     cpmm.addMessageListener("Activities:Register:OK", this);
 
     Services.obs.addObserver(this, "xpcom-shutdown", false);
+    Services.obs.addObserver(this, "SynthAPK:AppAdded", false);
 
     AppDownloadManager.registerCancelFunction(this.cancelDownload.bind(this));
 
@@ -742,6 +743,10 @@ this.DOMApplicationRegistry = {
       Services.obs.removeObserver(this, "xpcom-shutdown");
       cpmm = null;
       ppmm = null;
+    } else if (aTopic === "SynthAPK:AppAdded") {
+      dump("Webapps.jsm: SynthAPK:AppAdded: aSubject=" + JSON.stringify(aSubject) + "; aData=" + JSON.stringify(aData));
+
+      ppmm.broadcastAsyncMessage("Webapps:AutoInstall", aData);
     }
   },
 
@@ -1817,8 +1822,8 @@ this.DOMApplicationRegistry = {
           // We allow bypassing the install confirmation process to facilitate
           // automation.
           let prefName = "dom.mozApps.auto_confirm_install";
-          if (Services.prefs.prefHasUserValue(prefName) &&
-              Services.prefs.getBoolPref(prefName)) {
+          if ((Services.prefs.prefHasUserValue(prefName) &&
+              Services.prefs.getBoolPref(prefName)) || !aData.userConfirmationNeeded) {
             this.confirmInstall(aData);
           } else {
             Services.obs.notifyObservers(aMm, "webapps-ask-install",

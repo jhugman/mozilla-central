@@ -5,13 +5,6 @@
 
 package org.mozilla.gecko;
 
-import org.mozilla.gecko.util.INIParser;
-import org.mozilla.gecko.util.INISection;
-
-import android.content.Context;
-import android.text.TextUtils;
-import android.util.Log;
-
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.FileReader;
@@ -21,6 +14,13 @@ import java.nio.charset.Charset;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Hashtable;
+
+import org.mozilla.gecko.util.INIParser;
+import org.mozilla.gecko.util.INISection;
+
+import android.content.Context;
+import android.text.TextUtils;
+import android.util.Log;
 
 public final class GeckoProfile {
     private static final String LOGTAG = "GeckoProfile";
@@ -148,7 +148,7 @@ public final class GeckoProfile {
             } else {
                 Log.d(LOGTAG, "Found profile dir: " + mDir.getAbsolutePath());
             }
-        } catch (IOException ioe) {
+        } catch (Exception ioe) {
             Log.e(LOGTAG, "Error getting profile dir", ioe);
         }
         return mDir;
@@ -263,7 +263,7 @@ public final class GeckoProfile {
                         while (sections.containsKey(nextSection)) {
                             parser.renameSection(nextSection, curSection);
                             sectionNumber++;
-                            
+
                             curSection = nextSection;
                             nextSection = "Profile" + (sectionNumber+1);
                         }

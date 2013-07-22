@@ -232,6 +232,9 @@ FENNEC_JAVA_FILES = \
   menu/MenuItemDefault.java \
   menu/MenuPanel.java \
   menu/MenuPopup.java \
+  webapps/WebAppInstallReceiver.java \
+  webapps/WebAppRegistry.java \
+  webapps/Logger.java \
   widget/AboutHome.java \
   widget/AboutHomeView.java \
   widget/AboutHomeSection.java \

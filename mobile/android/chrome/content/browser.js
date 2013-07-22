@@ -289,6 +289,9 @@ var BrowserApp = {
 
     Services.obs.addObserver(this, "sessionstore-state-purge-complete", false);
 
+    Services.obs.addObserver(this, "SynthAPK:AppAdded", false);
+    Services.obs.addObserver(this, "SynthAPK:AppRemoved", false);
+
     function showFullScreenWarning() {
       NativeWindow.toast.show(Strings.browser.GetStringFromName("alertFullScreenToast"), "short");
     }
@@ -728,7 +731,7 @@ var BrowserApp = {
       if (tabs[i].browser.contentWindow == aWindow)
         return tabs[i];
     }
-    return null; 
+    return null;
   },
 
   getBrowserForWindow: function getBrowserForWindow(aWindow) {
@@ -1491,6 +1494,14 @@ var BrowserApp = {
         this.notifyPrefObservers(aData);
         break;
 
+      case "SynthAPK:AppAdded":
+        dump("browser.js: SynthAPK added: " + JSON.stringify(aData));
+        break;
+
+      case "SynthAPK:AppRemoved":
+        dump("SynthAPK removed: " + JSON.stringify(aData));
+        break;
+
       default:
         dump('BrowserApp.observe: unexpected topic "' + aTopic + '"\n');
         break;
@@ -1610,7 +1621,7 @@ var NativeWindow = {
         return;
 
       sendMessageToJava({
-        type: "Menu:Update", 
+        type: "Menu:Update",
         id: aId,
         options: aOptions
       });
@@ -1636,7 +1647,7 @@ var NativeWindow = {
    *                     automatically dismiss before this time.
    *        checkbox:    A string to appear next to a checkbox under the notification
    *                     message. The button callback functions will be called with
-   *                     the checked state as an argument.                   
+   *                     the checked state as an argument.
    */
     show: function(aMessage, aValue, aButtons, aTabID, aOptions) {
       aButtons.forEach((function(aButton) {
@@ -1874,7 +1885,7 @@ var NativeWindow = {
         return this._targetRef.get();
       return null;
     },
-  
+
     set _target(aTarget) {
       if (aTarget)
         this._targetRef = Cu.getWeakReference(aTarget);
@@ -2674,7 +2685,7 @@ Tab.prototype = {
                                   viewportWidth - 15);
   },
 
-  /** 
+  /**
    * Reloads the tab with the desktop mode setting.
    */
   reloadWithMode: function (aDesktopMode) {
@@ -3309,7 +3320,7 @@ Tab.prototype = {
 
             if (sizes == "any") {
               // Since Java expects an integer, use -1 to represent icons with sizes="any"
-              maxSize = -1; 
+              maxSize = -1;
             } else {
               let tokens = sizes.split(" ");
               tokens.forEach(function(token) {
@@ -3491,7 +3502,7 @@ Tab.prototype = {
       let showProgress = restoring ? false : this.showProgress;
 
       // true if the page loaded successfully (i.e., no 404s or other errors)
-      let success = false; 
+      let success = false;
       let uri = "";
       try {
         // Remember original URI for UA changes on redirected pages
@@ -5126,7 +5137,7 @@ var FormAssistant = {
  * -- and reflect them back to Java.
  */
 let HealthReportStatusListener = {
-  TELEMETRY_PREF: 
+  TELEMETRY_PREF:
 #ifdef MOZ_TELEMETRY_REPORTING
     // Telemetry pref differs based on build.
 #ifdef MOZ_TELEMETRY_ON_BY_DEFAULT
@@ -5881,7 +5892,7 @@ var ClipboardHelper = {
       return;
     let target = aElement.QueryInterface(Ci.nsIDOMNSEditableElement);
     target.editor.paste(Ci.nsIClipboard.kGlobalClipboard);
-    target.focus();  
+    target.focus();
   },
 
   inputMethod: function(aElement) {
@@ -6125,7 +6136,7 @@ var IdentityHandler = {
                                .QueryInterface(Components.interfaces.nsISSLStatusProvider)
                                .SSLStatus;
 
-    // Don't pass in the actual location object, since it can cause us to 
+    // Don't pass in the actual location object, since it can cause us to
     // hold on to the window object too long.  Just pass in the fields we
     // care about. (bug 424829)
     let locationObj = {};
@@ -6173,7 +6184,7 @@ var IdentityHandler = {
 
       return result;
     }
-    
+
     // Otherwise, we don't know the cert owner
     result.owner = Strings.browser.GetStringFromName("identity.ownerUnknown3");
 
@@ -6516,7 +6527,7 @@ var WebappsUI = {
     const DEFAULT_ICON = "chrome://browser/skin/images/default-app-icon.png";
     if (!aIcons)
       return DEFAULT_ICON;
-  
+
     let iconSizes = Object.keys(aIcons);
     if (iconSizes.length == 0)
       return DEFAULT_ICON;
@@ -6563,7 +6574,7 @@ var WebappsUI = {
       if (profilePath) {
         let file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsILocalFile);
         file.initWithPath(profilePath);
-  
+
         let self = this;
         DOMApplicationRegistry.confirmInstall(aData, false, file, null,
           function (manifest) {
@@ -6700,7 +6711,7 @@ var WebappsUI = {
         favicon.src = WebappsUI.getBiggestIcon(null);
       }
     };
-  
+
     favicon.src = aIconURL;
   },
 

@@ -164,7 +164,25 @@
             <intent-filter>
                 <action android:name="org.mozilla.gecko.ACTION_ALERT_CALLBACK" />
             </intent-filter>
+            <intent-filter>
+                <!-- catch links from synthetic apks -->
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/webapp" />
+            </intent-filter>
         </activity>
+
+         <!-- listen for apk removals and installs -->
+         <receiver android:name="org.mozilla.gecko.webapps.WebAppInstallReceiver">
+            <intent-filter>
+                <action android:name="android.intent.action.PACKAGE_REMOVED"/>
+                <data android:scheme="package"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.PACKAGE_ADDED"/>
+                <data android:scheme="package"/>
+            </intent-filter>
+        </receiver>
 
 #include @OBJDIR@/WebAppManifestFragment.xml.in
 
@@ -293,4 +311,4 @@
     <permission android:name="@ANDROID_PACKAGE_NAME@.permissions.FORMHISTORY_PROVIDER"
                 android:protectionLevel="signature"/>
 
-</manifest> 
+</manifest>

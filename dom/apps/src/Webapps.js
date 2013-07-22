@@ -65,6 +65,10 @@ WebappsRegistry.prototype = {
       case "Webapps:GetInstalled:Return:OK":
         Services.DOMRequest.fireSuccess(req, convertAppsArray(msg.apps, this._window));
         break;
+
+      case "Webapps:AutoInstall":
+        this.installFromSynthApk(aMessage);
+        break;
     }
     this.removeRequest(msg.requestID);
   },
@@ -156,6 +160,10 @@ WebappsRegistry.prototype = {
     return request;
   },
 
+  installFromSynthApk: function (aUrl, aParams) {
+    dump("Webapps.js: About to install from " + JSON.stringify(aUrl));
+  },
+
   getSelf: function() {
     let request = this.createRequest();
     cpmm.sendAsyncMessage("Webapps:GetSelf", { origin: this._getOrigin(this._window.location.href),
@@ -245,7 +253,8 @@ WebappsRegistry.prototype = {
     this.initDOMRequestHelper(aWindow, ["Webapps:Install:Return:OK", "Webapps:Install:Return:KO",
                               "Webapps:GetInstalled:Return:OK",
                               "Webapps:GetSelf:Return:OK",
-                              "Webapps:CheckInstalled:Return:OK" ]);
+                              "Webapps:CheckInstalled:Return:OK",
+                              "Webapps:AutoInstall" ]);
 
     let util = this._window.QueryInterface(Ci.nsIInterfaceRequestor)
                            .getInterface(Ci.nsIDOMWindowUtils);
@@ -371,7 +380,8 @@ WebappsApplication.prototype = {
                               "Webapps:Launch:Return:OK",
                               "Webapps:Launch:Return:KO",
                               "Webapps:PackageEvent",
-                              "Webapps:ClearBrowserData:Return"]);
+                              "Webapps:ClearBrowserData:Return",
+                              "Webapps:AutoInstall"]);
 
     cpmm.sendAsyncMessage("Webapps:RegisterForMessages",
                           ["Webapps:OfflineCache",
@@ -631,6 +641,10 @@ WebappsApplication.prototype = {
         break;
       case "Webapps:ClearBrowserData:Return":
         Services.DOMRequest.fireSuccess(req, null);
+        break;
+      case "Webapps:AutoInstall":
+        dump("Webapps.js, 641: Webapps.AutoInstall " + JSON.stringify(aMessage));
+        this.mgmt.installFromSynthApk(aMessage);
         break;
     }
   },
