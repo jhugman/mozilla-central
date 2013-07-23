@@ -1951,6 +1951,7 @@ this.DOMApplicationRegistry = {
   confirmInstall: function(aData, aFromSync, aProfileDir,
                            aOfflineCacheObserver,
                            aInstallSuccessCallback) {
+    debugger;
     let isReinstall = false;
     let app = aData.app;
     app.removable = true;

@@ -5,6 +5,7 @@
 
 package org.mozilla.gecko;
 
+import android.os.*;
 import org.mozilla.gecko.DataReportingNotification;
 import org.mozilla.gecko.background.announcements.AnnouncementsBroadcastService;
 import org.mozilla.gecko.db.BrowserDB;
@@ -101,16 +102,7 @@ import android.widget.SimpleAdapter;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import java.io.BufferedReader;
-import java.io.BufferedOutputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.FileReader;
-import java.io.InputStreamReader;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.io.UnsupportedEncodingException;
+import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.security.MessageDigest;
@@ -131,7 +123,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 abstract public class GeckoApp
-                extends GeckoActivity 
+                extends GeckoActivity
     implements GeckoEventListener, SensorEventListener, LocationListener,
                            Tabs.OnTabsChangedListener, GeckoEventResponder,
                            GeckoMenu.Callback, GeckoMenu.MenuPresenter,
@@ -388,9 +380,9 @@ abstract public class GeckoApp
                 onPreparePanel(featureId, mMenuPanel, mMenu);
             }
 
-            return mMenuPanel; 
+            return mMenuPanel;
         }
-  
+
         return super.onCreatePanelView(featureId);
     }
 
@@ -466,7 +458,7 @@ abstract public class GeckoApp
             mMenuPanel.addView((GeckoMenu) mMenu);
         }
     }
- 
+
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         // Handle hardware menu key presses separately so that we can show a custom menu in some cases.
@@ -657,6 +649,75 @@ abstract public class GeckoApp
                 // preInstallWebapp will return a File object pointing to the profile directory of the webapp
                 mCurrentResponse = GeckoAppShell.preInstallWebApp(name, manifestURL, origin).toString();
                 GeckoAppShell.postInstallWebApp(name, manifestURL, origin, iconURL, origin);
+            } else if (event.equals("WebApps:PreInstallSyntheticApk")) {
+                Log.i(LOGTAG, "In PreInstallSyntheticApk");
+                String name = message.getString("name");
+                // String manifestURL = message.getString("manifestURL");
+                String origin = message.getString("origin");
+                // preInstallWebapp will return a File object pointing to the profile directory of the webapp
+                File profilePath = GeckoAppShell.preInstallWebApp(name, null, origin);
+                mCurrentResponse = profilePath.toString();
+
+                Log.i(LOGTAG, "profile directory is: " + mCurrentResponse);
+                Log.i(LOGTAG, "can create path : " + profilePath.canWrite());
+                Log.i(LOGTAG, "path exists : " + profilePath.isDirectory());
+
+				boolean pathCreated = profilePath.mkdir();
+			    Log.i(LOGTAG, "profile created : " + pathCreated);
+                //TODO check app isn't installed already
+                //     need to get info from metadata and call through to JS
+                //     Q: how do we get back from JS with a result?
+                //        - should we send through the package name and have the below code somewhere where it can be used?
+
+
+                // get mini manifest
+
+                String packageName = message.getString("packageName");
+                String contentProviderAuthorityName = message.getString("authority");
+                ParcelFileDescriptor manifestFile = null;
+                try {
+                  manifestFile = getContentResolver().openFileDescriptor(Uri.parse("content://" + contentProviderAuthorityName + "/manifest"), "r");
+                } catch (FileNotFoundException e) {
+                  Log.e(LOGTAG, "FileNotFound exception whilst transferring manifest from " + packageName, e);
+                  e.printStackTrace();
+                }
+
+                Log.i(LOGTAG, "manifest file - size: " + manifestFile.getStatSize());
+                writeFile(manifestFile, new File(profilePath, "manifest.webapp"));
+
+                // get webapp archive
+                ParcelFileDescriptor archiveFile = null;
+                try {
+                  archiveFile = getContentResolver().openFileDescriptor(Uri.parse("content://" + contentProviderAuthorityName + "/archive"), "r");
+                } catch (FileNotFoundException e) {
+                  Log.e(LOGTAG, "FileNotFound exception whilst transferring archive file from " + packageName, e);
+                  e.printStackTrace();
+                }
+
+                Log.i(LOGTAG, "file - size: " + archiveFile.getStatSize());
+
+                writeFile(archiveFile, new File(profilePath, "application.zip"));
+
+            } else if (event.equals("WebApps:GetPackedMiniManifest")) {
+
+                // get mini manifest
+                String contentProviderAuthorityName = message.getString("authority");
+                ParcelFileDescriptor manifestFile = null;
+                try {
+                  manifestFile = getContentResolver().openFileDescriptor(Uri.parse("content://" + contentProviderAuthorityName + "/manifest"), "r");
+                } catch (FileNotFoundException e) {
+                  Log.e(LOGTAG, "FileNotFound exception whilst transferring manifest from " + contentProviderAuthorityName, e);
+                  e.printStackTrace();
+                }
+                FileInputStream fis =  new FileInputStream(manifestFile.getFileDescriptor());
+                StringBuffer fileContent = new StringBuffer("");
+                byte[] buffer = new byte[1024];
+                while (fis.read(buffer) != -1) {
+                  fileContent.append(new String(buffer));
+                }
+                mCurrentResponse = fileContent.toString();
+								// remove everything to the right of the last '}' as a shortcut way to remove non whitespace characters
+								mCurrentResponse = mCurrentResponse.substring(0, mCurrentResponse.lastIndexOf("}") + 1);
             } else if (event.equals("WebApps:PreInstall")) {
                 String name = message.getString("name");
                 String manifestURL = message.getString("manifestURL");
@@ -698,23 +759,40 @@ abstract public class GeckoApp
                 } else {
                     mPrivateBrowsingSession = message.getString("session");
                 }
-            } else if (event.equals("Contact:Add")) {                
+            } else if (event.equals("Contact:Add")) {
                 if (!message.isNull("email")) {
-                    Uri contactUri = Uri.parse(message.getString("email"));       
+                    Uri contactUri = Uri.parse(message.getString("email"));
                     Intent i = new Intent(ContactsContract.Intents.SHOW_OR_CREATE_CONTACT, contactUri);
                     startActivity(i);
                 } else if (!message.isNull("phone")) {
-                    Uri contactUri = Uri.parse(message.getString("phone"));       
+                    Uri contactUri = Uri.parse(message.getString("phone"));
                     Intent i = new Intent(ContactsContract.Intents.SHOW_OR_CREATE_CONTACT, contactUri);
                     startActivity(i);
                 } else {
                     // something went wrong.
                     Log.e(LOGTAG, "Received Contact:Add message with no email nor phone number");
-                }                
+                }
             }
         } catch (Exception e) {
             Log.e(LOGTAG, "Exception handling message \"" + event + "\":", e);
         }
+    }
+
+    private void writeFile(ParcelFileDescriptor descriptor, File toWrite) throws IOException {
+
+      InputStream fileStream = new FileInputStream(descriptor.getFileDescriptor());
+      OutputStream newFile = new FileOutputStream(toWrite);
+
+      byte[] buffer = new byte[1024];
+      int length;
+
+      while ((length = fileStream.read(buffer)) > 0) {
+          newFile.write(buffer, 0, length);
+      }
+
+      newFile.flush();
+      fileStream.close();
+      newFile.close();
     }
 
     public String getResponse(JSONObject origMessage) {
@@ -991,7 +1069,7 @@ abstract public class GeckoApp
                 // Sometimes WallpaperManager's getDesiredMinimum*() methods
                 // can return 0 if a Remote Exception occurs when calling the
                 // Wallpaper Service. So if that fails, we are calculating
-                // the ideal width and height from the device's display 
+                // the ideal width and height from the device's display
                 // resolution (excluding the decorated area)
 
                 if (idealWidth <= 0 || idealHeight <= 0) {
@@ -1134,7 +1212,7 @@ abstract public class GeckoApp
     public void requestRender() {
         mLayerView.requestRender();
     }
-    
+
     public void hidePlugins(Tab tab) {
         for (Layer layer : tab.getPluginLayers()) {
             if (layer instanceof PluginLayer) {
@@ -1548,9 +1626,11 @@ abstract public class GeckoApp
         registerEventListener("Shortcut:Remove");
         registerEventListener("WebApps:Open");
         registerEventListener("WebApps:PreInstall");
+        registerEventListener("WebApps:PreInstallSyntheticApk");
         registerEventListener("WebApps:PostInstall");
         registerEventListener("WebApps:Install");
         registerEventListener("WebApps:Uninstall");
+        registerEventListener("WebApps:GetPackedMiniManifest");
         registerEventListener("Share:Text");
         registerEventListener("Share:Image");
         registerEventListener("Wallpaper:Set");
@@ -2086,9 +2166,11 @@ abstract public class GeckoApp
         unregisterEventListener("Shortcut:Remove");
         unregisterEventListener("WebApps:Open");
         unregisterEventListener("WebApps:PreInstall");
+        unregisterEventListener("WebApps:PreInstallSyntheticApk");
         unregisterEventListener("WebApps:PostInstall");
         unregisterEventListener("WebApps:Install");
         unregisterEventListener("WebApps:Uninstall");
+        unregisterEventListener("WebApps:GetPackedMiniManifest");
         unregisterEventListener("Share:Text");
         unregisterEventListener("Share:Image");
         unregisterEventListener("Wallpaper:Set");

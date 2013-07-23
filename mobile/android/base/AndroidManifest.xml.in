@@ -277,6 +277,12 @@
             android:name="org.mozilla.gecko.NotificationService">
         </service>
 
+        
+        <receiver android:name="org.mozilla.gecko.webrt.PackagedAppRunReceiver">
+            <intent-filter>
+                <action android:name="org.mozilla.REGISTER_PACKAGED_APP" />
+            </intent-filter>
+        </receiver>
 
 #include ../services/manifests/AnnouncementsAndroidManifest_services.xml.in
 #include ../services/manifests/HealthReportAndroidManifest_services.xml.in

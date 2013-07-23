@@ -293,6 +293,7 @@ var BrowserApp = {
     Services.obs.addObserver(this, "FormHistory:Init", false);
     Services.obs.addObserver(this, "gather-telemetry", false);
     Services.obs.addObserver(this, "keyword-search", false);
+    Services.obs.addObserver(this, "WebApps:InstallApkPackagedApp", false);
 
     Services.obs.addObserver(this, "sessionstore-state-purge-complete", false);
 
@@ -1515,6 +1516,11 @@ var BrowserApp = {
 
       case "nsPref:changed":
         this.notifyPrefObservers(aData);
+        break;
+			
+      case "WebApps:InstallApkPackagedApp":
+			  dump("Reached WebApps:InstallApkPackagedApp");
+        Services.obs.notifyObservers(null, "webapps-ask-synthetic-package-install", aData);
         break;
 
       default:
@@ -6571,6 +6577,7 @@ var WebappsUI = {
     DOMApplicationRegistry.allAppsLaunchable = true;
 
     Services.obs.addObserver(this, "webapps-ask-install", false);
+    Services.obs.addObserver(this, "webapps-ask-synthetic-package-install", false);
     Services.obs.addObserver(this, "webapps-launch", false);
     Services.obs.addObserver(this, "webapps-sync-install", false);
     Services.obs.addObserver(this, "webapps-sync-uninstall", false);
@@ -6579,6 +6586,7 @@ var WebappsUI = {
 
   uninit: function unint() {
     Services.obs.removeObserver(this, "webapps-ask-install");
+    Services.obs.removeObserver(this, "webapps-ask-synthetic-package-install");
     Services.obs.removeObserver(this, "webapps-launch");
     Services.obs.removeObserver(this, "webapps-sync-install");
     Services.obs.removeObserver(this, "webapps-sync-uninstall");
@@ -6611,6 +6619,25 @@ var WebappsUI = {
         NativeWindow.toast.show(msg, "short");
         console.log("Error installing app: " + aData);
         break;
+      case "webapps-ask-synthetic-package-install":
+			  // TODO check if app is already installed
+				data.isApkPackagedApp = true;
+        console.log("data: " + JSON.stringify(data));
+				let miniManifest = sendMessageToJava({
+				  type: "WebApps:GetPackedMiniManifest",
+					packageName: data.packageName,
+					authority: data.authority
+				});
+        data.app = {};
+				try {
+				  data.app.manifest = JSON.parse(miniManifest);
+			  } catch (e) {
+				  console.log("error parsing mini manifest: " + e);
+				}
+        data.app.origin = data.originUrl;
+        data.app.manifestUrl = data.originUrl;
+				this.doInstall(data);
+				break;
       case "webapps-ask-install":
         this.doInstall(data);
         break;
@@ -6647,6 +6674,7 @@ var WebappsUI = {
   },
 
   getBiggestIcon: function getBiggestIcon(aIcons, aOrigin) {
+    console.log("get biggest icon");
     const DEFAULT_ICON = "chrome://browser/skin/images/default-app-icon.png";
     if (!aIcons)
       return DEFAULT_ICON;
@@ -6680,76 +6708,121 @@ var WebappsUI = {
   },
 
   doInstall: function doInstall(aData) {
-    let jsonManifest = aData.isPackage ? aData.app.updateManifest : aData.app.manifest;
+    let jsonManifest =  aData.isPackage ? aData.app.updateManifest : aData.app.manifest;
     let manifest = new ManifestHelper(jsonManifest, aData.app.origin);
     let name = manifest.name ? manifest.name : manifest.fullLaunchPath();
     let showPrompt = true;
-
-    if (!showPrompt || Services.prompt.confirm(null, Strings.browser.GetStringFromName("webapps.installTitle"), name + "\n" + aData.app.origin)) {
+    if (aData.isApkPackagedApp || !showPrompt || Services.prompt.confirm(null, Strings.browser.GetStringFromName("webapps.installTitle"), name + "\n" + aData.app.origin)) {
       // Get a profile for the app to be installed in. We'll download everything before creating the icons.
       let origin = aData.app.origin;
-      let profilePath = sendMessageToJava({
-        type: "WebApps:PreInstall",
-        name: manifest.name,
-        manifestURL: aData.app.manifestURL,
-        origin: origin
-      });
-      if (profilePath) {
-        let file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsILocalFile);
-        file.initWithPath(profilePath);
-  
-        let self = this;
-        DOMApplicationRegistry.confirmInstall(aData, false, file, null,
-          function (manifest) {
-            // the manifest argument is the manifest from within the zip file,
-            // TODO so now would be a good time to ask about permissions.
-            self.makeBase64Icon(self.getBiggestIcon(manifest.icons, Services.io.newURI(aData.app.origin, null, null)),
-              function(scaledIcon, fullsizeIcon) {
-                // if java returned a profile path to us, try to use it to pre-populate the app cache
-                // also save the icon so that it can be used in the splash screen
-                try {
-                  let iconFile = file.clone();
-                  iconFile.append("logo.png");
-                  let persist = Cc["@mozilla.org/embedding/browser/nsWebBrowserPersist;1"].createInstance(Ci.nsIWebBrowserPersist);
-                  persist.persistFlags = Ci.nsIWebBrowserPersist.PERSIST_FLAGS_REPLACE_EXISTING_FILES;
-                  persist.persistFlags |= Ci.nsIWebBrowserPersist.PERSIST_FLAGS_AUTODETECT_APPLY_CONVERSION;
+      
+      let profilePath;
+      if(aData.isApkPackagedApp) {
+        debugger;
+			//TO think about putting app profile on external storage (on APK sd card folder)
+			// what is the fallout of doing this - why do we currently 
+        let id = DOMApplicationRegistry.makeAppId();
+        let localId = DOMApplicationRegistry._nextLocalId();
 
-                  let source = Services.io.newURI(fullsizeIcon, "UTF8", null);
-                  persist.saveURI(source, null, null, null, null, iconFile, null);
+        profilePath = sendMessageToJava({
+          type: "WebApps:PreInstallSyntheticApk",
+          name: manifest.name,
+          id: id,
+          localId: localId,
+          packageName: aData.packageName,
+          authority: aData.authority,
+          manifest: aData.app.manifestURL,
+          origin: origin
+        });
+        console.log("profile path: " + profilePath);
+        
+        // disable permission installation atm - something about this checking method doesn't work
+        if (false && DOMApplicationRegistry.supportUseCurrentProfile()) {
+          // Update the permissions for this app.
+          PermissionsInstaller.installPermissions({ manifest: manifest,
+                                                    origin: origin,
+                                                    manifestURL: aData.app.manifestURL },
+                                                  true);
+        }
+        console.log("About to fire Webapps:PackageEvent 'installed'");
+        DOMApplicationRegistry.broadcastMessage("Webapps:PackageEvent",
+                              { type: "installed",
+                                manifestURL: aData.app.manifestURL,
+                                app: aData.app,
+                                manifest: manifest });
+        if (profilePath) {
+          let file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsILocalFile);
+          file.initWithPath(profilePath);
+          this.postInstall(this, file, manifest);
+        }
 
-                  // aData.app.origin may now point to the app: url that hosts this app
-                  sendMessageToJava({
-                    type: "WebApps:PostInstall",
-                    name: manifest.name,
-                    manifestURL: aData.app.manifestURL,
-                    originalOrigin: origin,
-                    origin: aData.app.origin,
-                    iconURL: fullsizeIcon
-                  });
-                  if (!!aData.isPackage) {
-                    // For packaged apps, put a notification in the notification bar.
-                    let message = Strings.browser.GetStringFromName("webapps.alertSuccess");
-                    let alerts = Cc["@mozilla.org/alerts-service;1"].getService(Ci.nsIAlertsService);
-                    alerts.showAlertNotification("drawable://alert_app", manifest.name, message, true, "", {
-                      observe: function () {
-                        self.openURL(aData.app.manifestURL, aData.app.origin);
-                      }
-                    }, "webapp");
-                  }
-                } catch(ex) {
-                  console.log(ex);
-                }
-                self.writeDefaultPrefs(file, manifest);
-              }
-            );
-          }
-        );
+      } else {
+         profilePath = sendMessageToJava({
+          type: "WebApps:PreInstall",
+          name: manifest.name,
+          manifestURL: aData.app.manifestURL,
+          origin: origin
+        });
+      
+        if (profilePath) {
+          let file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsILocalFile);
+          file.initWithPath(profilePath);
+   
+          let self = this;
+          DOMApplicationRegistry.confirmInstall(aData, false, file, null, function(manifest) {this.postInstall(self, file, manifest)});
+        }
       }
     } else {
       DOMApplicationRegistry.denyInstall(aData);
     }
   },
+  postInstall: function (context, file, manifest) {
+    debugger;
+    console.log("in postInstall");
+    console.log("icons: " + JSON.stringify(manifest.icons));
+    // the manifest argument is the manifest from within the zip file,
+    // TODO so now would be a good time to ask about permissions.
+    context.makeBase64Icon(context.getBiggestIcon(manifest.icons, Services.io.newURI(aData.app.origin, null, null)),
+      function(scaledIcon, fullsizeIcon) {
+        console.log("in make icon function");
+        // if java returned a profile path to us, try to use it to pre-populate the app cache
+        // also save the icon so that it can be used in the splash screen
+        try {
+          let iconFile = file.clone();
+          iconFile.append("logo.png");
+          let persist = Cc["@mozilla.org/embedding/browser/nsWebBrowserPersist;1"].createInstance(Ci.nsIWebBrowserPersist);
+          persist.persistFlags = Ci.nsIWebBrowserPersist.PERSIST_FLAGS_REPLACE_EXISTING_FILES;
+          persist.persistFlags |= Ci.nsIWebBrowserPersist.PERSIST_FLAGS_AUTODETECT_APPLY_CONVERSION;
 
+          let source = Services.io.newURI(fullsizeIcon, "UTF8", null);
+          persist.saveURI(source, null, null, null, null, iconFile, null);
+
+          // aData.app.origin may now point to the app: url that hosts this app
+          sendMessageToJava({
+            type: "WebApps:PostInstall",
+            name: manifest.name,
+            manifestURL: aData.app.manifestURL,
+            originalOrigin: origin,
+            origin: aData.app.origin,
+            iconURL: fullsizeIcon
+          });
+          if (!!aData.isPackage) {
+            // For packaged apps, put a notification in the notification bar.
+            let message = Strings.browser.GetStringFromName("webapps.alertSuccess");
+            let alerts = Cc["@mozilla.org/alerts-service;1"].getService(Ci.nsIAlertsService);
+            alerts.showAlertNotification("drawable://alert_app", manifest.name, message, true, "", {
+              observe: function () {
+                context.openURL(aData.app.manifestURL, aData.app.origin);
+              }
+            }, "webapp");
+          }
+        } catch(ex) {
+          console.log(ex);
+        }
+        context.writeDefaultPrefs(file, manifest);
+      }
+    );
+  },
   writeDefaultPrefs: function webapps_writeDefaultPrefs(aProfile, aManifest) {
       // build any app specific default prefs
       let prefs = [];
@@ -6806,6 +6879,7 @@ var WebappsUI = {
   },
 
   makeBase64Icon: function loadAndMakeBase64Icon(aIconURL, aCallbackFunction) {
+    console.log("icon url: " + aIconURL);
     let size = this.iconSize;
 
     let canvas = document.createElementNS("http://www.w3.org/1999/xhtml", "canvas");
