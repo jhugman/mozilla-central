@@ -37,12 +37,11 @@ public class PackagedAppRunReceiver extends BroadcastReceiver {
    *    - send request to Fennec to install
    */
   public void onReceive(Context context, Intent intent) {
-
     String packageName = intent.getStringExtra("PACKAGE_NAME");
-		String authority = packageName;
-		if(intent.hasExtra("AUTHORITY")) {
-		  authority = intent.getStringExtra("AUTHORITY");
-		}
+    String authority = packageName;
+    if(intent.hasExtra("AUTHORITY")) {
+      authority = intent.getStringExtra("AUTHORITY");
+    }
 
     if(TextUtils.isEmpty(packageName)) {
       Log.i(LOGTAG, "No 'PACKAGE_NAME' extra defined in intent");
@@ -56,7 +55,7 @@ public class PackagedAppRunReceiver extends BroadcastReceiver {
         app = context.getPackageManager().getApplicationInfo(packageName, PackageManager.GET_META_DATA);
     } catch (PackageManager.NameNotFoundException e) {
         e.printStackTrace();
-				throw new RuntimeException("Package name not found: " + packageName);
+        throw new RuntimeException("Package name not found: " + packageName);
     }
 
     Bundle metadata = app.metaData;
@@ -72,29 +71,29 @@ public class PackagedAppRunReceiver extends BroadcastReceiver {
     }
     String originUrl = metadata.getString("originUrl");
 
-		if(TextUtils.isEmpty(originUrl)) {
+    if(TextUtils.isEmpty(originUrl)) {
       throw new RuntimeException("Origin URL not defined in metadata");
-		}
+    }
     try {
       JSONObject data = new JSONObject();
       data.put("originUrl", originUrl);
-			data.put("packageName", packageName);
-			data.put("authority", authority);
+      data.put("packageName", packageName);
+      data.put("authority", authority);
       Log.i(LOGTAG, "sending data : " + data.toString());
     
       // for the purpse of the demo lets assume that Fennec is up and running
       GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("WebApps:InstallApkPackagedApp", data.toString()));
      /* 
-		  If Fennec isn't running here thenb we need to work out how to get it started silently.  
-			This below approach won't work as there are context dependencies within GeckoThread which rely on an Activity Context
+      If Fennec isn't running here thenb we need to work out how to get it started silently.  
+      This below approach won't work as there are context dependencies within GeckoThread which rely on an Activity Context
 
-		  GeckoThread sGeckoThread = new GeckoThread(null, null);
+      GeckoThread sGeckoThread = new GeckoThread(null, null);
       if(GeckoThread.checkAndSetLaunchState(GeckoThread.LaunchState.Launching, GeckoThread.LaunchState.Launched)) {
         sGeckoThread.start();
-			}
-			*/
+      }
+      */
       //GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("webapps-ask-package-install", data.toString()));
-		} catch (JSONException e) {
+    } catch (JSONException e) {
       Log.e(LOGTAG, "Exception creating message to allow mixed content", e);
     }
   }
@@ -153,6 +152,5 @@ public class PackagedAppRunReceiver extends BroadcastReceiver {
     newFile.flush();
     fileStream.close();
     newFile.close();
-    }
   }
-
+}
