@@ -744,10 +744,35 @@ this.DOMApplicationRegistry = {
       cpmm = null;
       ppmm = null;
     } else if (aTopic === "SynthAPK:AppAdded") {
-      dump("Webapps.jsm: SynthAPK:AppAdded: aSubject=" + JSON.stringify(aSubject) + "; aData=" + JSON.stringify(aData));
+      dump("Webapps.jsm: SynthAPK:AppAdded: aSubject=" + JSON.stringify(aSubject) + "; aData=" + JSON.stringify({url:aData}));
 
-      ppmm.broadcastAsyncMessage("Webapps:AutoInstall", aData);
+      this._autoInstall(aData);
     }
+  },
+
+
+  _autoInstall: function (aData) {
+    dump("AutoInstalling from Webapps.jsm");
+
+    this.broadcastMessage("Webapps:AutoInstall", aData);
+    //ppmm.broadcastAsyncMessage("Webapps:AutoInstall", {url:aData});
+
+
+    dump("Trying usual doInstall(): " + aData);
+    let mm = {
+      sendAsyncMessage: function (messageName, data) {
+        dump("Webapps.jsm: " + messageName + ": " + JSON.stringify(data));
+      }
+    };
+    this.doInstall({
+      app: {
+        origin: aData,
+        manifestURL: aData
+      },
+      silentInstall: true,
+      mm: mm
+    }, mm);
+    dump("Tried usual doInstall()");
   },
 
   _loadJSONAsync: function(aFile, aCallback) {
@@ -1823,7 +1848,8 @@ this.DOMApplicationRegistry = {
           // automation.
           let prefName = "dom.mozApps.auto_confirm_install";
           if ((Services.prefs.prefHasUserValue(prefName) &&
-              Services.prefs.getBoolPref(prefName)) || !aData.userConfirmationNeeded) {
+              Services.prefs.getBoolPref(prefName)) || aData.silentInstall) {
+            dump("Confirming install without user interaction");
             this.confirmInstall(aData);
           } else {
             Services.obs.notifyObservers(aMm, "webapps-ask-install",

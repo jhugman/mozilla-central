@@ -9,6 +9,8 @@ import java.io.File;
 import java.net.MalformedURLException;
 import java.net.URL;
 
+import org.json.JSONObject;
+import org.mozilla.gecko.webapps.Logger;
 import org.mozilla.gecko.webapps.WebAppRegistry;
 
 import android.content.Context;
@@ -62,12 +64,13 @@ public class WebAppImpl extends GeckoApp {
 
         String action = getIntent().getAction();
         Bundle extras = getIntent().getExtras();
+
         String title = extras != null ? extras.getString(Intent.EXTRA_SHORTCUT_NAME) : null;
         setTitle(title != null ? title : "Web App");
 
         mTitlebarText = (TextView)findViewById(R.id.webapp_title);
         mTitlebar = findViewById(R.id.webapp_titlebar);
-        String packageName = extras.getString("packageName");
+        String packageName = extras != null ? extras.getString("packageName") : null;
         Log.d(LOGTAG, "2. Package name is " + packageName);
         if (packageName != null) {
             if (getIndex() == -1) {
@@ -78,12 +81,18 @@ public class WebAppImpl extends GeckoApp {
                 } catch (Exception e) {
                     Log.e(LOGTAG, "Can't install " + packageName);
                 }
+                return;
             }
         } else if (!action.startsWith(ACTION_WEBAPP_PREFIX)) {
             Log.e(LOGTAG, "WebApp launch, but intent action is " + action + "!");
             return;
+        } else {
+            runWebApp();
         }
 
+    }
+
+    public void runWebApp() {
         // Try to use the origin stored in the WebAppAllocator first
         String origin = WebAppAllocator.getInstance(this).getAppForIndex(getIndex());
         try {
@@ -118,7 +127,7 @@ public class WebAppImpl extends GeckoApp {
 
             assert manifestUrlString != null;
             URL manifestUrl = new URL(manifestUrlString);
-
+            GeckoAppShell.getEventDispatcher().registerEventListener("WebApps:PostInstall", this);
             Log.d(LOGTAG, "Installing " + packageName + " from " + manifestUrl);
             new WebAppRegistry().addApk(this, packageName);
         } else if ("packaged".equals(type)) {
@@ -127,6 +136,18 @@ public class WebAppImpl extends GeckoApp {
 
         }
     }
+
+    @Override
+    public void handleMessage(String event, JSONObject message) {
+        if (event.equals("WebApps:PostInstall")) {
+            Logger.i("WebApps:PostInstall: About to run " + message.toString());
+            GeckoAppShell.getEventDispatcher().unregisterEventListener("WebApp:PostInstall", this);
+
+            runWebApp();
+        }
+    }
+
+
 
     @Override
     protected void loadStartupTab(String uri) {
