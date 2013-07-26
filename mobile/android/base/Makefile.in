@@ -260,6 +260,7 @@ FENNEC_JAVA_FILES = \
   UpdateService.java \
   GeckoUpdateReceiver.java \
   ReferrerReceiver.java \
+  webrt/PackagedAppRunReceiver.java \
   $(NULL)
 
 WEBSOCKETS_JAVA_FILES := \
