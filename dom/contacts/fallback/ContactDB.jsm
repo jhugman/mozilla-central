@@ -18,7 +18,7 @@ Cu.import("resource://gre/modules/IndexedDBHelper.jsm");
 Cu.import("resource://gre/modules/PhoneNumberUtils.jsm");
 
 const DB_NAME = "contacts";
-const DB_VERSION = 12;
+const DB_VERSION = 14;
 const STORE_NAME = "contacts";
 const SAVED_GETALL_STORE_NAME = "getallcache";
 const CHUNK_SIZE = 20;
@@ -93,7 +93,7 @@ ContactDB.prototype = {
   _dispatcher: {},
 
   upgradeSchema: function upgradeSchema(aTransaction, aDb, aOldVersion, aNewVersion) {
-    function loadInitialContacts() {
+    let loadInitialContacts = function() {
       // Add default contacts
       let jsm = {};
       Cu.import("resource://gre/modules/FileUtils.jsm", jsm);
@@ -142,7 +142,7 @@ ContactDB.prototype = {
         if (DEBUG) debug("import: " + JSON.stringify(contact));
         objectStore.put(contact);
       }
-    }
+    }.bind(this);
 
     if (DEBUG) debug("upgrade schema from: " + aOldVersion + " to " + aNewVersion + " called!");
     let db = aDb;
@@ -443,7 +443,73 @@ ContactDB.prototype = {
             next();
           }
         };
-      }
+      },
+      function upgrade12to13() {
+        if (DEBUG) debug("Add phone substring to the search index if appropriate for country");
+        if (this.substringMatching) {
+          if (!objectStore) {
+            objectStore = aTransaction.objectStore(STORE_NAME);
+          }
+          objectStore.openCursor().onsuccess = function(event) {
+            let cursor = event.target.result;
+            if (cursor) {
+              if (cursor.value.properties.tel) {
+                cursor.value.search.parsedTel = cursor.value.search.parsedTel || [];
+                cursor.value.properties.tel.forEach(
+                  function(tel) {
+                    let normalized = PhoneNumberUtils.normalize(tel.value.toString());
+                    if (normalized) {
+                      if (this.substringMatching && normalized.length > this.substringMatching) {
+                        let sub = normalized.slice(-this.substringMatching);
+                        if (cursor.value.search.parsedTel.indexOf(sub) === -1) {
+                          if (DEBUG) debug("Adding substring index: " + tel + ", " + sub);
+                          cursor.value.search.parsedTel.push(sub);
+                        }
+                      }
+                    }
+                  }.bind(this)
+                );
+                cursor.update(cursor.value);
+              }
+              cursor.continue();
+            } else {
+              next();
+            }
+          }.bind(this);
+        } else {
+          next();
+        }
+      },
+      function upgrade13to14() {
+        if (DEBUG) debug("Cleaning up empty substring entries in telMatch index");
+        if (!objectStore) {
+          objectStore = aTransaction.objectStore(STORE_NAME);
+        }
+        objectStore.openCursor().onsuccess = function(event) {
+          function removeEmptyStrings(value) {
+            if (value) {
+              const oldLength = value.length;
+              for (let i = 0; i < value.length; ++i) {
+                if (!value[i] || value[i] == "null") {
+                  value.splice(i, 1);
+                }
+              }
+              return oldLength !== value.length;
+            }
+          }
+
+          let cursor = event.target.result;
+          if (cursor) {
+            let modified = removeEmptyStrings(cursor.value.search.parsedTel);
+            let modified2 = removeEmptyStrings(cursor.value.search.tel);
+            if (modified || modified2) {
+              cursor.update(cursor.value);
+            }
+          } else {
+            next();
+          }
+        };
+      },
     ];
 
     let index = aOldVersion;
@@ -459,7 +525,7 @@ ContactDB.prototype = {
       try {
         var i = index++;
         if (DEBUG) debug("Upgrade step: " + i + "\n");
-        steps[i]();
+        steps[i].call(outer);
       } catch(ex) {
         dump("Caught exception" + ex);
         aTransaction.abort();
@@ -560,10 +626,14 @@ ContactDB.prototype = {
                 }
               }
               for (let num in containsSearch) {
-                contact.search.tel.push(num);
+                if (num != "null") {
+                  contact.search.tel.push(num);
+                }
               }
               for (let num in matchSearch) {
-                contact.search.parsedTel.push(num);
+                if (num != "null") {
+                  contact.search.parsedTel.push(num);
+                }
               }
             } else if ((field == "impp" || field == "email") && aContact.properties[field][i].value) {
               let value = aContact.properties[field][i].value;
@@ -919,6 +989,12 @@ ContactDB.prototype = {
         if (this.substringMatching && normalized.length > this.substringMatching) {
           normalized = normalized.slice(-this.substringMatching);
         }
+
+        if (!normalized.length) {
+          dump("ContactDB: normalized filterValue is empty, can't perform match search.\n");
+          return txn.abort();
+        }
+
         request = index.mozGetAll(normalized, limit);
       } else {
         // not case sensitive
@@ -970,7 +1046,13 @@ ContactDB.prototype = {
 
   // Enable special phone number substring matching. Does not update existing DB entries.
   enableSubstringMatching: function enableSubstringMatching(aDigits) {
+    if (DEBUG) debug("MCC enabling substring matching " + aDigits);
     this.substringMatching = aDigits;
+  },
+
+  disableSubstringMatching: function disableSubstringMatching() {
+    if (DEBUG) debug("MCC disabling substring matching");
+    delete this.substringMatching;
   },
 
   init: function init(aGlobal) {
