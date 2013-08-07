@@ -1230,7 +1230,7 @@ ContainerState::CreateOrRecycleMaskImageLayerFor(Layer* aLayer)
     if (!result)
       return nullptr;
     result->SetUserData(&gMaskLayerUserData, new MaskLayerUserData());
-    result->SetForceSingleTile(true);
+    result->SetDisallowBigImage(true);
   }
   
   return result.forget();
@@ -3318,7 +3318,7 @@ FrameLayerBuilder::DrawThebesLayer(ThebesLayer* aLayer,
     aContext->Restore();
   }
 
-  if (presContext->RefreshDriver()->GetPaintFlashing()) {
+  if (presContext->GetPaintFlashing()) {
     FlashPaint(aContext);
   }
 

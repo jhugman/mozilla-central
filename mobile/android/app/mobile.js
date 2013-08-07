@@ -147,12 +147,9 @@ pref("signon.expireMasterPassword", false);
 pref("signon.SignonFileName", "signons.txt");
 pref("signon.debug", false);
 
-/* form helper */
-// 0 = disabled, 1 = enabled, 2 = dynamic depending on screen size
-pref("formhelper.mode", 2);
+/* form helper (scroll to and optionally zoom into editable fields)  */
+pref("formhelper.mode", 2);  // 0 = disabled, 1 = enabled, 2 = dynamic depending on screen size
 pref("formhelper.autozoom", true);
-pref("formhelper.autozoom.caret", true);
-pref("formhelper.restore", false);
 
 /* find helper */
 pref("findhelper.autozoom", true);
@@ -440,6 +437,10 @@ pref("browser.ui.touch.weight.visited", 120); // percentage
 
 // The percentage of the screen that needs to be scrolled before margins are exposed.
 pref("browser.ui.show-margins-threshold", 20);
+
+// Maximum distance from the point where the user pressed where we still
+// look for text to select
+pref("browser.ui.selection.distance", 250);
 
 // plugins
 pref("plugin.disable", false);
@@ -754,8 +755,25 @@ pref("dom.payment.provider.0.type", "mozilla/payments/pay/v1");
 pref("dom.payment.provider.0.requestMethod", "GET");
 #endif
 
+// Contacts API
+pref("dom.mozContacts.enabled", true);
+pref("dom.navigator-property.disable.mozContacts", false);
+pref("dom.global-constructor.disable.mozContact", false);
+
+// Shortnumber matching needed for e.g. Brazil:
+// 01187654321 can be found with 87654321
+pref("dom.phonenumber.substringmatching.BR", 8);
+pref("dom.phonenumber.substringmatching.CO", 10);
+pref("dom.phonenumber.substringmatching.VE", 7);
+
 // Support for the mozAudioChannel attribute on media elements is disabled in non-webapps
 pref("media.useAudioChannelService", false);
 
 // Turn on the CSP 1.0 parser for Content Security Policy headers
 pref("security.csp.speccompliant", true);
+
+// Enable hardware-accelerated Skia canvas
+pref("gfx.canvas.azure.backends", "skia");
+pref("gfx.canvas.azure.accelerated", true);
+
+pref("general.useragent.override.youtube.com", "Android; Tablet;#Android; Mobile;");

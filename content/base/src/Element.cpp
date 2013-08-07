@@ -363,8 +363,7 @@ Element::WrapObject(JSContext *aCx, JS::Handle<JSObject*> aScope)
   // We must ensure that the XBL Binding is installed before we hand
   // back this object.
 
-  if (HasFlag(NODE_MAY_BE_IN_BINDING_MNGR) &&
-      doc->BindingManager()->GetBinding(this)) {
+  if (HasFlag(NODE_MAY_BE_IN_BINDING_MNGR) && GetXBLBinding()) {
     // There's already a binding for this element so nothing left to
     // be done here.
 
@@ -415,34 +414,6 @@ Element::WrapObject(JSContext *aCx, JS::Handle<JSObject*> aScope)
   }
 
   return obj;
-}
-
-Element*
-Element::GetFirstElementChild() const
-{
-  uint32_t i, count = mAttrsAndChildren.ChildCount();
-  for (i = 0; i < count; ++i) {
-    nsIContent* child = mAttrsAndChildren.ChildAt(i);
-    if (child->IsElement()) {
-      return child->AsElement();
-    }
-  }
-  
-  return nullptr;
-}
-
-Element*
-Element::GetLastElementChild() const
-{
-  uint32_t i = mAttrsAndChildren.ChildCount();
-  while (i > 0) {
-    nsIContent* child = mAttrsAndChildren.ChildAt(--i);
-    if (child->IsElement()) {
-      return child->AsElement();
-    }
-  }
-  
-  return nullptr;
 }
 
 nsDOMTokenList*
@@ -929,7 +900,7 @@ Element::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
                     bool aCompileEventHandlers)
 {
   NS_PRECONDITION(aParent || aDocument, "Must have document if no parent!");
-  NS_PRECONDITION(HasSameOwnerDoc(NODE_FROM(aParent, aDocument)),
+  NS_PRECONDITION((NODE_FROM(aParent, aDocument)->OwnerDoc() == OwnerDoc()),
                   "Must have the same owner document");
   NS_PRECONDITION(!aParent || aDocument == aParent->GetCurrentDoc(),
                   "aDocument must be current doc of aParent");
@@ -1719,8 +1690,7 @@ Element::SetAttrAndNotify(int32_t aNamespaceID,
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (document || HasFlag(NODE_FORCE_XBL_BINDINGS)) {
-    nsRefPtr<nsXBLBinding> binding =
-      OwnerDoc()->BindingManager()->GetBinding(this);
+    nsRefPtr<nsXBLBinding> binding = GetXBLBinding();
     if (binding) {
       binding->AttributeChanged(aName, aNamespaceID, false, aNotify);
     }
@@ -1903,8 +1873,7 @@ Element::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aName,
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (document || HasFlag(NODE_FORCE_XBL_BINDINGS)) {
-    nsRefPtr<nsXBLBinding> binding =
-      OwnerDoc()->BindingManager()->GetBinding(this);
+    nsRefPtr<nsXBLBinding> binding = GetXBLBinding();
     if (binding) {
       binding->AttributeChanged(aName, aNameSpaceID, true, aNotify);
     }
@@ -1997,7 +1966,8 @@ Element::List(FILE* out, int32_t aIndent,
 
   ListAttributes(out);
 
-  fprintf(out, " state=[%llx]", State().GetInternalValue());
+  fprintf(out, " state=[%llx]",
+          static_cast<unsigned long long>(State().GetInternalValue()));
   fprintf(out, " flags=[%08x]", static_cast<unsigned int>(GetFlags()));
   if (IsCommonAncestorForRangeInSelection()) {
     nsRange::RangeHashTable* ranges =
@@ -2507,7 +2477,7 @@ private:
     uint32_t mLength;
   };
 public:
-  StringBuilder() : mLast(this), mLength(0)
+  StringBuilder() : mLast(MOZ_THIS_IN_INITIALIZER_LIST()), mLength(0)
   {
     MOZ_COUNT_CTOR(StringBuilder);
   }

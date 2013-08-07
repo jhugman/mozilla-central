@@ -4,13 +4,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "ion/AsmJSSignalHandlers.h"
+
 #include "jscntxt.h"
 
-#include "ion/AsmJS.h"
-#include "ion/AsmJSModule.h"
 #include "assembler/assembler/MacroAssembler.h"
+#include "ion/AsmJSModule.h"
 
-#include "gc/Barrier-inl.h"
 #include "vm/ObjectImpl-inl.h"
 
 using namespace js;
@@ -102,7 +102,7 @@ using namespace mozilla;
 # define R13_sig(p) ((p)->uc_mcontext.__gregs[_REG_R13])
 # define R14_sig(p) ((p)->uc_mcontext.__gregs[_REG_R14])
 # define R15_sig(p) ((p)->uc_mcontext.__gregs[_REG_R15])
-#elif defined(__DragonFly__) || defined(__FreeBSD__)
+#elif defined(__DragonFly__) || defined(__FreeBSD__) || defined(__FreeBSD_kernel__)
 # if defined(__DragonFly__)
 #  define XMM_sig(p,i) (((union savefpu *)(p)->uc_mcontext.mc_fpregs)->sv_xmm.sv_xmm[i])
 # else
@@ -263,14 +263,14 @@ LookupHeapAccess(const AsmJSModule &module, uint8_t *pc)
 #  include <sys/mman.h>
 # endif
 
-# if defined(__FreeBSD__)
+# if defined(__FreeBSD__) || defined(__FreeBSD_kernel__)
 #  include <sys/ucontext.h> // for ucontext_t, mcontext_t
 # endif
 
 # if defined(JS_CPU_X64)
 #  if defined(__DragonFly__)
 #   include <machine/npx.h> // for union savefpu
-#  elif defined(__FreeBSD__) || defined(__OpenBSD__)
+#  elif defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__FreeBSD_kernel__)
 #   include <machine/fpu.h> // for struct savefpu/fxsave64
 #  endif
 # endif
@@ -997,14 +997,3 @@ js::TriggerOperationCallbackForAsmJSCode(JSRuntime *rt)
         MOZ_CRASH();
 #endif
 }
-
-#ifdef MOZ_ASAN
-// When running with asm.js under AddressSanitizer, we need to explicitely
-// tell AddressSanitizer to allow custom signal handlers because it will 
-// otherwise trigger ASan's SIGSEGV handler for the internal SIGSEGVs that 
-// asm.js would otherwise handle.
-extern "C" MOZ_ASAN_BLACKLIST
-const char* __asan_default_options() {
-    return "allow_user_segv_handler=1";
-}
-#endif

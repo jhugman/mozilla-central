@@ -524,9 +524,14 @@ protected:
       mCausedOtherKeyEvents = false;
     }
 
-    bool KeyDownOrPressHandled()
+    bool IsDefaultPrevented() const
     {
-      return mKeyDownHandled || mKeyPressHandled;
+      return mKeyDownHandled || mKeyPressHandled || mCausedOtherKeyEvents;
+    }
+
+    bool CanDispatchKeyPressEvent() const
+    {
+      return !mKeyPressDispatched && !IsDefaultPrevented();
     }
   };
 
@@ -951,6 +956,8 @@ public:
   void SetIMEOpenState(bool aOpen);
   void SetASCIICapableOnly(bool aASCIICapableOnly);
 
+  bool IsFocused();
+
   static CFArrayRef CreateAllIMEModeList();
   static void DebugPrintAllIMEModes();
 
@@ -973,7 +980,6 @@ protected:
   IMEInputHandler(nsChildView* aWidget, NSView<mozView> *aNativeView);
   virtual ~IMEInputHandler();
 
-  bool IsFocused();
   void ResetTimer();
 
   virtual void ExecutePendingMethods();

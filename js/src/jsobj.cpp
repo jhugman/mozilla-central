@@ -7,31 +7,35 @@
 /*
  * JS object implementation.
  */
+
 #include "jsobjinlines.h"
+
+#include "mozilla/MathAlgorithms.h"
+#include "mozilla/MemoryReporting.h"
+#include "mozilla/TemplateLib.h"
+#include "mozilla/Util.h"
 
 #include <string.h>
 
-#include "mozilla/MemoryReporting.h"
-#include "mozilla/Util.h"
-
-#include "jstypes.h"
-#include "jsutil.h"
-#include "jsprf.h"
 #include "jsapi.h"
 #include "jsarray.h"
 #include "jsatom.h"
 #include "jscntxt.h"
+#include "jsdbgapi.h"
 #include "jsfun.h"
 #include "jsgc.h"
 #include "jsiter.h"
 #include "jsnum.h"
 #include "jsopcode.h"
+#include "jsprf.h"
 #include "jsproxy.h"
 #include "jsscript.h"
 #include "jsstr.h"
-#include "jsdbgapi.h"
+#include "jstypes.h"
+#include "jsutil.h"
 #include "jswatchpoint.h"
 #include "jswrapper.h"
+
 #include "frontend/BytecodeCompiler.h"
 #include "gc/Marking.h"
 #include "ion/BaselineJIT.h"
@@ -45,9 +49,8 @@
 #include "jsboolinlines.h"
 #include "jscntxtinlines.h"
 #include "jscompartmentinlines.h"
-#include "builtin/Iterator-inl.h"
+
 #include "vm/ArrayObject-inl.h"
-#include "vm/ArgumentsObject-inl.h"
 #include "vm/BooleanObject-inl.h"
 #include "vm/NumberObject-inl.h"
 #include "vm/Runtime-inl.h"
@@ -61,6 +64,7 @@ using namespace js::types;
 using js::frontend::IsIdentifier;
 using mozilla::ArrayLength;
 using mozilla::DebugOnly;
+using mozilla::RoundUpPow2;
 
 JS_STATIC_ASSERT(int32_t((JSObject::NELEMENTS_LIMIT - 1) * sizeof(Value)) == int64_t((JSObject::NELEMENTS_LIMIT - 1) * sizeof(Value)));
 
@@ -76,7 +80,7 @@ Class JSObject::class_ = {
     JS_ConvertStub
 };
 
-JS_FRIEND_DATA(Class*) js::ObjectClassPtr = &JSObject::class_;
+JS_FRIEND_DATA(Class* const) js::ObjectClassPtr = &JSObject::class_;
 
 JS_FRIEND_API(JSObject *)
 JS_ObjectToInnerObject(JSContext *cx, JSObject *objArg)
@@ -323,7 +327,7 @@ js::GetFirstArgumentAsObject(JSContext *cx, const CallArgs &args, const char *me
         return false;
     }
 
-    HandleValue v = args.handleAt(0);
+    HandleValue v = args[0];
     if (!v.isObject()) {
         char *bytes = DecompileValueGenerator(cx, JSDVG_SEARCH_STACK, v, NullPtr());
         if (!bytes)
@@ -1328,8 +1332,11 @@ NewObject(ExclusiveContext *cx, Class *clasp, types::TypeObject *type_, JSObject
      * This will cancel an already-running incremental GC from doing any more
      * slices, and it will prevent any future incremental GCs.
      */
-    if (clasp->trace && !(clasp->flags & JSCLASS_IMPLEMENTS_BARRIERS))
+    if (clasp->trace && !(clasp->flags & JSCLASS_IMPLEMENTS_BARRIERS)) {
+        if (!cx->shouldBeJSContext())
+            return NULL;
         cx->asJSContext()->runtime()->gcIncrementalEnabled = false;
+    }
 
     Probes::createObject(cx, obj);
     return obj;
@@ -1822,7 +1829,7 @@ CopySlots(JSContext *cx, HandleObject from, HandleObject to)
     JS_ASSERT(from->getClass() == to->getClass());
 
     size_t n = 0;
-    if (from->isWrapper() &&
+    if (from->is<WrapperObject>() &&
         (Wrapper::wrapperHandler(from)->flags() &
          Wrapper::CROSS_COMPARTMENT)) {
         to->setSlot(0, from->getSlot(0));
@@ -2066,7 +2073,7 @@ JSObject::TradeGuts(JSContext *cx, JSObject *a, JSObject *b, TradeGutsReserved &
          * whether they have dynamically allocated slots and instead just copy
          * them over wholesale.
          */
-        char tmp[tl::Max<sizeof(JSFunction), sizeof(JSObject_Slots16)>::result];
+        char tmp[mozilla::tl::Max<sizeof(JSFunction), sizeof(JSObject_Slots16)>::value];
         JS_ASSERT(size <= sizeof(tmp));
 
         js_memcpy(tmp, a, size);
@@ -2079,8 +2086,8 @@ JSObject::TradeGuts(JSContext *cx, JSObject *a, JSObject *b, TradeGutsReserved &
          * below, in common with the other case.
          */
         for (size_t i = 0; i < a->numFixedSlots(); ++i) {
-            HeapSlot::writeBarrierPost(cx->runtime(), a, HeapSlot::Slot, i);
-            HeapSlot::writeBarrierPost(cx->runtime(), b, HeapSlot::Slot, i);
+            HeapSlot::writeBarrierPost(cx->runtime(), a, HeapSlot::Slot, i, a->getSlot(i));
+            HeapSlot::writeBarrierPost(cx->runtime(), b, HeapSlot::Slot, i, b->getSlot(i));
         }
 #endif
     } else {
@@ -2622,6 +2629,7 @@ JSObject::growSlots(ExclusiveContext *cx, HandleObject obj, uint32_t oldCount, u
 static void
 FreeSlots(ExclusiveContext *cx, HeapSlot *slots)
 {
+    // Note: threads without a JSContext do not have access to nursery allocated things.
 #ifdef JSGC_GENERATIONAL
     if (!cx->isJSContext() || !cx->asJSContext()->runtime()->gcNursery.isInside(slots))
 #endif
@@ -3082,6 +3090,9 @@ js_GetClassObject(ExclusiveContext *cxArg, JSObject *obj, JSProtoKey key, Mutabl
     }
 
     // Classes can only be initialized on the main thread.
+    if (!cxArg->shouldBeJSContext())
+        return false;
+
     JSContext *cx = cxArg->asJSContext();
 
     RootedId name(cx, NameToId(ClassName(key, cx)));
@@ -3343,8 +3354,11 @@ JSObject::defineGeneric(ExclusiveContext *cx, HandleObject obj,
 {
     JS_ASSERT(!(attrs & JSPROP_NATIVE_ACCESSORS));
     js::DefineGenericOp op = obj->getOps()->defineGeneric;
-    if (op)
+    if (op) {
+        if (!cx->shouldBeJSContext())
+            return false;
         return op(cx->asJSContext(), obj, id, value, getter, setter, attrs);
+    }
     return baseops::DefineGeneric(cx, obj, id, value, getter, setter, attrs);
 }
 
@@ -3390,8 +3404,11 @@ JSObject::defineElement(ExclusiveContext *cx, HandleObject obj,
                         JSPropertyOp getter, JSStrictPropertyOp setter, unsigned attrs)
 {
     js::DefineElementOp op = obj->getOps()->defineElement;
-    if (op)
+    if (op) {
+        if (!cx->shouldBeJSContext())
+            return false;
         return op(cx->asJSContext(), obj, index, value, getter, setter, attrs);
+    }
     return baseops::DefineElement(cx, obj, index, value, getter, setter, attrs);
 }
 
@@ -3425,6 +3442,9 @@ CallAddPropertyHook(ExclusiveContext *cx, Class *clasp, HandleObject obj, Handle
                     HandleValue nominal)
 {
     if (clasp->addProperty != JS_PropertyStub) {
+        if (!cx->shouldBeJSContext())
+            return false;
+
         /* Make a local copy of value so addProperty can mutate its inout parameter. */
         RootedValue value(cx, nominal);
 
@@ -3450,11 +3470,14 @@ CallAddPropertyHookDense(ExclusiveContext *cx, Class *clasp, HandleObject obj, u
         Rooted<ArrayObject*> arr(cx, &obj->as<ArrayObject>());
         uint32_t length = arr->length();
         if (index >= length)
-            ArrayObject::setLength(cx->asJSContext(), arr, index + 1);
+            ArrayObject::setLength(cx, arr, index + 1);
         return true;
     }
 
     if (clasp->addProperty != JS_PropertyStub) {
+        if (!cx->shouldBeJSContext())
+            return false;
+
         /* Make a local copy of value so addProperty can mutate its inout parameter. */
         RootedValue value(cx, nominal);
 
@@ -3466,6 +3489,7 @@ CallAddPropertyHookDense(ExclusiveContext *cx, Class *clasp, HandleObject obj, u
         if (value.get() != nominal)
             JSObject::setDenseElementWithType(cx, obj, index, value);
     }
+
     return true;
 }
 
@@ -3500,8 +3524,11 @@ DefinePropertyOrElement(ExclusiveContext *cx, HandleObject obj, HandleId id,
 
     if (obj->is<ArrayObject>()) {
         Rooted<ArrayObject*> arr(cx, &obj->as<ArrayObject>());
-        if (id == NameToId(cx->names().length))
+        if (id == NameToId(cx->names().length)) {
+            if (!cx->shouldBeJSContext())
+                return false;
             return ArraySetLength(cx->asJSContext(), arr, id, attrs, value, setterIsStrict);
+        }
 
         uint32_t index;
         if (js_IdIsIndex(id, &index)) {
@@ -3544,6 +3571,8 @@ DefinePropertyOrElement(ExclusiveContext *cx, HandleObject obj, HandleId id,
         return false;
 
     if (callSetterAfterwards && setter != JS_StrictPropertyStub) {
+        if (!cx->shouldBeJSContext())
+            return false;
         RootedValue nvalue(cx, value);
         return js_NativeSet(cx->asJSContext(), obj, obj, shape, setterIsStrict, &nvalue);
     }
@@ -3769,8 +3798,9 @@ LookupPropertyWithFlagsInline(ExclusiveContext *cx,
 
         /* Try obj's class resolve hook if id was not found in obj's scope. */
         if (current->getClass()->resolve != JS_ResolveStub) {
-            if (!allowGC)
+            if (!cx->shouldBeJSContext() || !allowGC)
                 return false;
+
             bool recursed;
             if (!CallResolveOp(cx->asJSContext(),
                                MaybeRooted<JSObject*, allowGC>::toHandle(current),
@@ -3799,7 +3829,7 @@ LookupPropertyWithFlagsInline(ExclusiveContext *cx,
         if (!proto)
             break;
         if (!proto->isNative()) {
-            if (!allowGC)
+            if (!cx->shouldBeJSContext() || !allowGC)
                 return false;
             return JSObject::lookupGeneric(cx->asJSContext(),
                                            MaybeRooted<JSObject*, allowGC>::toHandle(proto),
@@ -5241,7 +5271,7 @@ js_ReportGetterOnlyAssignment(JSContext *cx, bool strict)
 {
     return JS_ReportErrorFlagsAndNumber(cx,
                                         strict
-                                        ? JSREPORT_ERROR 
+                                        ? JSREPORT_ERROR
                                         : JSREPORT_WARNING | JSREPORT_STRICT,
                                         js_GetErrorMessage, NULL,
                                         JSMSG_GETTER_ONLY);

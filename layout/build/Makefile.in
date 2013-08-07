@@ -18,6 +18,8 @@ endif
 LIBRARY_NAME	= gklayout
 MSVC_ENABLE_PGO := 1
 EXPORT_LIBRARY = 1
+IS_COMPONENT	= 1
+MODULE_NAME	= nsLayoutModule
 LIBXUL_LIBRARY	= 1
 FAIL_ON_WARNINGS = 1
 
@@ -272,9 +274,8 @@ SHARED_LIBRARY_LIBS += \
 endif
 
 include $(topsrcdir)/config/config.mk
-include $(topsrcdir)/ipc/chromium/chromium-config.mk
-
 include $(topsrcdir)/config/rules.mk
+include $(topsrcdir)/ipc/chromium/chromium-config.mk
 
 LOCAL_INCLUDES	+= -I$(srcdir)/../base \
 		   -I$(srcdir)/../generic \

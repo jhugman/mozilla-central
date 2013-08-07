@@ -10,17 +10,19 @@
 // This file declares the core data structures for LIR: storage allocations for
 // inputs and outputs, as well as the interface instructions must conform to.
 
+#include "mozilla/Array.h"
+
 #include "jscntxt.h"
-#include "ion/IonAllocPolicy.h"
+
+#include "ion/Bailouts.h"
 #include "ion/InlineList.h"
-#include "ion/FixedArityList.h"
+#include "ion/IonAllocPolicy.h"
 #include "ion/LOpcodes.h"
-#include "ion/Registers.h"
 #include "ion/MIR.h"
 #include "ion/MIRGraph.h"
-#include "ion/shared/Assembler-shared.h"
+#include "ion/Registers.h"
 #include "ion/Safepoints.h"
-#include "ion/Bailouts.h"
+#include "ion/shared/Assembler-shared.h"
 #include "ion/VMFunctions.h"
 
 namespace js {
@@ -59,13 +61,14 @@ class LAllocation : public TempObject
 {
     uintptr_t bits_;
 
-  protected:
     static const uintptr_t TAG_BIT = 1;
     static const uintptr_t TAG_SHIFT = 0;
     static const uintptr_t TAG_MASK = 1 << TAG_SHIFT;
     static const uintptr_t KIND_BITS = 4;
     static const uintptr_t KIND_SHIFT = TAG_SHIFT + TAG_BIT;
     static const uintptr_t KIND_MASK = (1 << KIND_BITS) - 1;
+
+  protected:
     static const uintptr_t DATA_BITS = (sizeof(uint32_t) * 8) - KIND_BITS - TAG_BIT;
     static const uintptr_t DATA_SHIFT = KIND_SHIFT + KIND_BITS;
     static const uintptr_t DATA_MASK = (1 << DATA_BITS) - 1;
@@ -805,9 +808,9 @@ class LBlock : public TempObject
 template <size_t Defs, size_t Operands, size_t Temps>
 class LInstructionHelper : public LInstruction
 {
-    FixedArityList<LDefinition, Defs> defs_;
-    FixedArityList<LAllocation, Operands> operands_;
-    FixedArityList<LDefinition, Temps> temps_;
+    mozilla::Array<LDefinition, Defs> defs_;
+    mozilla::Array<LAllocation, Operands> operands_;
+    mozilla::Array<LDefinition, Temps> temps_;
 
   public:
     size_t numDefs() const MOZ_FINAL MOZ_OVERRIDE {

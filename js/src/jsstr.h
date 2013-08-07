@@ -10,6 +10,7 @@
 #include "mozilla/PodOperations.h"
 
 #include <ctype.h>
+
 #include "jsapi.h"
 #include "jsatom.h"
 #include "jslock.h"
@@ -43,12 +44,9 @@ class RopeBuilder;
 
 template <AllowGC allowGC>
 extern JSString *
-ConcatStrings(JSContext *cx,
+ConcatStrings(ThreadSafeContext *cx,
               typename MaybeRooted<JSString*, allowGC>::HandleType left,
               typename MaybeRooted<JSString*, allowGC>::HandleType right);
-
-extern JSString *
-ConcatStringsPure(ThreadSafeContext *cx, JSString *left, JSString *right);
 
 // Return s advanced past any Unicode white space characters.
 static inline const jschar *
@@ -262,18 +260,11 @@ namespace js {
 /*
  * Inflate bytes in ASCII encoding to jschars. Return null on error, otherwise
  * return the jschar that was malloc'ed. length is updated to the length of the
- * new string (in jschars).
+ * new string (in jschars). A null char is appended, but it is not included in
+ * the length.
  */
 extern jschar *
 InflateString(ThreadSafeContext *cx, const char *bytes, size_t *length);
-
-/*
- * Inflate bytes in UTF-8 encoding to jschars. Return null on error, otherwise
- * return the jschar vector that was malloc'ed. length is updated to the length
- * of the new string (in jschars).
- */
-extern jschar *
-InflateUTF8String(JSContext *cx, const char *bytes, size_t *length);
 
 /*
  * Inflate bytes to JS chars in an existing buffer. 'chars' must be large
@@ -285,20 +276,6 @@ InflateUTF8String(JSContext *cx, const char *bytes, size_t *length);
 extern bool
 InflateStringToBuffer(JSContext *maybecx, const char *bytes, size_t length,
                       jschar *chars, size_t *charsLength);
-
-extern bool
-InflateUTF8StringToBuffer(JSContext *cx, const char *bytes, size_t length,
-                          jschar *chars, size_t *charsLength);
-
-/*
- * The same as InflateUTF8StringToBuffer(), except that any malformed UTF-8
- * characters will be replaced by \uFFFD. No exception will be thrown for
- * malformed UTF-8 input.
- */
-extern bool
-InflateUTF8StringToBufferReplaceInvalid(JSContext *cx, const char *bytes,
-                                        size_t length, jschar *chars,
-                                        size_t *charsLength);
 
 /*
  * Deflate JS chars to bytes into a buffer. 'bytes' must be large enough for
@@ -343,6 +320,10 @@ namespace js {
 extern size_t
 PutEscapedStringImpl(char *buffer, size_t size, FILE *fp, JSLinearString *str, uint32_t quote);
 
+extern size_t
+PutEscapedStringImpl(char *buffer, size_t bufferSize, FILE *fp, const jschar *chars,
+                     size_t length, uint32_t quote);
+
 /*
  * Write str into buffer escaping any non-printable or non-ASCII character
  * using \escapes for JS string literals.
@@ -356,6 +337,16 @@ inline size_t
 PutEscapedString(char *buffer, size_t size, JSLinearString *str, uint32_t quote)
 {
     size_t n = PutEscapedStringImpl(buffer, size, NULL, str, quote);
+
+    /* PutEscapedStringImpl can only fail with a file. */
+    JS_ASSERT(n != size_t(-1));
+    return n;
+}
+
+inline size_t
+PutEscapedString(char *buffer, size_t bufferSize, const jschar *chars, size_t length, uint32_t quote)
+{
+    size_t n = PutEscapedStringImpl(buffer, bufferSize, NULL, chars, length, quote);
 
     /* PutEscapedStringImpl can only fail with a file. */
     JS_ASSERT(n != size_t(-1));

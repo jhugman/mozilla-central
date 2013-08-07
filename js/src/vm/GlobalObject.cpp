@@ -4,7 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "vm/GlobalObject.h"
+#include "vm/GlobalObject-inl.h"
 
 #include "jscntxt.h"
 #include "jsdate.h"
@@ -19,13 +19,11 @@
 #include "builtin/MapObject.h"
 #include "builtin/Object.h"
 #include "builtin/RegExp.h"
+#include "vm/RegExpStatics.h"
 
 #include "jscompartmentinlines.h"
 #include "jsfuninlines.h"
 #include "jsobjinlines.h"
-
-#include "vm/GlobalObject-inl.h"
-#include "vm/RegExpStatics-inl.h"
 
 using namespace js;
 
@@ -228,7 +226,7 @@ GlobalObject::initFunctionAndObjectClasses(JSContext *cx)
         jschar *source = InflateString(cx, rawSource, &sourceLen);
         if (!source)
             return NULL;
-        ScriptSource *ss = cx->new_<ScriptSource>();
+        ScriptSource *ss = cx->new_<ScriptSource>(/* originPrincipals = */ (JSPrincipals*) NULL);
         if (!ss) {
             js_free(source);
             return NULL;
@@ -241,6 +239,7 @@ GlobalObject::initFunctionAndObjectClasses(JSContext *cx)
         CompileOptions options(cx);
         options.setNoScriptRval(true)
                .setVersion(JSVERSION_DEFAULT);
+
         RootedScript script(cx, JSScript::Create(cx,
                                                  /* enclosingScope = */ NullPtr(),
                                                  /* savedCallerFun = */ false,

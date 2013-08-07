@@ -13,6 +13,7 @@
 #include "gfxASurface.h"
 #include "gfxContext.h"
 #include "gfxImageSurface.h"
+#include "gfxPlatform.h"
 
 #include "nsRect.h"
 
@@ -112,7 +113,7 @@ gfxASurface*
 gfxASurface::GetSurfaceWrapper(cairo_surface_t *csurf)
 {
     if (!csurf)
-        return NULL;
+        return nullptr;
     return (gfxASurface*) cairo_surface_get_user_data(csurf, &gfxasurface_pointer_key);
 }
 
@@ -243,6 +244,7 @@ gfxASurface::Flush() const
     if (!mSurfaceValid)
         return;
     cairo_surface_flush(mSurface);
+    gfxPlatform::ClearSourceSurfaceForSurface(const_cast<gfxASurface*>(this));
 }
 
 void
@@ -251,6 +253,7 @@ gfxASurface::MarkDirty()
     if (!mSurfaceValid)
         return;
     cairo_surface_mark_dirty(mSurface);
+    gfxPlatform::ClearSourceSurfaceForSurface(this);
 }
 
 void
@@ -261,6 +264,7 @@ gfxASurface::MarkDirty(const gfxRect& r)
     cairo_surface_mark_dirty_rectangle(mSurface,
                                        (int) r.X(), (int) r.Y(),
                                        (int) r.Width(), (int) r.Height());
+    gfxPlatform::ClearSourceSurfaceForSurface(this);
 }
 
 void
@@ -277,7 +281,7 @@ void *
 gfxASurface::GetData(const cairo_user_data_key_t *key)
 {
     if (!mSurfaceValid)
-        return NULL;
+        return nullptr;
     return cairo_surface_get_user_data(mSurface, key);
 }
 

@@ -244,6 +244,8 @@ XMLHttpRequestAuthPrompt::PromptPassword(const PRUnichar* aDialogTitle,
 
 /////////////////////////////////////////////
 
+NS_IMPL_CYCLE_COLLECTION_CLASS(nsXHREventTarget)
+
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsXHREventTarget,
                                                   nsDOMEventTargetHelper)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
@@ -356,9 +358,11 @@ nsXMLHttpRequest::Init()
   NS_ENSURE_STATE(subjectPrincipal);
 
   // Instead of grabbing some random global from the context stack,
-  // let's use the default one (junk drawer) for now.
+  // let's use the default one (junk scope) for now.
   // We should move away from this Init...
-  Construct(subjectPrincipal, xpc::GetNativeForGlobal(xpc::GetJunkScope()));
+  nsCOMPtr<nsIGlobalObject> global = xpc::GetJunkScopeGlobal();
+  NS_ENSURE_TRUE(global, NS_ERROR_FAILURE);
+  Construct(subjectPrincipal, global);
   return NS_OK;
 }
 
@@ -445,6 +449,8 @@ nsXMLHttpRequest::SetRequestObserver(nsIRequestObserver* aObserver)
 {
   mRequestObserver = aObserver;
 }
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(nsXMLHttpRequest)
 
 NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_BEGIN(nsXMLHttpRequest)
   bool isBlack = tmp->IsBlack();
@@ -863,7 +869,7 @@ void
 nsXMLHttpRequest::StaticAssertions()
 {
 #define ASSERT_ENUM_EQUAL(_lc, _uc) \
-  MOZ_STATIC_ASSERT(\
+  static_assert(\
     static_cast<int>(XMLHttpRequestResponseType::_lc)  \
     == XML_HTTP_RESPONSE_TYPE_ ## _uc, \
     #_uc " should match")
@@ -1020,7 +1026,7 @@ nsXMLHttpRequest::GetResponse(JSContext* aCx, ErrorResult& aRv)
     }
 
     JS::Rooted<JS::Value> result(aCx, JSVAL_NULL);
-    JS::Rooted<JSObject*> scope(aCx, JS_GetGlobalForScopeChain(aCx));
+    JS::Rooted<JSObject*> scope(aCx, JS::CurrentGlobalOrNull(aCx));
     aRv = nsContentUtils::WrapNative(aCx, scope, mResponseBlob, result.address(),
                                      nullptr, true);
     return result;
@@ -1031,7 +1037,7 @@ nsXMLHttpRequest::GetResponse(JSContext* aCx, ErrorResult& aRv)
       return JSVAL_NULL;
     }
 
-    JS::Rooted<JSObject*> scope(aCx, JS_GetGlobalForScopeChain(aCx));
+    JS::Rooted<JSObject*> scope(aCx, JS::CurrentGlobalOrNull(aCx));
     JS::Rooted<JS::Value> result(aCx, JSVAL_NULL);
     aRv = nsContentUtils::WrapNative(aCx, scope, mResponseXML, result.address(),
                                      nullptr, true);
@@ -3806,6 +3812,8 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(nsXMLHttpRequestXPCOMifier)
 
 // Can't NS_IMPL_CYCLE_COLLECTION_1 because mXHR has ambiguous
 // inheritance from nsISupports.
+NS_IMPL_CYCLE_COLLECTION_CLASS(nsXMLHttpRequestXPCOMifier)
+
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsXMLHttpRequestXPCOMifier)
 if (tmp->mXHR) {
   tmp->mXHR->mXPCOMifier = nullptr;

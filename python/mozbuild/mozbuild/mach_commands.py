@@ -129,14 +129,12 @@ class BuildProgressFooter(object):
             else:
                 parts.extend([tier, ' '])
 
-        current_encountered = False
         parts.extend([('bold', 'SUBTIER'), ':', ' '])
         for subtier in self._monitor.subtiers:
-            if subtier == self._monitor.current_subtier:
-                parts.extend([('underline_yellow', subtier), ' '])
-                current_encountered = True
-            elif not current_encountered:
+            if subtier in self._monitor.current_subtier_finished:
                 parts.extend([('green', subtier), ' '])
+            elif subtier in self._monitor.current_subtier_started:
+                parts.extend([('underline_yellow', subtier), ' '])
             else:
                 parts.extend([subtier, ' '])
 
@@ -174,7 +172,7 @@ class BuildProgressFooter(object):
                 written += len(arg)
             else:
                 if written + len(part) > max_width:
-                    write_pieces.append(arg[0:max_width - written])
+                    write_pieces.append(part[0:max_width - written])
                     written += len(part)
                     break
 
@@ -292,6 +290,17 @@ class Build(MachCommandBase):
                         path_arg.relpath())
 
                     if make_dir is None and make_target is None:
+                        return 1
+
+                    # See bug 886162 - we don't want to "accidentally" build
+                    # the entire tree (if that's really the intent, it's
+                    # unlikely they would have specified a directory.)
+                    if not make_dir and not make_target:
+                        print("The specified directory doesn't contain a "
+                              "Makefile and the first parent with one is the "
+                              "root of the tree. Please specify a directory "
+                              "with a Makefile or run |mach build| if you "
+                              "want to build the entire tree.")
                         return 1
 
                     target_pairs.append((make_dir, make_target))
@@ -638,7 +647,9 @@ class DebugProgram(MachCommandBase):
         help='Do not pass the -no-remote argument by default')
     @CommandArgument('+background', '+b', action='store_true',
         help='Do not pass the -foreground argument by default on Mac')
-    def debug(self, params, remote, background):
+    @CommandArgument('+gdbparams', default=None, metavar='params', type=str,
+        help='Command-line arguments to pass to GDB itself; split as the Bourne shell would.')
+    def debug(self, params, remote, background, gdbparams):
         import which
         try:
             debugger = which.which('gdb')
@@ -646,8 +657,17 @@ class DebugProgram(MachCommandBase):
             print("You don't have gdb in your PATH")
             print(e)
             return 1
+        args = [debugger]
+        if gdbparams:
+            import pymake.process
+            (argv, badchar) = pymake.process.clinetoargv(gdbparams, os.getcwd())
+            if badchar:
+                print("The +gdbparams you passed require a real shell to parse them.")
+                print("(We can't handle the %r character.)" % (badchar,))
+                return 1
+            args.extend(argv)
         try:
-            args = [debugger, '--args', self.get_binary_path('app')]
+            args.extend(['--args', self.get_binary_path('app')])
         except Exception as e:
             print("It looks like your program isn't built.",
                 "You can run |mach build| to build it.")

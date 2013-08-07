@@ -7,12 +7,12 @@
 #ifndef frontend_SharedContext_h
 #define frontend_SharedContext_h
 
-#include "jstypes.h"
 #include "jsatom.h"
 #include "jsopcode.h"
-#include "jsscript.h"
 #include "jsprvtd.h"
 #include "jspubtd.h"
+#include "jsscript.h"
+#include "jstypes.h"
 
 #include "builtin/Module.h"
 #include "frontend/ParseMaps.h"
@@ -73,8 +73,9 @@ class FunctionContextFlags
     // This class's data is all private and so only visible to these friends.
     friend class FunctionBox;
 
-    // We parsed a yield statement in the function.
-    bool isGenerator:1;
+    // We parsed a yield statement in the function, which can happen in JS1.7+
+    // mode.
+    bool isLegacyGenerator:1;
 
     // The function or a function that encloses it may define new local names
     // at runtime through means other than calling eval.
@@ -129,7 +130,7 @@ class FunctionContextFlags
 
   public:
     FunctionContextFlags()
-     :  isGenerator(false),
+     :  isLegacyGenerator(false),
         mightAliasLocals(false),
         hasExtensibleScope(false),
         needsDeclEnvObject(false),
@@ -139,6 +140,35 @@ class FunctionContextFlags
 };
 
 class GlobalSharedContext;
+
+// List of directives that may be encountered in a Directive Prologue (ES5 15.1).
+class Directives
+{
+    bool strict_;
+    bool asmJS_;
+
+  public:
+    explicit Directives(bool strict) : strict_(strict), asmJS_(false) {}
+    template <typename ParseHandler> explicit Directives(ParseContext<ParseHandler> *parent);
+
+    void setStrict() { strict_ = true; }
+    bool strict() const { return strict_; }
+
+    void setAsmJS() { asmJS_ = true; }
+    bool asmJS() const { return asmJS_; }
+
+    Directives &operator=(Directives rhs) {
+        strict_ = rhs.strict_;
+        asmJS_ = rhs.asmJS_;
+        return *this;
+    }
+    bool operator==(const Directives &rhs) const {
+        return strict_ == rhs.strict_ && asmJS_ == rhs.asmJS_;
+    }
+    bool operator!=(const Directives &rhs) const {
+        return !(*this == rhs);
+    }
+};
 
 /*
  * The struct SharedContext is part of the current parser context (see
@@ -156,10 +186,10 @@ class SharedContext
 
     // If it's function code, funbox must be non-NULL and scopeChain must be NULL.
     // If it's global code, funbox must be NULL.
-    SharedContext(ExclusiveContext *cx, bool strict, bool extraWarnings)
+    SharedContext(ExclusiveContext *cx, Directives directives, bool extraWarnings)
       : context(cx),
         anyCxFlags(),
-        strict(strict),
+        strict(directives.strict()),
         extraWarnings(extraWarnings)
     {}
 
@@ -180,7 +210,9 @@ class SharedContext
     void setHasDebuggerStatement()        { anyCxFlags.hasDebuggerStatement        = true; }
 
     // JSOPTION_EXTRA_WARNINGS warnings or strict mode errors.
-    inline bool needStrictChecks();
+    bool needStrictChecks() {
+        return strict || extraWarnings;
+    }
 };
 
 class GlobalSharedContext : public SharedContext
@@ -190,8 +222,8 @@ class GlobalSharedContext : public SharedContext
 
   public:
     GlobalSharedContext(ExclusiveContext *cx, JSObject *scopeChain,
-                        bool strict, bool extraWarnings)
-      : SharedContext(cx, strict, extraWarnings),
+                        Directives directives, bool extraWarnings)
+      : SharedContext(cx, directives, extraWarnings),
         scopeChain_(cx, scopeChain)
     {}
 
@@ -232,10 +264,10 @@ class FunctionBox : public ObjectBox, public SharedContext
     uint32_t        bufEnd;
     uint32_t        startLine;
     uint32_t        startColumn;
-    uint32_t        asmStart;               /* offset of the "use asm" directive, if present */
     uint16_t        ndefaults;
     bool            inWith:1;               /* some enclosing scope is a with-statement */
     bool            inGenexpLambda:1;       /* lambda from generator expression */
+    bool            hasDestructuringArgs:1; /* arguments list contains destructuring expression */
     bool            useAsm:1;               /* function contains "use asm" directive */
     bool            insideUseAsm:1;         /* nested function of function of "use asm" directive */
 
@@ -247,20 +279,22 @@ class FunctionBox : public ObjectBox, public SharedContext
 
     template <typename ParseHandler>
     FunctionBox(ExclusiveContext *cx, ObjectBox* traceListHead, JSFunction *fun,
-                ParseContext<ParseHandler> *pc,
-                bool strict, bool extraWarnings);
+                ParseContext<ParseHandler> *pc, Directives directives,
+                bool extraWarnings);
 
     ObjectBox *toObjectBox() { return this; }
     JSFunction *function() const { return &object->as<JSFunction>(); }
 
-    bool isGenerator()              const { return funCxFlags.isGenerator; }
+    // In the future, isGenerator will also return true for ES6 generators.
+    bool isGenerator()              const { return isLegacyGenerator(); }
+    bool isLegacyGenerator()        const { return funCxFlags.isLegacyGenerator; }
     bool mightAliasLocals()         const { return funCxFlags.mightAliasLocals; }
     bool hasExtensibleScope()       const { return funCxFlags.hasExtensibleScope; }
     bool needsDeclEnvObject()       const { return funCxFlags.needsDeclEnvObject; }
     bool argumentsHasLocalBinding() const { return funCxFlags.argumentsHasLocalBinding; }
     bool definitelyNeedsArgsObj()   const { return funCxFlags.definitelyNeedsArgsObj; }
 
-    void setIsGenerator()                  { funCxFlags.isGenerator              = true; }
+    void setIsLegacyGenerator()            { funCxFlags.isLegacyGenerator        = true; }
     void setMightAliasLocals()             { funCxFlags.mightAliasLocals         = true; }
     void setHasExtensibleScope()           { funCxFlags.hasExtensibleScope       = true; }
     void setNeedsDeclEnvObject()           { funCxFlags.needsDeclEnvObject       = true; }

@@ -60,7 +60,7 @@ class RemoteInputStream : public nsIInputStream,
   ActorFlavorEnum mOrigin;
 
 public:
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
 
   RemoteInputStream(nsIDOMBlob* aSourceBlob, ActorFlavorEnum aOrigin)
   : mMonitor("RemoteInputStream.mMonitor"), mSourceBlob(aSourceBlob),
@@ -312,8 +312,8 @@ private:
   }
 };
 
-NS_IMPL_THREADSAFE_ADDREF(RemoteInputStream)
-NS_IMPL_THREADSAFE_RELEASE(RemoteInputStream)
+NS_IMPL_ADDREF(RemoteInputStream)
+NS_IMPL_RELEASE(RemoteInputStream)
 
 NS_INTERFACE_MAP_BEGIN(RemoteInputStream)
   NS_INTERFACE_MAP_ENTRY(nsIInputStream)
@@ -364,8 +364,8 @@ inline
 already_AddRefed<nsIDOMBlob>
 GetBlobFromParams(const SlicedBlobConstructorParams& aParams)
 {
-  MOZ_STATIC_ASSERT(ActorFlavor == mozilla::dom::ipc::Parent,
-                    "No other flavor is supported here!");
+  static_assert(ActorFlavor == mozilla::dom::ipc::Parent,
+                "No other flavor is supported here!");
 
   BlobParent* actor =
     const_cast<BlobParent*>(
@@ -840,7 +840,7 @@ private:
       typename ActorType::ConstructorParamsType params;
       ActorType::BaseType::SetBlobConstructorParams(params, normalParams);
 
-      ActorType* newActor = ActorType::Create(params);
+      ActorType* newActor = ActorType::Create(mActor->Manager(), params);
       MOZ_ASSERT(newActor);
 
       SlicedBlobConstructorParams slicedParams;
@@ -1011,11 +1011,13 @@ RemoteBlob<Child>::GetInternalStream(nsIInputStream** aStream)
 }
 
 template <ActorFlavorEnum ActorFlavor>
-Blob<ActorFlavor>::Blob(nsIDOMBlob* aBlob)
-: mBlob(aBlob), mRemoteBlob(nullptr), mOwnsBlob(true), mBlobIsFile(false)
+Blob<ActorFlavor>::Blob(ContentManager* aManager, nsIDOMBlob* aBlob)
+: mBlob(aBlob), mRemoteBlob(nullptr), mOwnsBlob(true)
+, mBlobIsFile(false), mManager(aManager)
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aBlob);
+  MOZ_ASSERT(aManager);
   aBlob->AddRef();
 
   nsCOMPtr<nsIDOMFile> file = do_QueryInterface(aBlob);
@@ -1023,10 +1025,13 @@ Blob<ActorFlavor>::Blob(nsIDOMBlob* aBlob)
 }
 
 template <ActorFlavorEnum ActorFlavor>
-Blob<ActorFlavor>::Blob(const ConstructorParamsType& aParams)
-: mBlob(nullptr), mRemoteBlob(nullptr), mOwnsBlob(false), mBlobIsFile(false)
+Blob<ActorFlavor>::Blob(ContentManager* aManager,
+                        const ConstructorParamsType& aParams)
+: mBlob(nullptr), mRemoteBlob(nullptr), mOwnsBlob(false)
+, mBlobIsFile(false), mManager(aManager)
 {
   MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(aManager);
 
   ChildBlobConstructorParams::Type paramType =
     BaseType::GetBlobConstructorParams(aParams).type();
@@ -1048,7 +1053,8 @@ Blob<ActorFlavor>::Blob(const ConstructorParamsType& aParams)
 
 template <ActorFlavorEnum ActorFlavor>
 Blob<ActorFlavor>*
-Blob<ActorFlavor>::Create(const ConstructorParamsType& aParams)
+Blob<ActorFlavor>::Create(ContentManager* aManager,
+                          const ConstructorParamsType& aParams)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -1059,7 +1065,7 @@ Blob<ActorFlavor>::Create(const ConstructorParamsType& aParams)
     case ChildBlobConstructorParams::TNormalBlobConstructorParams:
     case ChildBlobConstructorParams::TFileBlobConstructorParams:
     case ChildBlobConstructorParams::TMysteryBlobConstructorParams:
-      return new Blob<ActorFlavor>(aParams);
+      return new Blob<ActorFlavor>(aManager, aParams);
 
     case ChildBlobConstructorParams::TSlicedBlobConstructorParams: {
       const SlicedBlobConstructorParams& params =
@@ -1074,7 +1080,7 @@ Blob<ActorFlavor>::Create(const ConstructorParamsType& aParams)
                       getter_AddRefs(slice));
       NS_ENSURE_SUCCESS(rv, nullptr);
 
-      return new Blob<ActorFlavor>(slice);
+      return new Blob<ActorFlavor>(aManager, slice);
     }
 
     default:

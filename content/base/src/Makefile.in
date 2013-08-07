@@ -22,17 +22,9 @@ endif
 
 GQI_SRCS = contentbase.gqi
 
-EXTRA_COMPONENTS = \
-		contentSecurityPolicy.manifest \
-		contentAreaDropListener.js \
-		contentAreaDropListener.manifest \
-		messageWakeupService.js \
-		messageWakeupService.manifest \
-		$(NULL)
-
 include $(topsrcdir)/config/config.mk
-include $(topsrcdir)/ipc/chromium/chromium-config.mk
 include $(topsrcdir)/config/rules.mk
+include $(topsrcdir)/ipc/chromium/chromium-config.mk
 
 LOCAL_INCLUDES += \
   -I$(topsrcdir)/caps/include \
@@ -46,6 +38,7 @@ LOCAL_INCLUDES += \
   -I$(topsrcdir)/content/xul/document/src \
   -I$(topsrcdir)/dom/base \
   -I$(topsrcdir)/dom/ipc \
+  -I$(topsrcdir)/js/ipc \
   -I$(topsrcdir)/image/src \
   -I$(topsrcdir)/js/xpconnect/src \
   -I$(topsrcdir)/layout/base \

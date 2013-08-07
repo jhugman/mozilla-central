@@ -6,12 +6,12 @@
 
 #include "jslibmath.h"
 #include "jsmath.h"
+
 #include "builtin/ParallelArray.h"
 #include "builtin/TestingFunctions.h"
-
+#include "ion/IonBuilder.h"
 #include "ion/MIR.h"
 #include "ion/MIRGraph.h"
-#include "ion/IonBuilder.h"
 
 #include "jsscriptinlines.h"
 
@@ -72,6 +72,32 @@ IonBuilder::inlineNativeCall(CallInfo &callInfo, JSNative native)
         return inlineMathFunction(callInfo, MMathFunction::ASin);
     if (native == js::math_acos)
         return inlineMathFunction(callInfo, MMathFunction::ACos);
+    if (native == js::math_log10)
+        return inlineMathFunction(callInfo, MMathFunction::Log10);
+    if (native == js::math_log2)
+        return inlineMathFunction(callInfo, MMathFunction::Log2);
+    if (native == js::math_log1p)
+        return inlineMathFunction(callInfo, MMathFunction::Log1P);
+    if (native == js::math_expm1)
+        return inlineMathFunction(callInfo, MMathFunction::ExpM1);
+    if (native == js::math_cosh)
+        return inlineMathFunction(callInfo, MMathFunction::CosH);
+    if (native == js::math_sin)
+        return inlineMathFunction(callInfo, MMathFunction::SinH);
+    if (native == js::math_tan)
+        return inlineMathFunction(callInfo, MMathFunction::TanH);
+    if (native == js::math_acosh)
+        return inlineMathFunction(callInfo, MMathFunction::ACosH);
+    if (native == js::math_asin)
+        return inlineMathFunction(callInfo, MMathFunction::ASinH);
+    if (native == js::math_atan)
+        return inlineMathFunction(callInfo, MMathFunction::ATanH);
+    if (native == js::math_sign)
+        return inlineMathFunction(callInfo, MMathFunction::Sign);
+    if (native == js::math_trunc)
+        return inlineMathFunction(callInfo, MMathFunction::Trunc);
+    if (native == js::math_cbrt)
+        return inlineMathFunction(callInfo, MMathFunction::Cbrt);
 
     // String natives.
     if (native == js_String)
@@ -104,8 +130,6 @@ IonBuilder::inlineNativeCall(CallInfo &callInfo, JSNative native)
     // Parallel intrinsics.
     if (native == intrinsic_ShouldForceSequential)
         return inlineForceSequentialOrInParallelSection(callInfo);
-    if (native == testingFunc_inParallelSection)
-        return inlineForceSequentialOrInParallelSection(callInfo);
     if (native == intrinsic_NewParallelArray)
         return inlineNewParallelArray(callInfo);
     if (native == ParallelArrayObject::construct)
@@ -120,10 +144,12 @@ IonBuilder::inlineNativeCall(CallInfo &callInfo, JSNative native)
         return inlineHaveSameClass(callInfo);
     if (native == intrinsic_ToObject)
         return inlineToObject(callInfo);
-#ifdef DEBUG
-    if (native == intrinsic_Dump)
-        return inlineDump(callInfo);
-#endif
+
+    // Testing Functions
+    if (native == testingFunc_inParallelSection)
+        return inlineForceSequentialOrInParallelSection(callInfo);
+    if (native == testingFunc_bailout)
+        return inlineBailout(callInfo);
 
     return InliningStatus_NotInlined;
 }
@@ -1292,7 +1318,7 @@ IonBuilder::inlineNewDenseArrayForParallelExecution(CallInfo &callInfo)
 
     callInfo.unwrapArgs();
 
-    MParNewDenseArray *newObject = new MParNewDenseArray(graph().parSlice(),
+    MNewDenseArrayPar *newObject = new MNewDenseArrayPar(graph().forkJoinSlice(),
                                                          callInfo.getArg(0),
                                                          templateObject);
     current->add(newObject);
@@ -1477,31 +1503,15 @@ IonBuilder::inlineToObject(CallInfo &callInfo)
 }
 
 IonBuilder::InliningStatus
-IonBuilder::inlineDump(CallInfo &callInfo)
+IonBuilder::inlineBailout(CallInfo &callInfo)
 {
-    // In Parallel Execution, call ParDump.  We just need a debugging
-    // aid!
-
-    if (callInfo.constructing())
-        return InliningStatus_NotInlined;
-
-    ExecutionMode executionMode = info().executionMode();
-    switch (executionMode) {
-      case SequentialExecution:
-        return InliningStatus_NotInlined;
-      case ParallelExecution:
-        break;
-    }
-
     callInfo.unwrapArgs();
-    JS_ASSERT(1 == callInfo.argc());
-    MParDump *dump = new MParDump(callInfo.getArg(0));
-    current->add(dump);
 
-    MConstant *udef = MConstant::New(UndefinedValue());
-    current->add(udef);
-    current->push(udef);
+    current->add(MBail::New());
 
+    MConstant *undefined = MConstant::New(UndefinedValue());
+    current->add(undefined);
+    current->push(undefined);
     return InliningStatus_Inlined;
 }
 

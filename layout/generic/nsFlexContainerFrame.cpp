@@ -1100,7 +1100,7 @@ nsFlexContainerFrame::GetType() const
 
 /* virtual */
 int
-nsFlexContainerFrame::GetSkipSides() const
+nsFlexContainerFrame::GetSkipSides(const nsHTMLReflowState* aReflowState) const
 {
   // (same as nsBlockFrame's GetSkipSides impl)
   if (IS_TRUE_OVERFLOW_CONTAINER(this)) {
@@ -2400,12 +2400,7 @@ nsFlexContainerFrame::Reflow(nsPresContext*           aPresContext,
                "We gave flex item unconstrained available height, so it "
                "should be complete");
 
-    // Apply CSS relative positioning
-    const nsStyleDisplay* styleDisp = curItem.Frame()->StyleDisplay();
-    if (NS_STYLE_POSITION_RELATIVE == styleDisp->mPosition) {
-      physicalPosn.x += childReflowState.mComputedOffsets.left;
-      physicalPosn.y += childReflowState.mComputedOffsets.top;
-    }
+    childReflowState.ApplyRelativePositioning(&physicalPosn);
 
     rv = FinishReflowChild(curItem.Frame(), aPresContext,
                            &childReflowState, childDesiredSize,

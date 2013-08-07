@@ -8,22 +8,19 @@
  * JS boolean implementation.
  */
 
-#include "jsbool.h"
+#include "jsboolinlines.h"
 
-#include "jstypes.h"
 #include "jsapi.h"
 #include "jsatom.h"
 #include "jscntxt.h"
 #include "jsobj.h"
+#include "jstypes.h"
 
 #include "vm/GlobalObject.h"
 #include "vm/ProxyObject.h"
 #include "vm/StringBuffer.h"
 
-#include "jsboolinlines.h"
-
 #include "vm/BooleanObject-inl.h"
-#include "vm/GlobalObject-inl.h"
 
 using namespace js;
 using namespace js::types;

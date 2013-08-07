@@ -46,6 +46,8 @@ private:
 
 // Promise
 
+NS_IMPL_CYCLE_COLLECTION_CLASS(Promise)
+
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(Promise)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mWindow)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mResolver)
@@ -188,18 +190,23 @@ Promise::Reject(const GlobalObject& aGlobal, JSContext* aCx,
 }
 
 already_AddRefed<Promise>
-Promise::Then(AnyCallback* aResolveCallback, AnyCallback* aRejectCallback)
+Promise::Then(const Optional<OwningNonNull<AnyCallback> >& aResolveCallback,
+              const Optional<OwningNonNull<AnyCallback> >& aRejectCallback)
 {
   nsRefPtr<Promise> promise = new Promise(GetParentObject());
 
   nsRefPtr<PromiseCallback> resolveCb =
     PromiseCallback::Factory(promise->mResolver,
-                             aResolveCallback,
+                             aResolveCallback.WasPassed()
+                               ? &aResolveCallback.Value()
+                               : nullptr,
                              PromiseCallback::Resolve);
 
   nsRefPtr<PromiseCallback> rejectCb =
     PromiseCallback::Factory(promise->mResolver,
-                             aRejectCallback,
+                             aRejectCallback.WasPassed()
+                               ? &aRejectCallback.Value()
+                               : nullptr,
                              PromiseCallback::Reject);
 
   AppendCallbacks(resolveCb, rejectCb);
@@ -208,29 +215,10 @@ Promise::Then(AnyCallback* aResolveCallback, AnyCallback* aRejectCallback)
 }
 
 already_AddRefed<Promise>
-Promise::Catch(AnyCallback* aRejectCallback)
+Promise::Catch(const Optional<OwningNonNull<AnyCallback> >& aRejectCallback)
 {
-  return Then(nullptr, aRejectCallback);
-}
-
-void
-Promise::Done(AnyCallback* aResolveCallback, AnyCallback* aRejectCallback)
-{
-  if (!aResolveCallback && !aRejectCallback) {
-    return;
-  }
-
-  nsRefPtr<PromiseCallback> resolveCb;
-  if (aResolveCallback) {
-    resolveCb = new SimpleWrapperPromiseCallback(this, aResolveCallback);
-  }
-
-  nsRefPtr<PromiseCallback> rejectCb;
-  if (aRejectCallback) {
-    rejectCb = new SimpleWrapperPromiseCallback(this, aRejectCallback);
-  }
-
-  AppendCallbacks(resolveCb, rejectCb);
+  Optional<OwningNonNull<AnyCallback> > resolveCb;
+  return Then(resolveCb, aRejectCallback);
 }
 
 void

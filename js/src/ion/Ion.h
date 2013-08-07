@@ -13,10 +13,10 @@
 
 #include "jscntxt.h"
 #include "jscompartment.h"
-#include "ion/IonCode.h"
-#include "ion/CompileInfo.h"
 #include "jsinfer.h"
 
+#include "ion/CompileInfo.h"
+#include "ion/IonCode.h"
 #include "vm/Interpreter.h"
 
 namespace js {
@@ -177,7 +177,7 @@ struct IonOptions
     // How many uses of a parallel kernel before we attempt compilation.
     //
     // Default: 1
-    uint32_t usesBeforeCompileParallel;
+    uint32_t usesBeforeCompilePar;
 
     void setEagerCompilation() {
         eagerCompilation = true;
@@ -213,7 +213,7 @@ struct IonOptions
         inlineMaxTotalBytecodeLength(1000),
         inlineUseCountRatio(128),
         eagerCompilation(false),
-        usesBeforeCompileParallel(1)
+        usesBeforeCompilePar(1)
     {
     }
 
@@ -246,7 +246,7 @@ class IonContext
 {
   public:
     IonContext(JSContext *cx, TempAllocator *temp);
-    IonContext(JSCompartment *comp, TempAllocator *temp);
+    IonContext(JSRuntime *rt, JSCompartment *comp, TempAllocator *temp);
     IonContext(JSRuntime *rt);
     ~IonContext();
 
@@ -344,6 +344,14 @@ IsEnabled(JSContext *cx)
     return cx->hasOption(JSOPTION_ION) &&
         cx->hasOption(JSOPTION_BASELINE) &&
         cx->typeInferenceEnabled();
+}
+
+inline bool
+IsIonInlinablePC(jsbytecode *pc) {
+    // CALL, FUNCALL, FUNAPPLY, EVAL, NEW (Normal Callsites)
+    // GETPROP, CALLPROP, and LENGTH. (Inlined Getters)
+    // SETPROP, SETNAME, SETGNAME (Inlined Setters)
+    return IsCallPC(pc) || IsGetterPC(pc) || IsSetterPC(pc);
 }
 
 void ForbidCompilation(JSContext *cx, JSScript *script);

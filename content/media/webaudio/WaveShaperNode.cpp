@@ -14,6 +14,8 @@
 namespace mozilla {
 namespace dom {
 
+NS_IMPL_CYCLE_COLLECTION_CLASS(WaveShaperNode)
+
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(WaveShaperNode, AudioNode)
   NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
   tmp->ClearCurve();
@@ -119,14 +121,14 @@ WaveShaperNode::WrapObject(JSContext *aCx, JS::Handle<JSObject*> aScope)
 }
 
 void
-WaveShaperNode::SetCurve(const Float32Array* aCurve)
+WaveShaperNode::SetCurve(const Nullable<Float32Array>& aCurve)
 {
   nsTArray<float> curve;
-  if (aCurve) {
-    mCurve = aCurve->Obj();
+  if (!aCurve.IsNull()) {
+    mCurve = aCurve.Value().Obj();
 
-    curve.SetLength(aCurve->Length());
-    PodCopy(curve.Elements(), aCurve->Data(), aCurve->Length());
+    curve.SetLength(aCurve.Value().Length());
+    PodCopy(curve.Elements(), aCurve.Value().Data(), aCurve.Value().Length());
   } else {
     mCurve = nullptr;
   }

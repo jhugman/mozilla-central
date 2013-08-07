@@ -48,6 +48,12 @@ function debug(aMsg) {
 }
 
 
+let defaultMessageConfigurator = {
+  get mustShowRunningApp() {
+    return false;
+  }
+};
+
 const MSG_SENT_SUCCESS = 0;
 const MSG_SENT_FAILURE_PERM_DENIED = 1;
 const MSG_SENT_FAILURE_APP_NOT_RUNNING = 2;
@@ -71,6 +77,8 @@ function SystemMessageInternal() {
 
   this._cpuWakeLocks = {};
 
+  this._configurators = {};
+
   Services.obs.addObserver(this, "xpcom-shutdown", false);
   Services.obs.addObserver(this, "webapps-registry-start", false);
   Services.obs.addObserver(this, "webapps-registry-ready", false);
@@ -82,6 +90,22 @@ function SystemMessageInternal() {
 }
 
 SystemMessageInternal.prototype = {
+
+  _getMessageConfigurator: function _getMessageConfigurator(aType) {
+    debug("_getMessageConfigurator for type: " + aType);
+    if (this._configurators[aType] === undefined) {
+      let contractID = "@mozilla.org/dom/system-messages/configurator/" + aType + ";1";
+      if (contractID in Cc) {
+        debug(contractID + " is registered, creating an instance");
+        this._configurators[aType] =
+          Cc[contractID].createInstance(Ci.nsISystemMessagesConfigurator);
+      } else {
+        debug(contractID + "is not registered, caching the answer");
+        this._configurators[aType] = null;
+      }
+    }
+    return this._configurators[aType] || defaultMessageConfigurator;
+  },
 
   _cancelCpuWakeLock: function _cancelCpuWakeLock(aPageKey) {
     let cpuWakeLock = this._cpuWakeLocks[aPageKey];
@@ -144,7 +168,7 @@ SystemMessageInternal.prototype = {
     return page;
   },
 
-  sendMessage: function sendMessage(aType, aMessage, aPageURI, aManifestURI) {
+  sendMessage: function sendMessage(aType, aMessage, aPageURI, aManifestURI, aExtra) {
     // Buffer system messages until the webapps' registration is ready,
     // so that we can know the correct pages registered to be sent.
     if (!this._webappsRegistryReady) {
@@ -152,7 +176,8 @@ SystemMessageInternal.prototype = {
                                    type: aType,
                                    msg: aMessage,
                                    pageURI: aPageURI,
-                                   manifestURI: aManifestURI });
+                                   manifestURI: aManifestURI,
+                                   extra: aExtra });
       return;
     }
 
@@ -161,13 +186,15 @@ SystemMessageInternal.prototype = {
     let messageID = gUUIDGenerator.generateUUID().toString();
 
     debug("Sending " + aType + " " + JSON.stringify(aMessage) +
-      " for " + aPageURI.spec + " @ " + aManifestURI.spec);
+      " for " + aPageURI.spec + " @ " + aManifestURI.spec +
+      '; extra: ' + JSON.stringify(aExtra));
 
     let result = this._sendMessageCommon(aType,
                                          aMessage,
                                          messageID,
                                          aPageURI.spec,
-                                         aManifestURI.spec);
+                                         aManifestURI.spec,
+                                         aExtra);
     debug("Returned status of sending message: " + result);
 
     // Don't need to open the pages and queue the system message
@@ -181,20 +208,18 @@ SystemMessageInternal.prototype = {
       // Queue this message in the corresponding pages.
       this._queueMessage(page, aMessage, messageID);
 
-        if (result === MSG_SENT_FAILURE_APP_NOT_RUNNING) {
-          // Don't open the page again if we already sent the message to it.
-          this._openAppPage(page, aMessage);
-        }
+      this._openAppPage(page, aMessage, aExtra, result);
     }
   },
 
-  broadcastMessage: function broadcastMessage(aType, aMessage) {
+  broadcastMessage: function broadcastMessage(aType, aMessage, aExtra) {
     // Buffer system messages until the webapps' registration is ready,
     // so that we can know the correct pages registered to be broadcasted.
     if (!this._webappsRegistryReady) {
       this._bufferedSysMsgs.push({ how: "broadcast",
                                    type: aType,
-                                   msg: aMessage });
+                                   msg: aMessage,
+                                   extra: aExtra });
       return;
     }
 
@@ -202,7 +227,8 @@ SystemMessageInternal.prototype = {
     // clean it up from the pending message queue when apps receive it.
     let messageID = gUUIDGenerator.generateUUID().toString();
 
-    debug("Broadcasting " + aType + " " + JSON.stringify(aMessage));
+    debug("Broadcasting " + aType + " " + JSON.stringify(aMessage) +
+      '; extra = ' + JSON.stringify(aExtra));
     // Find pages that registered an handler for this type.
     this._pages.forEach(function(aPage) {
       if (aPage.type == aType) {
@@ -210,7 +236,8 @@ SystemMessageInternal.prototype = {
                                              aMessage,
                                              messageID,
                                              aPage.uri,
-                                             aPage.manifest);
+                                             aPage.manifest,
+                                             aExtra);
         debug("Returned status of sending message: " + result);
 
 
@@ -223,10 +250,7 @@ SystemMessageInternal.prototype = {
         // Queue this message in the corresponding pages.
         this._queueMessage(aPage, aMessage, messageID);
 
-        if (result === MSG_SENT_FAILURE_APP_NOT_RUNNING) {
-          // Open app pages to handle their pending messages.
-          this._openAppPage(aPage, aMessage);
-        }
+        this._openAppPage(aPage, aMessage, aExtra, result);
       }
     }, this);
   },
@@ -479,10 +503,10 @@ SystemMessageInternal.prototype = {
           switch (aSysMsg.how) {
             case "send":
               this.sendMessage(
-                aSysMsg.type, aSysMsg.msg, aSysMsg.pageURI, aSysMsg.manifestURI);
+                aSysMsg.type, aSysMsg.msg, aSysMsg.pageURI, aSysMsg.manifestURI, aSysMsg.extra);
               break;
             case "broadcast":
-              this.broadcastMessage(aSysMsg.type, aSysMsg.msg);
+              this.broadcastMessage(aSysMsg.type, aSysMsg.msg, aSysMsg.extra);
               break;
           }
         }, this);
@@ -500,12 +524,28 @@ SystemMessageInternal.prototype = {
     }
   },
 
-  _openAppPage: function _openAppPage(aPage, aMessage) {
+  _openAppPage: function _openAppPage(aPage, aMessage, aExtra, aMsgSentStatus) {
+    // This means the app must be brought to the foreground.
+    let showApp = this._getMessageConfigurator(aPage.type).mustShowRunningApp;
+
+    // We should send the open-app message if the system message was
+    // not sent, or if it was sent but we should show the app anyway.
+    if ((aMsgSentStatus === MSG_SENT_SUCCESS) && !showApp) {
+      return;
+    }
+
+    // This flag means the app must *only* be brought to the foreground
+    // and we don't need to load the app to handle messages.
+    let onlyShowApp = (aMsgSentStatus === MSG_SENT_SUCCESS) && showApp;
+
     // We don't need to send the full object to observers.
     let page = { uri: aPage.uri,
                  manifest: aPage.manifest,
                  type: aPage.type,
-                 target: aMessage.target };
+                 extra: aExtra,
+                 target: aMessage.target,
+                 onlyShowApp: onlyShowApp,
+                 showApp: showApp };
     debug("Asking to open " + JSON.stringify(page));
     Services.obs.notifyObservers(this, "system-messages-open-app", JSON.stringify(page));
   },
@@ -535,7 +575,7 @@ SystemMessageInternal.prototype = {
   },
 
   _sendMessageCommon:
-    function _sendMessageCommon(aType, aMessage, aMessageID, aPageURI, aManifestURI) {
+    function _sendMessageCommon(aType, aMessage, aMessageID, aPageURI, aManifestURI, aExtra) {
     // Don't send the system message not granted by the app's permissions.
     if (!SystemMessagePermissionsChecker
           .isSystemMessagePermittedToSend(aType,
@@ -547,7 +587,7 @@ SystemMessageInternal.prototype = {
     let appPageIsRunning = false;
     let pageKey = this._createKeyForPage({ type: aType,
                                            manifest: aManifestURI,
-                                           uri: aPageURI })
+                                           uri: aPageURI });
 
     let targets = this._listeners[aManifestURI];
     if (targets) {

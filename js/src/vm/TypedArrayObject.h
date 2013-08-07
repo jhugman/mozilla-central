@@ -255,7 +255,7 @@ class ArrayBufferViewObject : public JSObject
 
     inline void setNextView(ArrayBufferViewObject *view);
 
-    void prependToViews(HeapPtr<ArrayBufferViewObject> *views);
+    void prependToViews(ArrayBufferViewObject *viewsHead);
 
     void neuter();
 
@@ -589,6 +589,8 @@ ClampIntForUint8Array(int32_t x)
         return 255;
     return x;
 }
+
+bool ToDoubleForTypedArray(JSContext *cx, JS::HandleValue vp, double *d);
 
 } // namespace js
 

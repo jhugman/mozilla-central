@@ -153,12 +153,6 @@ RTCSessionDescription.prototype = {
   __init: function(dict) {
     this.type = dict.type;
     this.sdp  = dict.sdp;
-  },
-
-  // Bug 863402 serializer support workaround
-  toJSON: function() {
-    return { type: this.type, sdp: this.sdp,
-             __exposedProps__: { type: "rw", sdp: "rw" } };
   }
 };
 
@@ -849,8 +843,8 @@ RTCPeerConnection.prototype = {
     }
 
     if (dict.maxRetransmitTime != undefined &&
-        dict.maxRetransmitNum != undefined) {
-      throw new Components.Exception("Both maxRetransmitTime and maxRetransmitNum cannot be provided");
+        dict.maxRetransmits != undefined) {
+      throw new Components.Exception("Both maxRetransmitTime and maxRetransmits cannot be provided");
     }
     let protocol;
     if (dict.protocol == undefined) {
@@ -863,7 +857,7 @@ RTCPeerConnection.prototype = {
     let type;
     if (dict.maxRetransmitTime != undefined) {
       type = Ci.IPeerConnection.kDataChannelPartialReliableTimed;
-    } else if (dict.maxRetransmitNum != undefined) {
+    } else if (dict.maxRetransmits != undefined) {
       type = Ci.IPeerConnection.kDataChannelPartialReliableRexmit;
     } else {
       type = Ci.IPeerConnection.kDataChannelReliable;
@@ -871,9 +865,9 @@ RTCPeerConnection.prototype = {
 
     // Synchronous since it doesn't block.
     let channel = this._getPC().createDataChannel(
-      label, protocol, type, dict.outOfOrderAllowed, dict.maxRetransmitTime,
-      dict.maxRetransmitNum, dict.preset ? true : false,
-      dict.stream != undefined ? dict.stream : 0xFFFF
+      label, protocol, type, !dict.ordered, dict.maxRetransmitTime,
+      dict.maxRetransmits, dict.negotiated ? true : false,
+      dict.id != undefined ? dict.id : 0xFFFF
     );
     return channel;
   },

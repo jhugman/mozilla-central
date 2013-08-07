@@ -87,7 +87,7 @@ try { // nsIXULRuntime is not available in some configurations.
           Components.classes["@mozilla.org/toolkit/crash-reporter;1"]
           .getService(Components.interfaces.nsICrashReporter)) {
       crashReporter.enabled = true;
-      crashReporter.minidumpPath = do_get_cwd();
+      crashReporter.minidumpPath = do_get_tempdir();
     }
   }
 }
@@ -122,8 +122,8 @@ function _Timer(func, delay) {
 }
 _Timer.prototype = {
   QueryInterface: function(iid) {
-    if (iid.Equals(Components.interfaces.nsITimerCallback) ||
-        iid.Equals(Components.interfaces.nsISupports))
+    if (iid.equals(Components.interfaces.nsITimerCallback) ||
+        iid.equals(Components.interfaces.nsISupports))
       return this;
 
     throw Components.results.NS_ERROR_NO_INTERFACE;
@@ -200,7 +200,7 @@ function _dump_exception_stack(stack) {
  * @note Idle service is overridden by default.  If a test requires it, it will
  *       have to call do_get_idle() function at least once before use.
  */
-_fakeIdleService = {
+var _fakeIdleService = {
   get registrar() {
     delete this.registrar;
     return this.registrar =
@@ -344,7 +344,7 @@ function _execute_test() {
     // possible that this will mask an NS_ERROR_ABORT that happens after a
     // do_check failure though.
     if (!_quit || e != Components.results.NS_ERROR_ABORT) {
-      msg = "TEST-UNEXPECTED-FAIL | ";
+      let msg = "TEST-UNEXPECTED-FAIL | ";
       if (e.fileName) {
         msg += e.fileName;
         if (e.lineNumber) {
@@ -915,6 +915,23 @@ function do_parse_document(aPath, aType) {
 function do_register_cleanup(aFunction)
 {
   _cleanupFunctions.push(aFunction);
+}
+
+/**
+ * Returns the directory for a temp dir, which is created by the
+ * test harness. Every test gets its own temp dir.
+ *
+ * @return nsILocalFile of the temporary directory
+ */
+function do_get_tempdir() {
+  let env = Components.classes["@mozilla.org/process/environment;1"]
+                      .getService(Components.interfaces.nsIEnvironment);
+  // the python harness sets this in the environment for us
+  let path = env.get("XPCSHELL_TEST_TEMP_DIR");
+  let file = Components.classes["@mozilla.org/file/local;1"]
+                       .createInstance(Components.interfaces.nsILocalFile);
+  file.initWithPath(path);
+  return file;
 }
 
 /**
