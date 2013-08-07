@@ -334,6 +334,7 @@ just addresses the organization to follow, e.g. "This site is run by " -->
 <!ENTITY suggestions_prompt2 "Would you like to turn on &formatS; search suggestions?">
 
 <!ENTITY webapp_generic_name "App">
+<!ENTITY webapp_installer "Webapp installer">
 
 <!ENTITY searchable_description "Bookmarks and history">
 

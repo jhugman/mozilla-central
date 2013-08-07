@@ -172,6 +172,7 @@ FENNEC_JAVA_FILES = \
   VideoPlayer.java \
   WebAppAllocator.java \
   WebAppImpl.java \
+  WebAppInstaller.java \
   ZoomConstraints.java \
   braille/com/googlecode/eyesfree/braille/selfbraille/ISelfBrailleService.java \
   braille/com/googlecode/eyesfree/braille/selfbraille/SelfBrailleClient.java \
