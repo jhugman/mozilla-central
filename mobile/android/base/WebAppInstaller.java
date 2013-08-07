@@ -10,6 +10,7 @@ import java.net.MalformedURLException;
 import org.json.JSONObject;
 import org.mozilla.gecko.webapps.Logger;
 
+import android.R;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
@@ -91,7 +92,11 @@ public class WebAppInstaller extends GeckoApp {
 
             Intent intent = new Intent();
             intent.putExtra("appUri", message.optString("origin"));
-            setResult(RESULT_OK, intent);
+            if (getParent() == null) {
+                setResult(RESULT_OK, intent);
+            } else {
+                getParent().setResult(RESULT_OK, intent);
+            }
             finish();
         }
     }
