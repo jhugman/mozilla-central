@@ -662,7 +662,6 @@ public class GeckoAppShell
 		int index = allocator.getIndexForApp(aOriginalOrigin);
     	assert index != -1 && aIconURL != null;
     	allocator.updateAppAllocation(aOrigin, index, BitmapUtils.getBitmapFromDataURI(aIconURL));
-    	createShortcut(aTitle, aURI, aOrigin, aIconURL, "webapp");
     }
 
     public static Intent getWebAppIntent(String aURI, String aOrigin, String aTitle, Bitmap aIcon) {

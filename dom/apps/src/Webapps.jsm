@@ -119,7 +119,7 @@ this.DOMApplicationRegistry = {
     cpmm.addMessageListener("Activities:Register:OK", this);
 
     Services.obs.addObserver(this, "xpcom-shutdown", false);
-    Services.obs.addObserver(this, "SynthAPK:AppAdded", false);
+    Services.obs.addObserver(this, "Webapps:AutoInstall", false);
 
     AppDownloadManager.registerCancelFunction(this.cancelDownload.bind(this));
 
@@ -743,8 +743,8 @@ this.DOMApplicationRegistry = {
       Services.obs.removeObserver(this, "xpcom-shutdown");
       cpmm = null;
       ppmm = null;
-    } else if (aTopic === "SynthAPK:AppAdded") {
-      dump("Webapps.jsm: SynthAPK:AppAdded: aSubject=" + JSON.stringify(aSubject) + "; aData=" + JSON.stringify({url:aData}));
+    } else if (aTopic === "Webapps:AutoInstall") {
+      dump("Webapps.jsm: Webapps:AutoInstall: aSubject=" + JSON.stringify(aSubject) + "; aData=" + JSON.stringify({url:aData}));
 
       this._autoInstall(aData);
     }

@@ -289,8 +289,6 @@ var BrowserApp = {
 
     Services.obs.addObserver(this, "sessionstore-state-purge-complete", false);
 
-    Services.obs.addObserver(this, "SynthAPK:AppAdded", false);
-    Services.obs.addObserver(this, "SynthAPK:AppRemoved", false);
 
     function showFullScreenWarning() {
       NativeWindow.toast.show(Strings.browser.GetStringFromName("alertFullScreenToast"), "short");
