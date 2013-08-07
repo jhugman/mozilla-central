@@ -4,13 +4,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "ion/IonAnalysis.h"
+
 #include "jsanalyze.h"
 
-#include "ion/IonBuilder.h"
-#include "ion/MIRGraph.h"
 #include "ion/Ion.h"
-#include "ion/IonAnalysis.h"
+#include "ion/IonBuilder.h"
 #include "ion/LIR.h"
+#include "ion/MIRGraph.h"
 
 using namespace js;
 using namespace js::ion;
@@ -415,6 +416,10 @@ GuessPhiType(MPhi *phi)
             continue;
         }
         if (type != in->type()) {
+            // Ignore operands which we've never observed.
+            if (in->resultTypeSet() && in->resultTypeSet()->empty())
+                continue;
+
             // Specialize phis with int32 and double operands as double.
             if (IsNumberType(type) && IsNumberType(in->type()))
                 type = MIRType_Double;
@@ -519,6 +524,10 @@ TypeAnalyzer::adjustPhiInputs(MPhi *phi)
                 MToDouble *toDouble = MToDouble::New(in);
                 in->block()->insertBefore(in->block()->lastIns(), toDouble);
                 phi->replaceOperand(i, toDouble);
+            } else if (in->type() == MIRType_Value) {
+                MUnbox *unbox = MUnbox::New(in, MIRType_Double, MUnbox::Fallible);
+                in->block()->insertBefore(in->block()->lastIns(), unbox);
+                phi->replaceOperand(i, unbox);
             } else {
                 JS_ASSERT(in->type() == MIRType_Double);
             }
@@ -526,8 +535,26 @@ TypeAnalyzer::adjustPhiInputs(MPhi *phi)
         return;
     }
 
-    if (phiType != MIRType_Value)
+    // If we specialized a type that's not Value, either every input is of
+    // that type or the input's typeset was unobserved (i.e. the opcode hasn't
+    // been executed yet.) Be optimistic and insert unboxes.
+    if (phiType != MIRType_Value) {
+        for (size_t i = 0, e = phi->numOperands(); i < e; i++) {
+            MDefinition *in = phi->getOperand(i);
+            if (in->type() == phiType)
+                continue;
+
+            if (in->isBox() && in->toBox()->input()->type() == phiType) {
+                phi->replaceOperand(i, in->toBox()->input());
+            } else {
+                MUnbox *unbox = MUnbox::New(in, phiType, MUnbox::Fallible);
+                in->block()->insertBefore(in->block()->lastIns(), unbox);
+                phi->replaceOperand(i, unbox);
+            }
+        }
+
         return;
+    }
 
     // Box every typed input.
     for (size_t i = 0, e = phi->numOperands(); i < e; i++) {

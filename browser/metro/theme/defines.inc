@@ -19,6 +19,7 @@
 %define toolbar_vertical_spacing 5px
 %define toolbar_horizontal_spacing 20px
 %define toolbar_height 68px
+%define labelled_toolbar_height 90px
 %define tabs_height 178px
 %define findbar_height 54px
 
@@ -95,3 +96,8 @@
 % that the bars slide up after the keyboard is in place.
 %define appbar_keyboard_slideup_duration 750ms
 
+% minimum resolution cutoffs for displaying 1.4x and 1.8x versions of icons
+% XXX currently, there's some weirdness with the dppx unit, as documented in
+% bug 895277. Because of that, we have to use 1.39dppx instead of 1.4dppx.
+%define min_res_140pc 1.39dppx
+%define min_res_180pc 1.8dppx

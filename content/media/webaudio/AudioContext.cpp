@@ -160,7 +160,7 @@ AudioContext::CreateBuffer(JSContext* aJSContext, uint32_t aNumberOfChannels,
 }
 
 already_AddRefed<AudioBuffer>
-AudioContext::CreateBuffer(JSContext* aJSContext, ArrayBuffer& aBuffer,
+AudioContext::CreateBuffer(JSContext* aJSContext, const ArrayBuffer& aBuffer,
                           bool aMixToMono, ErrorResult& aRv)
 {
   // Do not accept this method unless the legacy pref has been set.
@@ -176,12 +176,13 @@ AudioContext::CreateBuffer(JSContext* aJSContext, ArrayBuffer& aBuffer,
                   aBuffer.Data(), aBuffer.Length(),
                   contentType);
 
-  WebAudioDecodeJob job(contentType, this);
+  nsRefPtr<WebAudioDecodeJob> job =
+    new WebAudioDecodeJob(contentType, this, aBuffer);
 
   if (mDecoder.SyncDecodeMedia(contentType.get(),
-                               aBuffer.Data(), aBuffer.Length(), job) &&
-      job.mOutput) {
-    nsRefPtr<AudioBuffer> buffer = job.mOutput.forget();
+                               aBuffer.Data(), aBuffer.Length(), *job) &&
+      job->mOutput) {
+    nsRefPtr<AudioBuffer> buffer = job->mOutput.forget();
     if (aMixToMono) {
       buffer->MixToMono(aJSContext);
     }
@@ -212,8 +213,13 @@ bool IsValidBufferSize(uint32_t aBufferSize) {
 }
 
 already_AddRefed<MediaStreamAudioDestinationNode>
-AudioContext::CreateMediaStreamDestination()
+AudioContext::CreateMediaStreamDestination(ErrorResult& aRv)
 {
+  if (mIsOffline) {
+    aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
+    return nullptr;
+  }
+
   nsRefPtr<MediaStreamAudioDestinationNode> node =
       new MediaStreamAudioDestinationNode(this);
   return node.forget();
@@ -374,8 +380,8 @@ AudioContext::DecodeAudioData(const ArrayBuffer& aBuffer,
   if (aFailureCallback.WasPassed()) {
     failureCallback = &aFailureCallback.Value();
   }
-  nsAutoPtr<WebAudioDecodeJob> job(
-    new WebAudioDecodeJob(contentType, this,
+  nsRefPtr<WebAudioDecodeJob> job(
+    new WebAudioDecodeJob(contentType, this, aBuffer,
                           &aSuccessCallback, failureCallback));
   mDecoder.AsyncDecodeMedia(contentType.get(),
                             aBuffer.Data(), aBuffer.Length(), *job);
@@ -400,6 +406,9 @@ void
 AudioContext::UnregisterPannerNode(PannerNode* aNode)
 {
   mPannerNodes.RemoveEntry(aNode);
+  if (mListener) {
+    mListener->UnregisterPannerNode(aNode);
+  }
 }
 
 void
@@ -462,10 +471,24 @@ GetHashtableElements(nsTHashtable<nsPtrHashKey<T> >& aHashtable, nsTArray<T*>& a
 }
 
 void
+AudioContext::ShutdownDecoder()
+{
+  mDecoder.Shutdown();
+}
+
+void
 AudioContext::Shutdown()
 {
   Suspend();
-  mDecoder.Shutdown();
+
+  // We need to hold the AudioContext object alive here to make sure that
+  // it doesn't get destroyed before our decoder shutdown runnable has had
+  // a chance to run.
+  nsCOMPtr<nsIRunnable> threadShutdownEvent =
+    NS_NewRunnableMethod(this, &AudioContext::ShutdownDecoder);
+  if (threadShutdownEvent) {
+    NS_DispatchToCurrentThread(threadShutdownEvent);
+  }
 
   // Stop all audio buffer source nodes, to make sure that they release
   // their self-references.

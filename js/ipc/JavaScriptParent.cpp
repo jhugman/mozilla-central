@@ -436,7 +436,7 @@ JavaScriptParent::call(JSContext *cx, HandleObject proxy, const CallArgs &args)
             return false;
 
         JSObject *obj = &outobjects[i].toObject();
-        if (!JS_SetProperty(cx, obj, "value", v.address()))
+        if (!JS_SetProperty(cx, obj, "value", v))
             return false;
     }
 
@@ -494,14 +494,11 @@ CPOWProxyHandler::finalize(JSFreeOp *fop, JSObject *proxy)
 void
 JavaScriptParent::drop(JSObject *obj)
 {
-    if (inactive_)
-        return;
-
     ObjectId objId = idOf(obj);
 
     objects_.remove(objId);
-    if (!SendDropObject(objId))
-        MOZ_CRASH();
+    if (!inactive_ && !SendDropObject(objId))
+        (void)0;
     decref();
 }
 
@@ -517,7 +514,8 @@ JavaScriptParent::init()
 bool
 JavaScriptParent::makeId(JSContext *cx, JSObject *obj, ObjectId *idp)
 {
-    if (!IsProxy(obj) || GetProxyHandler(obj) != &CPOWProxyHandler::singleton) {
+    obj = js::CheckedUnwrap(obj, false);
+    if (!obj || !IsProxy(obj) || GetProxyHandler(obj) != &CPOWProxyHandler::singleton) {
         JS_ReportError(cx, "cannot ipc non-cpow object");
         return false;
     }
@@ -565,12 +563,14 @@ JavaScriptParent::unwrap(JSContext *cx, ObjectId objId)
 
     bool callable = !!(objId & OBJECT_IS_CALLABLE);
 
+    RootedObject global(cx, JS::CurrentGlobalOrNull(cx));
+
     RootedValue v(cx, UndefinedValue());
     JSObject *obj = NewProxyObject(cx,
                                    &CPOWProxyHandler::singleton,
                                    v,
                                    NULL,
-                                   NULL,
+                                   global,
                                    callable ? ProxyIsCallable : ProxyNotCallable);
     if (!obj)
         return NULL;
@@ -656,4 +656,25 @@ JavaScriptParent::instanceOf(JSObject *obj, const nsID *id, bool *bp)
         return NS_ERROR_UNEXPECTED;
 
     return NS_OK;
+}
+
+/* static */ bool
+JavaScriptParent::DOMInstanceOf(JSObject *obj, int prototypeID, int depth, bool *bp)
+{
+    return ParentOf(obj)->domInstanceOf(obj, prototypeID, depth, bp);
+}
+
+bool
+JavaScriptParent::domInstanceOf(JSObject *obj, int prototypeID, int depth, bool *bp)
+{
+    ObjectId objId = idOf(obj);
+
+    ReturnStatus status;
+    if (!CallDOMInstanceOf(objId, prototypeID, depth, &status, bp))
+        return false;
+
+    if (!status.ok())
+        return false;
+
+    return true;
 }

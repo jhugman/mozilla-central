@@ -269,6 +269,8 @@ public:
   void ScheduleSyntheticMouseMove();
   static void ScrollActivityCallback(nsITimer *aTimer, void* anInstance);
 
+  void HandleScrollbarStyleSwitching();
+
   // owning references to the nsIAnonymousContentCreator-built content
   nsCOMPtr<nsIContent> mHScrollbarContent;
   nsCOMPtr<nsIContent> mVScrollbarContent;
@@ -285,7 +287,7 @@ public:
   nsIFrame* mResizerBox;
   nsContainerFrame* mOuter;
   nsRefPtr<AsyncScroll> mAsyncScroll;
-  nsCOMPtr<ScrollbarActivity> mScrollbarActivity;
+  nsRefPtr<ScrollbarActivity> mScrollbarActivity;
   nsTArray<nsIScrollPositionListener*> mListeners;
   nsRect mScrollPort;
   // Where we're currently scrolling to, if we're scrolling asynchronously.
@@ -495,6 +497,9 @@ public:
           nsRenderingContext* aRC) MOZ_OVERRIDE {
     nsBoxLayoutState bls(aPresContext, aRC, 0);
     return mInner.GetNondisappearingScrollbarWidth(&bls);
+  }
+  virtual nsRect GetScrolledRect() const MOZ_OVERRIDE {
+    return mInner.GetScrolledRect();
   }
   virtual nsRect GetScrollPortRect() const MOZ_OVERRIDE {
     return mInner.GetScrollPortRect();
@@ -761,6 +766,9 @@ public:
           nsRenderingContext* aRC) MOZ_OVERRIDE {
     nsBoxLayoutState bls(aPresContext, aRC, 0);
     return mInner.GetNondisappearingScrollbarWidth(&bls);
+  }
+  virtual nsRect GetScrolledRect() const MOZ_OVERRIDE {
+    return mInner.GetScrolledRect();
   }
   virtual nsRect GetScrollPortRect() const MOZ_OVERRIDE {
     return mInner.GetScrollPortRect();

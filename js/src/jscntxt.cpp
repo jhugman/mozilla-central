@@ -8,25 +8,21 @@
  * JS execution context.
  */
 
-#include "jscntxt.h"
+#include "jscntxtinlines.h"
+
+#include "mozilla/DebugOnly.h"
+#include "mozilla/MemoryReporting.h"
+#include "mozilla/Util.h"
 
 #include <locale.h>
 #include <stdarg.h>
 #include <string.h>
-
-#include "mozilla/DebugOnly.h"
-
 #ifdef ANDROID
 # include <android/log.h>
 # include <fstream>
 # include <string>
 #endif  // ANDROID
 
-#include "mozilla/MemoryReporting.h"
-#include "mozilla/Util.h"
-
-#include "jstypes.h"
-#include "jsprf.h"
 #include "jsatom.h"
 #include "jscompartment.h"
 #include "jsdbgapi.h"
@@ -37,21 +33,22 @@
 #include "jsmath.h"
 #include "jsobj.h"
 #include "jsopcode.h"
+#include "jsprf.h"
 #include "jspubtd.h"
 #include "jsscript.h"
 #include "jsstr.h"
+#include "jstypes.h"
 #include "jsworkers.h"
+
+#include "gc/Marking.h"
 #ifdef JS_ION
 #include "ion/Ion.h"
 #endif
-
-#include "gc/Marking.h"
 #include "js/CharacterEncoding.h"
 #include "js/MemoryMetrics.h"
 #include "vm/Shape.h"
 #include "yarr/BumpPointerAllocator.h"
 
-#include "jscntxtinlines.h"
 #include "jsobjinlines.h"
 
 #include "vm/Stack-inl.h"
@@ -214,7 +211,7 @@ js::NewContext(JSRuntime *rt, size_t stackChunkSize)
     }
 
     JSContextCallback cxCallback = rt->cxCallback;
-    if (cxCallback && !cxCallback(cx, JSCONTEXT_NEW)) {
+    if (cxCallback && !cxCallback(cx, JSCONTEXT_NEW, rt->cxCallbackData)) {
         DestroyContext(cx, DCM_NEW_FAILED);
         return NULL;
     }
@@ -244,7 +241,8 @@ js::DestroyContext(JSContext *cx, DestroyContextMode mode)
              * JSCONTEXT_DESTROY callback is not allowed to fail and must
              * return true.
              */
-            JS_ALWAYS_TRUE(cxCallback(cx, JSCONTEXT_DESTROY));
+            JS_ALWAYS_TRUE(cxCallback(cx, JSCONTEXT_DESTROY,
+                                      rt->cxCallbackData));
         }
     }
 
@@ -260,9 +258,10 @@ js::DestroyContext(JSContext *cx, DestroyContextMode mode)
         for (CompartmentsIter c(rt); !c.done(); c.next())
             c->types.print(cx, false);
 
-        /* Off thread ion compilations depend on atoms still existing. */
+        /* Off thread compilation and parsing depend on atoms still existing. */
         for (CompartmentsIter c(rt); !c.done(); c.next())
             CancelOffThreadIonCompile(c, NULL);
+        WaitForOffThreadParsingToFinish(rt);
 
         /* Unpin all common names before final GC. */
         FinishCommonNames(rt);
@@ -362,7 +361,7 @@ PopulateReportBlame(JSContext *cx, JSErrorReport *report)
 
     report->filename = iter.script()->filename();
     report->lineno = PCToLineNumber(iter.script(), iter.pc(), &report->column);
-    report->originPrincipals = iter.script()->originPrincipals;
+    report->originPrincipals = iter.script()->originPrincipals();
 }
 
 /*
@@ -405,6 +404,18 @@ js_ReportOutOfMemory(ThreadSafeContext *cxArg)
         AutoSuppressGC suppressGC(cx);
         onError(cx, msg, &report);
     }
+
+    /*
+     * We would like to enforce the invariant that any exception reported
+     * during an OOM situation does not require wrapping. Besides avoiding
+     * allocation when memory is low, this reduces the number of places where
+     * we might need to GC.
+     *
+     * When JS code is running, we set the pending exception to an atom, which
+     * does not need wrapping. If no JS code is running, no exception should be
+     * set at all.
+     */
+    JS_ASSERT(!cx->isExceptionPending());
 }
 
 JS_FRIEND_API(void)
@@ -521,7 +532,7 @@ js::ReportUsageError(JSContext *cx, HandleObject callee, const char *msg)
     JS_ASSERT(shape->hasDefaultGetter());
 
     RootedValue usage(cx);
-    if (!JS_LookupProperty(cx, callee, "usage", usage.address()))
+    if (!JS_LookupProperty(cx, callee, "usage", &usage))
         return;
 
     if (JSVAL_IS_VOID(usage)) {
@@ -1022,19 +1033,19 @@ js_InvokeOperationCallback(JSContext *cx)
     return !cb || cb(cx);
 }
 
-JSBool
+bool
 js_HandleExecutionInterrupt(JSContext *cx)
 {
-    JSBool result = JS_TRUE;
     if (cx->runtime()->interrupt)
-        result = js_InvokeOperationCallback(cx) && result;
-    return result;
+        return js_InvokeOperationCallback(cx);
+    return true;
 }
 
 js::ThreadSafeContext::ThreadSafeContext(JSRuntime *rt, PerThreadData *pt, ContextKind kind)
   : ContextFriendFields(rt),
     contextKind_(kind),
-    perThreadData(pt)
+    perThreadData(pt),
+    allocator_(NULL)
 { }
 
 bool
@@ -1058,7 +1069,6 @@ JSContext::JSContext(JSRuntime *rt)
     reportGranularity(JS_DEFAULT_JITREPORT_GRANULARITY),
     resolvingList(NULL),
     generatingError(false),
-    enterCompartmentDepth_(0),
     savedFrameChains_(),
     defaultCompartmentObject_(NULL),
     cycleDetectorSet(MOZ_THIS_IN_INITIALIZER_LIST()),
@@ -1101,7 +1111,7 @@ JSContext::wrapPendingException()
 {
     RootedValue value(this, getPendingException());
     clearPendingException();
-    if (compartment()->wrap(this, &value))
+    if (!IsAtomsCompartment(compartment()) && compartment()->wrap(this, &value))
         setPendingException(value);
 }
 
@@ -1138,14 +1148,9 @@ JSContext::saveFrameChain()
     if (Activation *act = mainThread().activation())
         act->saveFrameChain();
 
-    if (defaultCompartmentObject_)
-        setCompartment(defaultCompartmentObject_->compartment());
-    else
-        setCompartment(NULL);
+    setCompartment(NULL);
     enterCompartmentDepth_ = 0;
 
-    if (isExceptionPending())
-        wrapPendingException();
     return true;
 }
 
@@ -1299,7 +1304,7 @@ JS::AutoCheckRequestDepth::AutoCheckRequestDepth(JSContext *cx)
     : cx(cx)
 {
     JS_ASSERT(cx->runtime()->requestDepth || cx->runtime()->isHeapBusy());
-    cx->runtime()->assertValidThread();
+    JS_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
     cx->runtime()->checkRequestDepth++;
 }
 
@@ -1308,7 +1313,7 @@ JS::AutoCheckRequestDepth::AutoCheckRequestDepth(ContextFriendFields *cxArg)
 {
     if (cx) {
         JS_ASSERT(cx->runtime()->requestDepth || cx->runtime()->isHeapBusy());
-        cx->runtime()->assertValidThread();
+        JS_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
         cx->runtime()->checkRequestDepth++;
     }
 }

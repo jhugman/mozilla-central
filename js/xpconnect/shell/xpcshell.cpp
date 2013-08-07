@@ -139,6 +139,7 @@ FILE *gErrFile = NULL;
 FILE *gInFile = NULL;
 
 int gExitCode = 0;
+bool gIgnoreReportedErrors = false;
 JSBool gQuitting = false;
 static JSBool reportWarnings = true;
 static JSBool compileOnly = false;
@@ -264,97 +265,6 @@ GetLine(JSContext *cx, char *bufp, FILE *file, const char *prompt) {
         strcpy(bufp, line);
     }
     return true;
-}
-
-static void
-my_ErrorReporter(JSContext *cx, const char *message, JSErrorReport *report)
-{
-    int i, j, k, n;
-    char *prefix = NULL, *tmp;
-    const char *ctmp;
-    nsCOMPtr<nsIXPConnect> xpc;
-
-    // Don't report an exception from inner JS frames as the callers may intend
-    // to handle it.
-    if (JS_DescribeScriptedCaller(cx, nullptr, nullptr)) {
-        return;
-    }
-
-    // In some cases cx->fp is null here so use XPConnect to tell us about inner
-    // frames.
-    if ((xpc = do_GetService(nsIXPConnect::GetCID()))) {
-        nsAXPCNativeCallContext *cc = nullptr;
-        xpc->GetCurrentNativeCallContext(&cc);
-        if (cc) {
-            nsAXPCNativeCallContext *prev = cc;
-            while (NS_SUCCEEDED(prev->GetPreviousCallContext(&prev)) && prev) {
-                uint16_t lang;
-                if (NS_SUCCEEDED(prev->GetLanguage(&lang)) &&
-                    lang == nsAXPCNativeCallContext::LANG_JS) {
-                    return;
-                }
-            }
-        }
-    }
-
-    if (!report) {
-        fprintf(gErrFile, "%s\n", message);
-        return;
-    }
-
-    /* Conditionally ignore reported warnings. */
-    if (JSREPORT_IS_WARNING(report->flags) && !reportWarnings)
-        return;
-
-    if (report->filename)
-        prefix = JS_smprintf("%s:", report->filename);
-    if (report->lineno) {
-        tmp = prefix;
-        prefix = JS_smprintf("%s%u: ", tmp ? tmp : "", report->lineno);
-        JS_free(cx, tmp);
-    }
-    if (JSREPORT_IS_WARNING(report->flags)) {
-        tmp = prefix;
-        prefix = JS_smprintf("%s%swarning: ",
-                             tmp ? tmp : "",
-                             JSREPORT_IS_STRICT(report->flags) ? "strict " : "");
-        JS_free(cx, tmp);
-    }
-
-    /* embedded newlines -- argh! */
-    while ((ctmp = strchr(message, '\n')) != 0) {
-        ctmp++;
-        if (prefix) fputs(prefix, gErrFile);
-        fwrite(message, 1, ctmp - message, gErrFile);
-        message = ctmp;
-    }
-    /* If there were no filename or lineno, the prefix might be empty */
-    if (prefix)
-        fputs(prefix, gErrFile);
-    fputs(message, gErrFile);
-
-    if (!report->linebuf) {
-        fputc('\n', gErrFile);
-        goto out;
-    }
-
-    fprintf(gErrFile, ":\n%s%s\n%s", prefix, report->linebuf, prefix);
-    n = report->tokenptr - report->linebuf;
-    for (i = j = 0; i < n; i++) {
-        if (report->linebuf[i] == '\t') {
-            for (k = (j + 8) & ~7; j < k; j++) {
-                fputc('.', gErrFile);
-            }
-            continue;
-        }
-        fputc('.', gErrFile);
-        j++;
-    }
-    fputs("^\n", gErrFile);
- out:
-    if (!JSREPORT_IS_WARNING(report->flags))
-        gExitCode = EXITCODE_RUNTIME_ERROR;
-    JS_free(cx, prefix);
 }
 
 static JSBool
@@ -516,6 +426,21 @@ Quit(JSContext *cx, unsigned argc, jsval *vp)
     gQuitting = true;
 //    exit(0);
     return false;
+}
+
+// Provide script a way to disable the xpcshell error reporter, preventing
+// reported errors from being logged to the console and also from affecting the
+// exit code returned by the xpcshell binary.
+static JSBool
+IgnoreReportedErrors(JSContext *cx, unsigned argc, jsval *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    if (argc != 1 || !args[0].isBoolean()) {
+        JS_ReportError(cx, "Bad arguments");
+        return false;
+    }
+    gIgnoreReportedErrors = args[0].toBoolean();
+    return true;
 }
 
 static JSBool
@@ -836,7 +761,7 @@ Blob(JSContext *cx, unsigned argc, jsval *vp)
     return false;
   }
 
-  JSObject* global = JS_GetGlobalForScopeChain(cx);
+  JSObject* global = JS::CurrentGlobalOrNull(cx);
   rv = xpc->WrapNativeToJSVal(cx, global, native, nullptr,
                               &NS_GET_IID(nsISupports), true,
                               args.rval().address(), nullptr);
@@ -875,7 +800,7 @@ File(JSContext *cx, unsigned argc, jsval *vp)
     return false;
   }
 
-  JSObject* global = JS_GetGlobalForScopeChain(cx);
+  JSObject* global = JS::CurrentGlobalOrNull(cx);
   rv = xpc->WrapNativeToJSVal(cx, global, native, nullptr,
                               &NS_GET_IID(nsISupports), true,
                               args.rval().address(), nullptr);
@@ -887,11 +812,74 @@ File(JSContext *cx, unsigned argc, jsval *vp)
   return true;
 }
 
+Value sScriptedOperationCallback = UndefinedValue();
+
+static JSBool
+XPCShellOperationCallback(JSContext *cx)
+{
+    // If no operation callback was set by script, no-op.
+    if (sScriptedOperationCallback.isUndefined())
+        return true;
+
+    JSAutoCompartment ac(cx, &sScriptedOperationCallback.toObject());
+    RootedValue rv(cx);
+    if (!JS_CallFunctionValue(cx, nullptr, sScriptedOperationCallback,
+                              0, nullptr, rv.address()) || !rv.isBoolean())
+    {
+        NS_WARNING("Scripted operation callback failed! Terminating script.");
+        JS_ClearPendingException(cx);
+        return false;
+    }
+
+    return rv.toBoolean();
+}
+
+static JSBool
+SetOperationCallback(JSContext *cx, unsigned argc, jsval *vp)
+{
+    // Sanity-check args.
+    JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+    if (args.length() != 1) {
+        JS_ReportError(cx, "Wrong number of arguments");
+        return false;
+    }
+
+    // Allow callers to remove the operation callback by passing undefined.
+    if (args[0].isUndefined()) {
+        sScriptedOperationCallback = UndefinedValue();
+        return true;
+    }
+
+    // Otherwise, we should have a callable object.
+    if (!args[0].isObject() || !JS_ObjectIsCallable(cx, &args[0].toObject())) {
+        JS_ReportError(cx, "Argument must be callable");
+        return false;
+    }
+
+    sScriptedOperationCallback = args[0];
+
+    return true;
+}
+
+static JSBool
+SimulateActivityCallback(JSContext *cx, unsigned argc, jsval *vp)
+{
+    // Sanity-check args.
+    JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+    if (args.length() != 1 || !args[0].isBoolean()) {
+        JS_ReportError(cx, "Wrong number of arguments");
+        return false;
+    }
+    xpc::SimulateActivityCallback(args[0].toBoolean());
+    return true;
+}
+
 static const JSFunctionSpec glob_functions[] = {
     JS_FS("print",           Print,          0,0),
     JS_FS("readline",        ReadLine,       1,0),
     JS_FS("load",            Load,           1,0),
     JS_FS("quit",            Quit,           0,0),
+    JS_FS("ignoreReportedErrors", IgnoreReportedErrors, 1,0),
     JS_FS("version",         Version,        1,0),
     JS_FS("build",           BuildDate,      0,0),
     JS_FS("dumpXPC",         DumpXPC,        1,0),
@@ -910,6 +898,8 @@ static const JSFunctionSpec glob_functions[] = {
     JS_FS("btoa",            Btoa,           1,0),
     JS_FS("Blob",            Blob,           2,JSFUN_CONSTRUCTOR),
     JS_FS("File",            File,           2,JSFUN_CONSTRUCTOR),
+    JS_FS("setOperationCallback", SetOperationCallback, 1,0),
+    JS_FS("simulateActivityCallback", SimulateActivityCallback, 1,0),
     JS_FS_END
 };
 
@@ -1378,6 +1368,7 @@ ProcessArgs(JSContext *cx, JS::Handle<JSObject*> obj, char **argv, int argc, XPC
 
     if (filename || isInteractive)
         Process(cx, obj, filename, forceTTY);
+
     return gExitCode;
 }
 
@@ -1459,17 +1450,25 @@ nsXPCFunctionThisTranslator::TranslateThis(nsISupports *aInitialThis,
 
 #endif
 
-// ContextCallback calls are chained
-static JSContextCallback gOldJSContextCallback;
+void
+XPCShellErrorReporter(JSContext *cx, const char *message, JSErrorReport *rep)
+{
+    if (gIgnoreReportedErrors)
+        return;
 
-static JSBool
+    if (!JSREPORT_IS_WARNING(rep->flags))
+        gExitCode = EXITCODE_RUNTIME_ERROR;
+
+    // Delegate to the system error reporter for heavy lifting.
+    xpc::SystemErrorReporterExternal(cx, message, rep);
+}
+
+static bool
 ContextCallback(JSContext *cx, unsigned contextOp)
 {
-    if (gOldJSContextCallback && !gOldJSContextCallback(cx, contextOp))
-        return false;
-
     if (contextOp == JSCONTEXT_NEW) {
-        JS_SetErrorReporter(cx, my_ErrorReporter);
+        JS_SetErrorReporter(cx, XPCShellErrorReporter);
+        JS_SetOperationCallback(cx, XPCShellOperationCallback);
     }
     return true;
 }
@@ -1641,7 +1640,7 @@ main(int argc, char **argv, char **envp)
             return 1;
         }
 
-        gOldJSContextCallback = JS_SetContextCallback(rt, ContextCallback);
+        rtsvc->RegisterContextCallback(ContextCallback);
 
         cx = JS_NewContext(rt, 8192);
         if (!cx) {
@@ -1753,7 +1752,9 @@ main(int argc, char **argv, char **envp)
             JS_DefineProperty(cx, glob, "__LOCATION__", JSVAL_VOID,
                               GetLocationProperty, NULL, 0);
 
+            JS_AddValueRoot(cx, &sScriptedOperationCallback);
             result = ProcessArgs(cx, glob, argv, argc, &dirprovider);
+            JS_RemoveValueRoot(cx, &sScriptedOperationCallback);
 
             JS_DropPrincipals(rt, gJSPrincipals);
             JS_SetAllNonReservedSlotsToUndefined(cx, glob);
@@ -1943,24 +1944,26 @@ XPCShellDirProvider::GetFiles(const char *prop, nsISimpleEnumerator* *result)
         }
         return NS_ERROR_FAILURE;
     } else if (!strcmp(prop, NS_APP_PLUGINS_DIR_LIST)) {
-        nsCOMPtr<nsIFile> file;
         nsCOMArray<nsIFile> dirs;
-        bool exists;
-        // We have to add this path, buildbot copies the test plugin directory
-        // to (app)/bin when unpacking test zips.
-        if (mGREDir) {
-            mGREDir->Clone(getter_AddRefs(file));
-            if (NS_SUCCEEDED(mGREDir->Clone(getter_AddRefs(file)))) {
-                file->AppendNative(NS_LITERAL_CSTRING("plugins"));
-                if (NS_SUCCEEDED(file->Exists(&exists)) && exists) {
-                    dirs.AppendObject(file);
-                }
-            }
-        }
         // Add the test plugin location passed in by the caller or through
         // runxpcshelltests.
         if (mPluginDir) {
             dirs.AppendObject(mPluginDir);
+        // If there was no path specified, default to the one set up by automation
+        } else {
+            nsCOMPtr<nsIFile> file;
+            bool exists;
+            // We have to add this path, buildbot copies the test plugin directory
+            // to (app)/bin when unpacking test zips.
+            if (mGREDir) {
+                mGREDir->Clone(getter_AddRefs(file));
+                if (NS_SUCCEEDED(mGREDir->Clone(getter_AddRefs(file)))) {
+                    file->AppendNative(NS_LITERAL_CSTRING("plugins"));
+                    if (NS_SUCCEEDED(file->Exists(&exists)) && exists) {
+                        dirs.AppendObject(file);
+                    }
+                }
+            }
         }
         return NS_NewArrayEnumerator(result, dirs);
     }

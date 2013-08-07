@@ -11,6 +11,8 @@ include $(DEPTH)/config/autoconf.mk
 
 LIBRARY_NAME		= widget_winrt
 EXPORT_LIBRARY	= 1
+IS_COMPONENT		= 1
+MODULE_NAME			= WidgetWinRTModule
 LIBXUL_LIBRARY	= 1
 
 DEFINES		+= -DMOZ_UNICODE
@@ -35,19 +37,12 @@ LOCAL_INCLUDES	= \
 		-I$(topsrcdir)/xpcom/base \
 		$(NULL)
 
-FORCE_STATIC_LIB = 1
-
 include $(topsrcdir)/config/config.mk
-include $(topsrcdir)/ipc/chromium/chromium-config.mk
 
 MIDL_GENERATED_FILES = \
 	UIABridge_i.c \
 	UIABridge_p.c \
 	dlldata.c \
-	$(NULL)
-
-EXTRA_COMPONENTS = MetroUIUtils.js \
-	MetroUIUtils.manifest \
 	$(NULL)
 
 GARBAGE += $(MIDL_GENERATED_FILES) done_gen
@@ -59,5 +54,6 @@ do_interfaces_gen: UIABridge.idl
 export:: do_interfaces_gen
 
 include $(topsrcdir)/config/rules.mk
+include $(topsrcdir)/ipc/chromium/chromium-config.mk
 
 CXXFLAGS += $(MOZ_CAIRO_CFLAGS)

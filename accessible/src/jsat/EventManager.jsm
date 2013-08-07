@@ -156,11 +156,12 @@ this.EventManager.prototype = {
           QueryInterface(Ci.nsIAccessibleVirtualCursorChangeEvent);
         let reason = event.reason;
 
-        if (this.editState.editing)
+        if (this.editState.editing) {
           aEvent.accessibleDocument.takeFocus();
-
+        }
         this.present(
-          Presentation.pivotChanged(position, event.oldAccessible, reason));
+          Presentation.pivotChanged(position, event.oldAccessible, reason,
+                                    pivot.startOffset, pivot.endOffset));
 
         break;
       }
@@ -211,6 +212,9 @@ this.EventManager.prototype = {
             editState.atEnd != this.editState.atEnd ||
             editState.atStart != this.editState.atStart)
           this.sendMsgFunc("AccessFu:Input", editState);
+
+        this.present(Presentation.textSelectionChanged(acc.getText(0,-1),
+                     caretOffset, caretOffset, 0, 0, aEvent.isFromUserInput));
 
         this.editState = editState;
         break;

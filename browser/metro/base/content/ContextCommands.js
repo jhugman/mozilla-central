@@ -68,6 +68,8 @@ var ContextCommands = {
 
         SelectionHelperUI.closeEditSession(true);
       }
+    } else if (ContextMenuUI.popupState.string) {
+      this.clipboard.copyString(ContextMenuUI.popupState.string, this.docRef);
     } else {
       // chrome
       target.editor.copy();
@@ -161,7 +163,7 @@ var ContextCommands = {
 
   openLinkInNewTab: function cc_openLinkInNewTab() {
     Browser.addTab(ContextMenuUI.popupState.linkURL, false, Browser.selectedTab);
-    ContextUI.peekTabs();
+    ContextUI.peekTabs(kOpenInNewTabAnimationDelayMsec);
   },
 
   copyLink: function cc_copyLink() {

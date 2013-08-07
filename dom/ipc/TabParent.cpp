@@ -41,6 +41,9 @@
 #include "nsIURI.h"
 #include "nsIMozBrowserFrame.h"
 #include "nsIScriptSecurityManager.h"
+#include "nsIWebBrowserChrome.h"
+#include "nsIXULBrowserWindow.h"
+#include "nsIXULWindow.h"
 #include "nsViewManager.h"
 #include "nsIWidget.h"
 #include "nsIWindowWatcher.h"
@@ -52,6 +55,7 @@
 #include "nsThreadUtils.h"
 #include "private/pprio.h"
 #include "StructuredCloneUtils.h"
+#include "JavaScriptParent.h"
 #include "TabChild.h"
 #include <algorithm>
 
@@ -62,6 +66,7 @@ using namespace mozilla::layout;
 using namespace mozilla::services;
 using namespace mozilla::widget;
 using namespace mozilla::dom::indexedDB;
+using namespace mozilla::jsipc;
 
 // The flags passed by the webProgress notifications are 16 bits shifted
 // from the ones registered by webProgressListeners.
@@ -215,7 +220,7 @@ TabParent::~TabParent()
 }
 
 void
-TabParent::SetOwnerElement(nsIDOMElement* aElement)
+TabParent::SetOwnerElement(Element* aElement)
 {
   mFrameElement = aElement;
   TryCacheDPIAndScale();
@@ -314,7 +319,8 @@ TabParent::RecvMoveFocus(const bool& aForward)
     nsCOMPtr<nsIDOMElement> dummy;
     uint32_t type = aForward ? uint32_t(nsIFocusManager::MOVEFOCUS_FORWARD)
                              : uint32_t(nsIFocusManager::MOVEFOCUS_BACKWARD);
-    fm->MoveFocus(nullptr, mFrameElement, type, nsIFocusManager::FLAG_BYKEY, 
+    nsCOMPtr<nsIDOMElement> frame = do_QueryInterface(mFrameElement);
+    fm->MoveFocus(nullptr, frame, type, nsIFocusManager::FLAG_BYKEY,
                   getter_AddRefs(dummy));
   }
   return true;
@@ -708,18 +714,22 @@ TabParent::TryCapture(const nsGUIEvent& aEvent)
 bool
 TabParent::RecvSyncMessage(const nsString& aMessage,
                            const ClonedMessageData& aData,
+                           const InfallibleTArray<CpowEntry>& aCpows,
                            InfallibleTArray<nsString>* aJSONRetVal)
 {
   StructuredCloneData cloneData = ipc::UnpackClonedMessageDataForParent(aData);
-  return ReceiveMessage(aMessage, true, &cloneData, aJSONRetVal);
+  CpowIdHolder cpows(static_cast<ContentParent*>(Manager())->GetCPOWManager(), aCpows);
+  return ReceiveMessage(aMessage, true, &cloneData, &cpows, aJSONRetVal);
 }
 
 bool
 TabParent::RecvAsyncMessage(const nsString& aMessage,
-                                  const ClonedMessageData& aData)
+                            const ClonedMessageData& aData,
+                            const InfallibleTArray<CpowEntry>& aCpows)
 {
   StructuredCloneData cloneData = ipc::UnpackClonedMessageDataForParent(aData);
-  return ReceiveMessage(aMessage, false, &cloneData, nullptr);
+  CpowIdHolder cpows(static_cast<ContentParent*>(Manager())->GetCPOWManager(), aCpows);
+  return ReceiveMessage(aMessage, false, &cloneData, &cpows, nullptr);
 }
 
 bool
@@ -737,6 +747,42 @@ TabParent::RecvSetBackgroundColor(const nscolor& aColor)
 {
   if (RenderFrameParent* frame = GetRenderFrame()) {
     frame->SetBackgroundColor(aColor);
+  }
+  return true;
+}
+
+bool
+TabParent::RecvSetStatus(const uint32_t& aType, const nsString& aStatus)
+{
+  nsCOMPtr<nsIContent> frame = do_QueryInterface(mFrameElement);
+  if (frame) {
+    nsCOMPtr<nsISupports> container = frame->OwnerDoc()->GetContainer();
+    if (!container)
+      return true;
+    nsCOMPtr<nsIDocShell> docShell = do_QueryInterface(container);
+    if (!docShell)
+      return true;
+    nsCOMPtr<nsIDocShellTreeOwner> treeOwner;
+    docShell->GetTreeOwner(getter_AddRefs(treeOwner));
+    if (!treeOwner)
+      return true;
+
+    nsCOMPtr<nsIXULWindow> window = do_GetInterface(treeOwner);
+    if (window) {
+      nsCOMPtr<nsIXULBrowserWindow> xulBrowserWindow;
+      window->GetXULBrowserWindow(getter_AddRefs(xulBrowserWindow));
+      if (xulBrowserWindow) {
+        switch (aType)
+        {
+        case nsIWebBrowserChrome::STATUS_SCRIPT:
+          xulBrowserWindow->SetJSStatus(aStatus);
+          break;
+        case nsIWebBrowserChrome::STATUS_LINK:
+          xulBrowserWindow->SetOverLink(aStatus, nullptr);
+          break;
+        }
+      }
+    }
   }
   return true;
 }
@@ -1084,26 +1130,19 @@ bool
 TabParent::ReceiveMessage(const nsString& aMessage,
                           bool aSync,
                           const StructuredCloneData* aCloneData,
+                          CpowHolder* aCpows,
                           InfallibleTArray<nsString>* aJSONRetVal)
 {
   nsRefPtr<nsFrameLoader> frameLoader = GetFrameLoader();
   if (frameLoader && frameLoader->GetFrameMessageManager()) {
     nsRefPtr<nsFrameMessageManager> manager =
       frameLoader->GetFrameMessageManager();
-    AutoSafeJSContext ctx;
-    uint32_t len = 0; //TODO: obtain a real value in bug 572685
-    // Because we want JS messages to have always the same properties,
-    // create array even if len == 0.
-    JS::Rooted<JSObject*> objectsArray(ctx, JS_NewArrayObject(ctx, len, NULL));
-    if (!objectsArray) {
-      return false;
-    }
 
     manager->ReceiveMessage(mFrameElement,
                             aMessage,
                             aSync,
                             aCloneData,
-                            objectsArray,
+                            aCpows,
                             aJSONRetVal);
   }
   return true;
@@ -1243,9 +1282,8 @@ TabParent::HandleDelayedDialogs()
 {
   nsCOMPtr<nsIWindowWatcher> ww = do_GetService(NS_WINDOWWATCHER_CONTRACTID);
   nsCOMPtr<nsIDOMWindow> window;
-  nsCOMPtr<nsIContent> frame = do_QueryInterface(mFrameElement);
-  if (frame) {
-    window = do_QueryInterface(frame->OwnerDoc()->GetWindow());
+  if (mFrameElement) {
+    window = do_QueryInterface(mFrameElement->OwnerDoc()->GetWindow());
   }
   nsCOMPtr<nsIDialogCreator> dialogCreator = do_QueryInterface(mBrowserDOMWindow);
   while (!ShouldDelayDialogs() && mDelayedDialogs.Length()) {
@@ -1256,9 +1294,10 @@ TabParent::HandleDelayedDialogs()
     params.swap(data->mParams);
     PContentDialogParent* dialog = data->mDialog;
     if (dialogCreator) {
+      nsCOMPtr<nsIDOMElement> frame = do_QueryInterface(mFrameElement);
       dialogCreator->OpenDialog(data->mType,
                                 data->mName, data->mFeatures,
-                                params, mFrameElement);
+                                params, frame);
     } else if (ww) {
       nsAutoCString url;
       if (data->mType) {
@@ -1287,7 +1326,7 @@ TabParent::HandleDelayedDialogs()
     }
   }
   if (ShouldDelayDialogs() && mDelayedDialogs.Length()) {
-    nsContentUtils::DispatchTrustedEvent(frame->OwnerDoc(), frame,
+    nsContentUtils::DispatchTrustedEvent(mFrameElement->OwnerDoc(), mFrameElement,
                                          NS_LITERAL_STRING("MozDelayedModalDialog"),
                                          true, true);
   }
@@ -1389,11 +1428,7 @@ TabParent::TryCacheDPIAndScale()
   if (!widget && mFrameElement) {
     // Even if we don't have a widget (e.g. because we're display:none), there's
     // probably a widget somewhere in the hierarchy our frame element lives in.
-    nsCOMPtr<nsIDOMDocument> ownerDoc;
-    mFrameElement->GetOwnerDocument(getter_AddRefs(ownerDoc));
-
-    nsCOMPtr<nsIDocument> doc = do_QueryInterface(ownerDoc);
-    widget = nsContentUtils::WidgetForDocument(doc);
+    widget = nsContentUtils::WidgetForDocument(mFrameElement->OwnerDoc());
   }
 
   if (widget) {

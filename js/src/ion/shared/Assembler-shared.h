@@ -7,14 +7,14 @@
 #ifndef ion_shared_Assembler_shared_h
 #define ion_shared_Assembler_shared_h
 
-#include <limits.h>
-
-#include "mozilla/DebugOnly.h"
 #include "mozilla/PodOperations.h"
+
+#include <limits.h>
 
 #include "ion/IonAllocPolicy.h"
 #include "ion/Registers.h"
 #include "ion/RegisterSets.h"
+
 #if defined(JS_CPU_X64) || defined(JS_CPU_ARM)
 // JS_SMALL_BRANCH means the range on a branch instruction
 // is smaller than the whole address space
@@ -201,17 +201,14 @@ struct LabelBase
 
     // Disallow assignment.
     void operator =(const LabelBase &label);
-    static int id_count;
   public:
-    mozilla::DebugOnly <int> id;
     static const int32_t INVALID_OFFSET = -1;
 
-    LabelBase() : offset_(INVALID_OFFSET), bound_(false), id(id_count++)
+    LabelBase() : offset_(INVALID_OFFSET), bound_(false)
     { }
     LabelBase(const LabelBase &label)
       : offset_(label.offset_),
-        bound_(label.bound_),
-        id(id_count++)
+        bound_(label.bound_)
     { }
 
     // If the label is bound, all incoming edges have been patched and any
@@ -441,14 +438,20 @@ class CodeLocationJump
 {
     uint8_t *raw_;
 #ifdef DEBUG
-    bool absolute_;
+    enum State { Uninitialized, Absolute, Relative };
+    State state_;
+    void setUninitialized() {
+        state_ = Uninitialized;
+    }
     void setAbsolute() {
-        absolute_ = true;
+        state_ = Absolute;
     }
     void setRelative() {
-        absolute_ = false;
+        state_ = Relative;
     }
 #else
+    void setUninitialized() const {
+    }
     void setAbsolute() const {
     }
     void setRelative() const {
@@ -461,8 +464,8 @@ class CodeLocationJump
 
   public:
     CodeLocationJump() {
-        raw_ = (uint8_t *) 0xdeadc0de;
-        setAbsolute();
+        raw_ = NULL;
+        setUninitialized();
 #ifdef JS_SMALL_BRANCH
         jumpTableEntry_ = (uint8_t *) 0xdeadab1e;
 #endif
@@ -482,22 +485,18 @@ class CodeLocationJump
 
     void repoint(IonCode *code, MacroAssembler* masm = NULL);
 
-    bool isSet() const {
-        return raw_ != (uint8_t *) 0xdeadc0de;
-    }
-
     uint8_t *raw() const {
-        JS_ASSERT(absolute_ && isSet());
+        JS_ASSERT(state_ == Absolute);
         return raw_;
     }
     uint8_t *offset() const {
-        JS_ASSERT(!absolute_ && isSet());
+        JS_ASSERT(state_ == Relative);
         return raw_;
     }
 
 #ifdef JS_SMALL_BRANCH
-    uint8_t *jumpTableEntry() {
-        JS_ASSERT(absolute_);
+    uint8_t *jumpTableEntry() const {
+        JS_ASSERT(state_ == Absolute);
         return jumpTableEntry_;
     }
 #endif
@@ -507,14 +506,20 @@ class CodeLocationLabel
 {
     uint8_t *raw_;
 #ifdef DEBUG
-    bool absolute_;
+    enum State { Uninitialized, Absolute, Relative };
+    State state_;
+    void setUninitialized() {
+        state_ = Uninitialized;
+    }
     void setAbsolute() {
-        absolute_ = true;
+        state_ = Absolute;
     }
     void setRelative() {
-        absolute_ = false;
+        state_ = Relative;
     }
 #else
+    void setUninitialized() const {
+    }
     void setAbsolute() const {
     }
     void setRelative() const {
@@ -523,8 +528,8 @@ class CodeLocationLabel
 
   public:
     CodeLocationLabel() {
-        raw_ = (uint8_t *) 0xdeadc0de;
-        setAbsolute();
+        raw_ = NULL;
+        setUninitialized();
     }
     CodeLocationLabel(IonCode *code, CodeOffsetLabel base) {
         *this = base;
@@ -549,16 +554,18 @@ class CodeLocationLabel
 
     void repoint(IonCode *code, MacroAssembler *masm = NULL);
 
-    bool isSet() {
-        return raw_ != (uint8_t *) 0xdeadc0de;
+#ifdef DEBUG
+    bool isSet() const {
+        return state_ != Uninitialized;
     }
+#endif
 
-    uint8_t *raw() {
-        JS_ASSERT(absolute_ && isSet());
+    uint8_t *raw() const {
+        JS_ASSERT(state_ == Absolute);
         return raw_;
     }
-    uint8_t *offset() {
-        JS_ASSERT(!absolute_ && isSet());
+    uint8_t *offset() const {
+        JS_ASSERT(state_ == Relative);
         return raw_;
     }
 };

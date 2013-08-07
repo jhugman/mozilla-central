@@ -512,6 +512,10 @@ NS_IMETHODIMP nsCocoaWindow::CreatePopupContentView(const nsIntRect &aRect,
 
 NS_IMETHODIMP nsCocoaWindow::Destroy()
 {
+  // If we don't hide here we run into problems with panels, this is not ideal.
+  // (Bug 891424)
+  Show(false);
+
   if (mPopupContentView)
     mPopupContentView->Destroy();
 
@@ -1554,6 +1558,15 @@ nsCocoaWindow::BackingScaleFactorChanged()
   if (presShell) {
     presShell->BackingScaleFactorChanged();
   }
+}
+
+int32_t
+nsCocoaWindow::RoundsWidgetCoordinatesTo()
+{
+  if (BackingScaleFactor() == 2.0) {
+    return 2;
+  }
+  return 1;
 }
 
 NS_IMETHODIMP nsCocoaWindow::SetCursor(nsCursor aCursor)

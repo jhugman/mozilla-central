@@ -9,12 +9,14 @@
 #ifndef jsinferinlines_h
 #define jsinferinlines_h
 
+#include "jsinfer.h"
+
+#include "mozilla/MathAlgorithms.h"
 #include "mozilla/PodOperations.h"
 
-#include "jsarray.h"
 #include "jsanalyze.h"
+#include "jsarray.h"
 #include "jscompartment.h"
-#include "jsinfer.h"
 #include "jsprf.h"
 #include "jsproxy.h"
 
@@ -297,24 +299,6 @@ TypeIdString(jsid id)
 #else
     return "(missing)";
 #endif
-}
-
-/* Assert code to know which PCs are reasonable to be considering inlining on. */
-inline bool
-IsInlinableCall(jsbytecode *pc)
-{
-    JSOp op = JSOp(*pc);
-
-    // CALL, FUNCALL, FUNAPPLY, EVAL (Standard callsites)
-    // NEW (IonMonkey-only callsite)
-    // GETPROP, CALLPROP, and LENGTH. (Inlined Getters)
-    // SETPROP, SETNAME, SETGNAME (Inlined Setters)
-    return op == JSOP_CALL || op == JSOP_FUNCALL || op == JSOP_FUNAPPLY || op == JSOP_EVAL ||
-#ifdef JS_ION
-           op == JSOP_NEW ||
-#endif
-           op == JSOP_GETPROP || op == JSOP_CALLPROP || op == JSOP_LENGTH ||
-           op == JSOP_SETPROP || op == JSOP_SETGNAME || op == JSOP_SETNAME;
 }
 
 /*
@@ -966,7 +950,14 @@ TypeScript::MonitorAssign(JSContext *cx, HandleObject obj, jsid id)
         uint32_t i;
         if (js_IdIsIndex(id, &i))
             return;
-        MarkTypeObjectUnknownProperties(cx, obj->type());
+
+        // But if we don't have too many properties yet, don't do anything.  The
+        // idea here is that normal object initialization should not trigger
+        // deoptimization in most cases, while actual usage as a hashmap should.
+        TypeObject* type = obj->type();
+        if (type->getPropertyCount() < 8)
+            return;
+        MarkTypeObjectUnknownProperties(cx, type);
     }
 }
 
@@ -1092,9 +1083,7 @@ HashSetCapacity(unsigned count)
     if (count <= SET_ARRAY_SIZE)
         return SET_ARRAY_SIZE;
 
-    unsigned log2;
-    JS_FLOOR_LOG2(log2, count);
-    return 1 << (log2 + 2);
+    return 1 << (mozilla::FloorLog2(count) + 2);
 }
 
 /* Compute the FNV hash for the low 32 bits of v. */
@@ -1353,14 +1342,6 @@ TypeSet::addType(JSContext *cx, Type type)
             JS_ASSERT(!nobject->singleton);
             if (nobject->unknownProperties())
                 goto unknownObject;
-            if (objectCount > 1) {
-                nobject->contribution += (objectCount - 1) * (objectCount - 1);
-                if (nobject->contribution >= TypeObject::CONTRIBUTION_LIMIT) {
-                    InferSpew(ISpewOps, "limitUnknown: %sT%p%s",
-                              InferSpewColor(this), this, InferSpewColorReset());
-                    goto unknownObject;
-                }
-            }
         }
     }
 
@@ -1589,7 +1570,7 @@ inline void
 TypeObject::writeBarrierPre(TypeObject *type)
 {
 #ifdef JSGC_INCREMENTAL
-    if (!type || !type->runtime()->needsBarrier())
+    if (!type || !type->runtimeFromAnyThread()->needsBarrier())
         return;
 
     JS::Zone *zone = type->zone();
@@ -1618,7 +1599,7 @@ inline void
 TypeNewScript::writeBarrierPre(TypeNewScript *newScript)
 {
 #ifdef JSGC_INCREMENTAL
-    if (!newScript || !newScript->fun->runtime()->needsBarrier())
+    if (!newScript || !newScript->fun->runtimeFromAnyThread()->needsBarrier())
         return;
 
     JS::Zone *zone = newScript->fun->zone();

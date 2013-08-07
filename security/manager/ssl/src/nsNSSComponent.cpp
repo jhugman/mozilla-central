@@ -95,14 +95,14 @@ public:
   virtual ~nsTokenEventRunnable();
 
   NS_IMETHOD Run ();
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
 private:
   nsString mType;
   nsString mTokenName;
 };
 
 // ISuuports implementation for nsTokenEventRunnable
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsTokenEventRunnable, nsIRunnable)
+NS_IMPL_ISUPPORTS1(nsTokenEventRunnable, nsIRunnable)
 
 nsTokenEventRunnable::nsTokenEventRunnable(const nsAString &aType, 
    const nsAString &aTokenName): mType(aType), mTokenName(aTokenName) { }
@@ -1058,11 +1058,11 @@ nsNSSComponent::InitializeNSS(bool showWarningBox)
 
   PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsNSSComponent::InitializeNSS\n"));
 
-  MOZ_STATIC_ASSERT(nsINSSErrorsService::NSS_SEC_ERROR_BASE == SEC_ERROR_BASE &&
-                    nsINSSErrorsService::NSS_SEC_ERROR_LIMIT == SEC_ERROR_LIMIT &&
-                    nsINSSErrorsService::NSS_SSL_ERROR_BASE == SSL_ERROR_BASE &&
-                    nsINSSErrorsService::NSS_SSL_ERROR_LIMIT == SSL_ERROR_LIMIT,
-                    "You must update the values in nsINSSErrorsService.idl");
+  static_assert(nsINSSErrorsService::NSS_SEC_ERROR_BASE == SEC_ERROR_BASE &&
+                nsINSSErrorsService::NSS_SEC_ERROR_LIMIT == SEC_ERROR_LIMIT &&
+                nsINSSErrorsService::NSS_SSL_ERROR_BASE == SSL_ERROR_BASE &&
+                nsINSSErrorsService::NSS_SSL_ERROR_LIMIT == SSL_ERROR_LIMIT,
+                "You must update the values in nsINSSErrorsService.idl");
 
   // variables used for flow control within this function
 
@@ -1256,8 +1256,6 @@ nsNSSComponent::InitializeNSS(bool showWarningBox)
       // dynamic options from prefs
       setValidationOptions(mPrefBranch);
 
-      RegisterMyOCSPAIAInfoCallback();
-
       mHttpForNSS.initTable();
       mHttpForNSS.registerHttpClient();
 
@@ -1301,7 +1299,6 @@ nsNSSComponent::ShutdownNSS()
 
     PK11_SetPasswordFunc((PK11PasswordFunc)nullptr);
     mHttpForNSS.unregisterHttpClient();
-    UnregisterMyOCSPAIAInfoCallback();
 
     if (mPrefBranch) {
       mPrefBranch->RemoveObserver("security.", this);
@@ -1414,12 +1411,12 @@ nsNSSComponent::Init()
 }
 
 /* nsISupports Implementation for the class */
-NS_IMPL_THREADSAFE_ISUPPORTS5(nsNSSComponent,
-                              nsISignatureVerifier,
-                              nsIEntropyCollector,
-                              nsINSSComponent,
-                              nsIObserver,
-                              nsISupportsWeakReference)
+NS_IMPL_ISUPPORTS5(nsNSSComponent,
+                   nsISignatureVerifier,
+                   nsIEntropyCollector,
+                   nsINSSComponent,
+                   nsIObserver,
+                   nsISupportsWeakReference)
 
 
 /* Callback functions for decoder. For now, use empty/default functions. */
@@ -1889,7 +1886,7 @@ nsNSSComponent::GetDefaultCertVerifier(RefPtr<CertVerifier> &out)
   return NS_OK;
 }
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(PipUIContext, nsIInterfaceRequestor)
+NS_IMPL_ISUPPORTS1(PipUIContext, nsIInterfaceRequestor)
 
 PipUIContext::PipUIContext()
 {

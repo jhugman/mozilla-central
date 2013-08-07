@@ -117,29 +117,47 @@ Telephony::~Telephony()
 
 // static
 already_AddRefed<Telephony>
-Telephony::Create(nsPIDOMWindow* aOwner, nsITelephonyProvider* aProvider)
+Telephony::Create(nsPIDOMWindow* aOwner, ErrorResult& aRv)
 {
   NS_ASSERTION(aOwner, "Null owner!");
-  NS_ASSERTION(aProvider, "Null provider!");
+
+  nsCOMPtr<nsITelephonyProvider> ril =
+    do_GetService(NS_RILCONTENTHELPER_CONTRACTID);
+  if (!ril) {
+    aRv.Throw(NS_ERROR_UNEXPECTED);
+    return nullptr;
+  }
 
   nsCOMPtr<nsIScriptGlobalObject> sgo = do_QueryInterface(aOwner);
-  NS_ENSURE_TRUE(sgo, nullptr);
+  if (!sgo) {
+    aRv.Throw(NS_ERROR_UNEXPECTED);
+    return nullptr;
+  }
 
   nsCOMPtr<nsIScriptContext> scriptContext = sgo->GetContext();
-  NS_ENSURE_TRUE(scriptContext, nullptr);
+  if (!scriptContext) {
+    aRv.Throw(NS_ERROR_UNEXPECTED);
+    return nullptr;
+  }
 
   nsRefPtr<Telephony> telephony = new Telephony();
 
   telephony->BindToOwner(aOwner);
 
-  telephony->mProvider = aProvider;
+  telephony->mProvider = ril;
   telephony->mListener = new Listener(telephony);
 
-  nsresult rv = aProvider->EnumerateCalls(telephony->mListener);
-  NS_ENSURE_SUCCESS(rv, nullptr);
+  nsresult rv = ril->EnumerateCalls(telephony->mListener);
+  if (NS_FAILED(rv)) {
+    aRv.Throw(rv);
+    return nullptr;
+  }
 
-  rv = aProvider->RegisterTelephonyMsg(telephony->mListener);
-  NS_ENSURE_SUCCESS(rv, nullptr);
+  rv = ril->RegisterTelephonyMsg(telephony->mListener);
+  if (NS_FAILED(rv)) {
+    aRv.Throw(rv);
+    return nullptr;
+  }
 
   return telephony.forget();
 }
@@ -221,6 +239,8 @@ Telephony::DialInternal(bool isEmergency,
   call.forget(aResult);
   return NS_OK;
 }
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(Telephony)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(Telephony,
                                                   nsDOMEventTargetHelper)
@@ -376,6 +396,8 @@ Telephony::StopTone()
 
 NS_IMPL_EVENT_HANDLER(Telephony, incoming)
 NS_IMPL_EVENT_HANDLER(Telephony, callschanged)
+NS_IMPL_EVENT_HANDLER(Telephony, remoteheld)
+NS_IMPL_EVENT_HANDLER(Telephony, remoteresumed)
 
 // EventTarget
 
@@ -506,14 +528,49 @@ Telephony::EnumerateCallState(uint32_t aCallIndex, uint16_t aCallState,
 }
 
 NS_IMETHODIMP
+Telephony::SupplementaryServiceNotification(int32_t aCallIndex,
+                                            uint16_t aNotification)
+{
+  nsRefPtr<TelephonyCall> associatedCall;
+  if (!mCalls.IsEmpty() && aCallIndex != -1) {
+    for (uint32_t index = 0; index < mCalls.Length(); index++) {
+      nsRefPtr<TelephonyCall>& call = mCalls[index];
+      if (call->CallIndex() == uint32_t(aCallIndex)) {
+        associatedCall = call;
+        break;
+      }
+    }
+  }
+
+  nsresult rv;
+  switch (aNotification) {
+    case nsITelephonyProvider::NOTIFICATION_REMOTE_HELD:
+      rv = DispatchCallEvent(NS_LITERAL_STRING("remoteheld"), associatedCall);
+      break;
+    case nsITelephonyProvider::NOTIFICATION_REMOTE_RESUMED:
+      rv = DispatchCallEvent(NS_LITERAL_STRING("remoteresumed"), associatedCall);
+      break;
+    default:
+      NS_ERROR("Got a bad notification!");
+      return NS_ERROR_UNEXPECTED;
+  }
+
+  NS_ENSURE_SUCCESS(rv, rv);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 Telephony::NotifyError(int32_t aCallIndex,
                        const nsAString& aError)
 {
   nsRefPtr<TelephonyCall> callToNotify;
   if (!mCalls.IsEmpty()) {
-    // The connection is not established yet. Get the latest call object.
+    // The connection is not established yet. Get the latest dialing call object.
     if (aCallIndex == -1) {
-      callToNotify = mCalls[mCalls.Length() - 1];
+      nsRefPtr<TelephonyCall>& lastCall = mCalls[mCalls.Length() - 1];
+      if (lastCall->CallIndex() == kOutgoingPlaceholderCallIndex) {
+        callToNotify = lastCall;
+      }
     } else {
       // The connection has been established. Get the failed call.
       for (uint32_t index = 0; index < mCalls.Length(); index++) {
@@ -545,9 +602,13 @@ nsresult
 Telephony::DispatchCallEvent(const nsAString& aType,
                              nsIDOMTelephonyCall* aCall)
 {
-  // We will notify enumeration being completed by firing oncallschanged.
-  // We only ever have a null call with that event type.
-  MOZ_ASSERT(aCall || aType.EqualsLiteral("callschanged"));
+  // The call may be null in following cases:
+  //   1. callschanged when notifying enumeration being completed
+  //   2. remoteheld/remoteresumed.
+  MOZ_ASSERT(aCall ||
+             aType.EqualsLiteral("callschanged") ||
+             aType.EqualsLiteral("remoteheld") ||
+             aType.EqualsLiteral("remtoeresumed"));
 
   nsCOMPtr<nsIDOMEvent> event;
   NS_NewDOMCallEvent(getter_AddRefs(event), this, nullptr, nullptr);
@@ -574,36 +635,24 @@ Telephony::EnqueueEnumerationAck()
   }
 }
 
-nsresult
-NS_NewTelephony(nsPIDOMWindow* aWindow, nsIDOMTelephony** aTelephony)
+/* static */
+bool
+Telephony::CheckPermission(nsPIDOMWindow* aWindow)
 {
-  NS_ASSERTION(aWindow, "Null pointer!");
-
-  nsPIDOMWindow* innerWindow = aWindow->IsInnerWindow() ?
-    aWindow :
-    aWindow->GetCurrentInnerWindow();
+  MOZ_ASSERT(aWindow && aWindow->IsInnerWindow());
 
   nsCOMPtr<nsIPermissionManager> permMgr =
     do_GetService(NS_PERMISSIONMANAGER_CONTRACTID);
-  NS_ENSURE_TRUE(permMgr, NS_ERROR_UNEXPECTED);
+  NS_ENSURE_TRUE(permMgr, false);
 
   uint32_t permission;
   nsresult rv =
     permMgr->TestPermissionFromWindow(aWindow, "telephony", &permission);
-  NS_ENSURE_SUCCESS(rv, rv);
+  NS_ENSURE_SUCCESS(rv, false);
 
   if (permission != nsIPermissionManager::ALLOW_ACTION) {
-    *aTelephony = nullptr;
-    return NS_OK;
+    return false;
   }
 
-  nsCOMPtr<nsITelephonyProvider> ril =
-    do_GetService(NS_RILCONTENTHELPER_CONTRACTID);
-  NS_ENSURE_TRUE(ril, NS_ERROR_UNEXPECTED);
-
-  nsRefPtr<Telephony> telephony = Telephony::Create(innerWindow, ril);
-  NS_ENSURE_TRUE(telephony, NS_ERROR_UNEXPECTED);
-
-  telephony.forget(aTelephony);
-  return NS_OK;
+  return true;
 }

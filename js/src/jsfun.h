@@ -9,8 +9,9 @@
 /*
  * JS function definitions.
  */
-#include "jsprvtd.h"
+
 #include "jsobj.h"
+#include "jsprvtd.h"
 #include "jsscript.h"
 
 #include "gc/Barrier.h"
@@ -51,8 +52,8 @@ class JSFunction : public JSObject
 
     static void staticAsserts() {
         JS_STATIC_ASSERT(INTERPRETED == JS_FUNCTION_INTERPRETED_BIT);
-        MOZ_STATIC_ASSERT(sizeof(JSFunction) == sizeof(js::shadow::Function),
-                          "shadow interface must match actual interface");
+        static_assert(sizeof(JSFunction) == sizeof(js::shadow::Function),
+                      "shadow interface must match actual interface");
     }
 
     uint16_t        nargs;        /* maximum number of specified arguments,
@@ -259,7 +260,7 @@ class JSFunction : public JSObject
 
     JSScript *nonLazyScript() const {
         JS_ASSERT(hasScript());
-        return JS::HandleScript::fromMarkedLocation(&u.i.s.script_);
+        return u.i.s.script_;
     }
 
     js::HeapPtrScript &mutableScript() {
@@ -321,6 +322,7 @@ class JSFunction : public JSObject
     }
 
     static unsigned offsetOfNativeOrScript() {
+        JS_STATIC_ASSERT(offsetof(U, n.native) == offsetof(U, i.s.lazy_));
         JS_STATIC_ASSERT(offsetof(U, n.native) == offsetof(U, i.s.script_));
         JS_STATIC_ASSERT(offsetof(U, n.native) == offsetof(U, nativeOrScript));
         return offsetof(JSFunction, u.nativeOrScript);
@@ -408,6 +410,10 @@ DefineFunction(JSContext *cx, HandleObject obj, HandleId id, JSNative native,
                unsigned nargs, unsigned flags,
                gc::AllocKind allocKind = JSFunction::FinalizeKind,
                NewObjectKind newKind = GenericObject);
+
+extern JSBool
+fun_resolve(JSContext *cx, js::HandleObject obj, js::HandleId id,
+            unsigned flags, js::MutableHandleObject objp);
 
 // ES6 9.2.5 IsConstructor
 bool IsConstructor(const Value &v);

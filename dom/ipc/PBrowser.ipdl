@@ -14,6 +14,7 @@ include protocol PRenderFrame;
 include protocol POfflineCacheUpdate;
 include protocol PIndexedDB;
 include DOMTypes;
+include JavaScriptTypes;
 include URIParams;
 
 include "gfxMatrix.h";
@@ -67,7 +68,7 @@ rpc protocol PBrowser
     manages PIndexedDB;
 
 both:
-    AsyncMessage(nsString aMessage, ClonedMessageData aData);
+    AsyncMessage(nsString aMessage, ClonedMessageData aData, CpowEntry[] aCpows);
 
 parent:
     /**
@@ -80,7 +81,7 @@ parent:
 
     rpc CreateWindow() returns (PBrowser window);
 
-    sync SyncMessage(nsString aMessage, ClonedMessageData aData)
+    sync SyncMessage(nsString aMessage, ClonedMessageData aData, CpowEntry[] aCpows)
       returns (nsString[] retval);
 
     /**
@@ -188,6 +189,12 @@ parent:
 
     SetCursor(uint32_t value);
     SetBackgroundColor(nscolor color);
+
+    /**
+     * Used to set the current text of the status tooltip.
+     * Nowadays this is mainly used for link locations on hover.
+     */
+    SetStatus(uint32_t type, nsString status);
 
     /**
      * Initiates an asynchronous request for permission for the
