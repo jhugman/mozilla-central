@@ -1848,7 +1848,7 @@ this.DOMApplicationRegistry = {
           // automation.
           let prefName = "dom.mozApps.auto_confirm_install";
           if ((Services.prefs.prefHasUserValue(prefName) &&
-              Services.prefs.getBoolPref(prefName)) || aData.silentInstall) {
+              Services.prefs.getBoolPref(prefName))) {
             dump("Confirming install without user interaction");
             this.confirmInstall(aData);
           } else {
