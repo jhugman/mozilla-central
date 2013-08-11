@@ -8,9 +8,9 @@ package org.mozilla.gecko;
 import java.net.MalformedURLException;
 
 import org.json.JSONObject;
+import org.mozilla.gecko.GeckoThread.LaunchState;
 import org.mozilla.gecko.webapps.Logger;
 
-import android.R;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
@@ -91,7 +91,14 @@ public class WebAppInstaller extends GeckoApp {
             GeckoAppShell.getEventDispatcher().unregisterEventListener("WebApps:PostInstall", this);
 
             Intent intent = new Intent();
-            intent.putExtra("appUri", message.optString("origin"));
+            String origin = message.optString("origin");
+            int index = WebAppAllocator.getInstance().getIndexForApp(origin);
+            if (index >= 0) {
+                Log.i(LOGTAG, "Webapp action is: " + "org.mozilla.gecko.WEBAPP" + index);
+                intent.putExtra("appAction", "org.mozilla.gecko.WEBAPP" + index);
+                intent.putExtra("appUri", origin);
+            }
+
             if (getParent() == null) {
                 setResult(RESULT_OK, intent);
             } else {
@@ -114,8 +121,14 @@ public class WebAppInstaller extends GeckoApp {
 
     @Override
     protected String getDefaultProfileName() {
-        String profile = GeckoProfile.findDefaultProfile(this);
-        return (profile != null ? profile : "default");
+        String profile;
+        if (GeckoThread.checkLaunchState(LaunchState.GeckoRunning)) {
+            profile = GeckoProfile.findDefaultProfile(this);
+        } else {
+            profile = "webapp-installer";
+        }
+        Logger.i("Installing using the " + profile + " profile");
+        return profile;
     }
 
     @Override
