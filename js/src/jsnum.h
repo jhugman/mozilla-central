@@ -9,7 +9,7 @@
 
 #include "mozilla/FloatingPoint.h"
 
-#include "jscntxt.h"
+#include "jsapi.h"
 
 #include "vm/NumericConversions.h"
 
@@ -18,10 +18,12 @@ extern double js_NegativeInfinity;
 
 namespace js {
 
+class StringBuffer;
+
 extern bool
 InitRuntimeNumberState(JSRuntime *rt);
 
-#if !ENABLE_INTL_API
+#if !EXPOSE_INTL_API
 extern void
 FinishRuntimeNumberState(JSRuntime *rt);
 #endif
@@ -161,7 +163,7 @@ ToNumber(JSContext *cx, JS::MutableHandleValue vp)
     return true;
 }
 
-JSBool
+bool
 num_parseInt(JSContext *cx, unsigned argc, Value *vp);
 
 }  /* namespace js */
@@ -176,14 +178,14 @@ num_parseInt(JSContext *cx, unsigned argc, Value *vp);
  * If the string does not contain a number, set *ep to s and return 0.0 in dp.
  * Return false if out of memory.
  */
-extern JSBool
+extern bool
 js_strtod(js::ThreadSafeContext *cx, const jschar *s, const jschar *send,
           const jschar **ep, double *dp);
 
-extern JSBool
+extern bool
 js_num_toString(JSContext *cx, unsigned argc, js::Value *vp);
 
-extern JSBool
+extern bool
 js_num_valueOf(JSContext *cx, unsigned argc, js::Value *vp);
 
 namespace js {

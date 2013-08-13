@@ -141,6 +141,9 @@ exports.testTabPropertiesInNewWindow = function(test) {
 exports.testTabPropertiesInSameWindow = function(test) {
   test.waitUntilDone();
 
+  // Get current count of tabs so we know the index of the
+  // new tab, bug 893846
+  let tabCount = tabs.length;
   let count = 0;
   function onReadyOrLoad (tab) {
     if (count++) {
@@ -156,7 +159,7 @@ exports.testTabPropertiesInSameWindow = function(test) {
       test.assertEqual(tab.url, url, "URL of the new tab matches");
       test.assert(tab.favicon, "favicon of the new tab is not empty");
       test.assertEqual(tab.style, null, "style of the new tab matches");
-      test.assertEqual(tab.index, 1, "index of the new tab matches");
+      test.assertEqual(tab.index, tabCount, "index of the new tab matches");
       test.assertNotEqual(tab.getThumbnail(), null, "thumbnail of the new tab matches");
       test.assertNotEqual(tab.id, null, "a tab object always has an id property.");
 
@@ -167,7 +170,7 @@ exports.testTabPropertiesInSameWindow = function(test) {
       test.assertEqual(tab.url, url, "URL of the new tab matches");
       test.assert(tab.favicon, "favicon of the new tab is not empty");
       test.assertEqual(tab.style, null, "style of the new tab matches");
-      test.assertEqual(tab.index, 1, "index of the new tab matches");
+      test.assertEqual(tab.index, tabCount, "index of the new tab matches");
       test.assertNotEqual(tab.getThumbnail(), null, "thumbnail of the new tab matches");
       test.assertNotEqual(tab.id, null, "a tab object always has an id property.");
 
@@ -945,40 +948,6 @@ exports.testOnLoadEventWithImage = function(test) {
     tabs.open({
       url: base64png,
       inBackground: true
-    });
-  });
-};
-
-exports.testOnPageShowEvent = function (test) {
-  test.waitUntilDone();
-
-  let firstUrl = 'data:text/html;charset=utf-8,First';
-  let secondUrl = 'data:text/html;charset=utf-8,Second';
-
-  openBrowserWindow(function(window, browser) {
-    let counter = 0;
-    tabs.on('pageshow', function onPageShow(tab, persisted) {
-      counter++;
-      if (counter === 1) {
-        test.assert(!persisted, 'page should not be cached on initial load');
-        tab.url = secondUrl;
-      }
-      else if (counter === 2) {
-        test.assert(!persisted, 'second test page should not be cached either');
-        tab.attach({
-          contentScript: 'setTimeout(function () { window.history.back(); }, 0)'
-        });
-      }
-      else {
-        test.assert(persisted, 'when we get back to the fist page, it has to' +
-                               'come from cache');
-        tabs.removeListener('pageshow', onPageShow);
-        closeBrowserWindow(window, function() test.done());
-      }
-    });
-
-    tabs.open({
-      url: firstUrl
     });
   });
 };

@@ -1534,13 +1534,6 @@ nsChildView::ComputeShouldAccelerate(bool aDefault)
 bool
 nsChildView::ShouldUseOffMainThreadCompositing()
 {
-  // When acceleration is off, default to false, but allow force-enabling
-  // using the layers.offmainthreadcomposition.prefer-basic pref.
-  if (!ComputeShouldAccelerate(mUseLayersAcceleration) &&
-      !Preferences::GetBool("layers.offmainthreadcomposition.prefer-basic", false)) {
-    return false;
-  }
-
   // Don't use OMTC (which requires OpenGL) for transparent windows or for
   // popup windows.
   if (!mView || ![[mView window] isOpaque] ||
@@ -1841,16 +1834,16 @@ NS_IMETHODIMP_(void)
 nsChildView::SetInputContext(const InputContext& aContext,
                              const InputContextAction& aAction)
 {
-  // XXX Ideally, we should check if this instance has focus or not.
-  //     However, this is called only when this widget has focus, so,
-  //     it's not problem at least for now.
-  if (aContext.IsPasswordEditor()) {
-    TextInputHandler::EnableSecureEventInput();
-  } else {
-    TextInputHandler::EnsureSecureEventInputDisabled();
+  NS_ENSURE_TRUE_VOID(mTextInputHandler);
+
+  if (mTextInputHandler->IsFocused()) {
+    if (aContext.IsPasswordEditor()) {
+      TextInputHandler::EnableSecureEventInput();
+    } else {
+      TextInputHandler::EnsureSecureEventInputDisabled();
+    }
   }
 
-  NS_ENSURE_TRUE_VOID(mTextInputHandler);
   mInputContext = aContext;
   switch (aContext.mIMEState.mEnabled) {
     case IMEState::ENABLED:

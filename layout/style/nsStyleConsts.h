@@ -659,10 +659,6 @@ static inline mozilla::css::Side operator++(mozilla::css::Side& side, int) {
 // Note: make sure that the largest NS_STYLE_TEXT_ALIGN_* value is smaller than
 // the smallest NS_STYLE_VERTICAL_ALIGN_* value below!
 
-// See nsStyleText
-#define NS_STYLE_TEXT_BLINK_NONE                0
-#define NS_STYLE_TEXT_BLINK_BLINK               1
-
 // See nsStyleText, nsStyleFont
 #define NS_STYLE_TEXT_DECORATION_LINE_NONE         0
 #define NS_STYLE_TEXT_DECORATION_LINE_UNDERLINE    NS_FONT_DECORATION_UNDERLINE
@@ -933,6 +929,24 @@ static inline mozilla::css::Side operator++(mozilla::css::Side& side, int) {
 // object {fill,stroke}-opacity for SVG glyphs
 #define NS_STYLE_OBJECT_FILL_OPACITY                0
 #define NS_STYLE_OBJECT_STROKE_OPACITY              1
+
+// blending
+#define NS_STYLE_BLEND_NORMAL                       0
+#define NS_STYLE_BLEND_MULTIPLY                     1
+#define NS_STYLE_BLEND_SCREEN                       2
+#define NS_STYLE_BLEND_OVERLAY                      3
+#define NS_STYLE_BLEND_DARKEN                       4
+#define NS_STYLE_BLEND_LIGHTEN                      5
+#define NS_STYLE_BLEND_COLOR_DODGE                  6
+#define NS_STYLE_BLEND_COLOR_BURN                   7
+#define NS_STYLE_BLEND_HARD_LIGHT                   8
+#define NS_STYLE_BLEND_SOFT_LIGHT                   9
+#define NS_STYLE_BLEND_DIFFERENCE                   10
+#define NS_STYLE_BLEND_EXCLUSION                    11
+#define NS_STYLE_BLEND_HUE                          12
+#define NS_STYLE_BLEND_SATURATION                   13
+#define NS_STYLE_BLEND_COLOR                        14
+#define NS_STYLE_BLEND_LUMINOSITY                   15
 
 /*****************************************************************************
  * Constants for media features.                                             *

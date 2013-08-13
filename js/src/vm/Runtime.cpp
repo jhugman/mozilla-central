@@ -25,9 +25,9 @@
 #include "jswrapper.h"
 
 #include "js/MemoryMetrics.h"
-#include "ion/AsmJSSignalHandlers.h"
-#include "ion/IonCompartment.h"
-#include "ion/PcScriptCache.h"
+#include "jit/AsmJSSignalHandlers.h"
+#include "jit/IonCompartment.h"
+#include "jit/PcScriptCache.h"
 #include "yarr/BumpPointerAllocator.h"
 
 #include "jscntxtinlines.h"
@@ -99,6 +99,7 @@ PerThreadData::removeFromThreadList()
 JSRuntime::JSRuntime(JSUseHelperThreads useHelperThreads)
   : mainThread(this),
     interrupt(0),
+    operationCallback(NULL),
 #ifdef JS_THREADSAFE
     operationCallbackLock(NULL),
 #ifdef DEBUG
@@ -246,7 +247,7 @@ JSRuntime::JSRuntime(JSUseHelperThreads useHelperThreads)
     structuredCloneCallbacks(NULL),
     telemetryCallback(NULL),
     propertyRemovals(0),
-#if !ENABLE_INTL_API
+#if !EXPOSE_INTL_API
     thousandsSeparator(0),
     decimalSeparator(0),
     numGrouping(0),
@@ -424,7 +425,7 @@ JSRuntime::~JSRuntime()
     }
 #endif
 
-#if !ENABLE_INTL_API
+#if !EXPOSE_INTL_API
     FinishRuntimeNumberState(this);
 #endif
     FinishAtoms(this);

@@ -8,8 +8,8 @@
 #define mozilla_CycleCollectedJSRuntime_h__
 
 #include "mozilla/MemoryReporting.h"
-#include "jsprvtd.h"
 #include "jsapi.h"
+#include "jsfriendapi.h"
 
 #include "nsCycleCollector.h"
 #include "nsCycleCollectionParticipant.h"
@@ -159,8 +159,8 @@ private:
   static void TraceBlackJS(JSTracer* aTracer, void* aData);
   static void TraceGrayJS(JSTracer* aTracer, void* aData);
   static void GCCallback(JSRuntime* aRuntime, JSGCStatus aStatus, void* aData);
-  static JSBool ContextCallback(JSContext* aCx, unsigned aOperation,
-                                void* aData);
+  static bool ContextCallback(JSContext* aCx, unsigned aOperation,
+                              void* aData);
 
   virtual void TraceNativeBlackRoots(JSTracer* aTracer) { };
   void TraceNativeGrayRoots(JSTracer* aTracer);

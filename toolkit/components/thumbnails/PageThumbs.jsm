@@ -185,6 +185,18 @@ this.PageThumbs = {
            "?url=" + encodeURIComponent(aUrl);
   },
 
+   /**
+    * Gets the path of the thumbnail file for a given web page's
+    * url. This file may or may not exist depending on whether the
+    * thumbnail has been captured or not.
+    *
+    * @param aUrl The web page's url.
+    * @return The path of the thumbnail file.
+    */
+   getThumbnailPath: function PageThumbs_getThumbnailPath(aUrl) {
+     return PageThumbsStorage.getFilePathForURL(aUrl);
+   },
+
   /**
    * Checks if an existing thumbnail for the specified URL is either missing
    * or stale, and if so, queues a background request to capture it.  That
@@ -444,7 +456,7 @@ this.PageThumbs = {
       let screenManager = Cc["@mozilla.org/gfx/screenmanager;1"]
                             .getService(Ci.nsIScreenManager);
       let left = {}, top = {}, width = {}, height = {};
-      screenManager.primaryScreen.GetRect(left, top, width, height);
+      screenManager.primaryScreen.GetRectDisplayPix(left, top, width, height);
       this._thumbnailWidth = Math.round(width.value / 3);
       this._thumbnailHeight = Math.round(height.value / 3);
     }
@@ -453,7 +465,7 @@ this.PageThumbs = {
 
   _prefEnabled: function PageThumbs_prefEnabled() {
     try {
-      return Services.prefs.getBoolPref("browser.pageThumbs.enabled");
+      return !Services.prefs.getBoolPref("browser.pagethumbnails.capturing_disabled");
     }
     catch (e) {
       return true;

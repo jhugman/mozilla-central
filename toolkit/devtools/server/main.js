@@ -20,6 +20,7 @@ const DBG_STRINGS_URI = "chrome://global/locale/devtools/debugger.properties";
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 let wantLogging = Services.prefs.getBoolPref("devtools.debugger.log");
+const promptConnections = Services.prefs.getBoolPref("devtools.debugger.prompt-connection");
 
 Cu.import("resource://gre/modules/jsdebugger.jsm");
 addDebuggerToGlobal(this);
@@ -443,7 +444,7 @@ var DebuggerServer = {
 
   onSocketAccepted:
   makeInfallible(function DS_onSocketAccepted(aSocket, aTransport) {
-    if (!this._allowConnection()) {
+    if (promptConnections && !this._allowConnection()) {
       return;
     }
     dumpn("New debugging connection on " + aTransport.host + ":" + aTransport.port);
@@ -715,6 +716,15 @@ function DebuggerServerConnection(aPrefix, aTransport)
   this._actorPool = new ActorPool(this);
   this._extraPools = [];
 
+  // Responses to a given actor must be returned the the client
+  // in the same order as the requests that they're replying to, but
+  // Implementations might finish serving requests in a different
+  // order.  To keep things in order we generate a promise for each
+  // request, chained to the promise for the request before it.
+  // This map stores the latest request promise in the chain, keyed
+  // by an actor ID string.
+  this._actorResponses = new Map;
+
   /*
    * We can forward packets to other servers, if the actors on that server
    * all use a distinct prefix on their names. This is a map from prefixes
@@ -941,19 +951,23 @@ DebuggerServerConnection.prototype = {
       return;
     }
 
-    resolve(ret)
-      .then(function (aResponse) {
-        if (!aResponse.from) {
-          aResponse.from = aPacket.to;
-        }
-        return aResponse;
-      })
-      .then(this.transport.send.bind(this.transport))
-      .then(null, (e) => {
-        return this._unknownError(
-          "error occurred while processing '" + aPacket.type,
-          e);
-      });
+    let pendingResponse = this._actorResponses.get(actor.actorID) || resolve(null);
+    let response = pendingResponse.then(() => {
+      return ret;
+    }).then(aResponse => {
+      if (!aResponse.from) {
+        aResponse.from = aPacket.to;
+      }
+      this.transport.send(aResponse);
+    }).then(null, (e) => {
+      let errorPacket = this._unknownError(
+        "error occurred while processing '" + aPacket.type,
+        e);
+      errorPacket.from = aPacket.to;
+      this.transport.send(errorPacket);
+    });
+
+    this._actorResponses.set(actor.actorID, response);
   },
 
   /**

@@ -12,7 +12,12 @@ pref("devtools.errorconsole.enabled", true);
 #endif
 
 // Automatically submit crash reports
+#ifdef RELEASE_BUILD
 pref("app.crashreporter.autosubmit", false);
+#else
+// For Nightly and Aurora we turn this on by default
+pref("app.crashreporter.autosubmit", true);
+#endif
 // Has the user been prompted about crash reporting?
 pref("app.crashreporter.prompted", false);
 
@@ -23,9 +28,14 @@ pref("metro.debug.selection.displayRanges", false);
 pref("metro.debug.selection.dumpRanges", false);
 pref("metro.debug.selection.dumpEvents", false);
 
+// Enable tab-modal prompts
+pref("prompts.tab_modal.enabled", true);
+
+
 // Enable off main thread compositing
 pref("layers.offmainthreadcomposition.enabled", true);
 pref("layers.async-pan-zoom.enabled", false);
+pref("gfx.axis.fling_friction", "0.002");
 
 // Enable Microsoft TSF support by default for imes.
 pref("intl.enable_tsf_support", true);

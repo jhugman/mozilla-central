@@ -31,6 +31,14 @@ var Appbar = {
     switch (aEvent.type) {
       case 'URLChanged':
       case 'TabSelect':
+        this.update();
+        // Switching away from or loading a site into a startui tab that has actions
+        // pending, we consider this confirmation that the user wants to flush changes.
+        if (this.activeTileset && aEvent.lastTab && aEvent.lastTab.browser.currentURI.spec == kStartURI) {
+          ContextUI.dismiss();
+        }
+        break;
+
       case 'MozAppbarShowing':
         this.update();
         break;
@@ -70,8 +78,8 @@ var Appbar = {
   },
 
   onDownloadButton: function() {
-    // TODO: Bug 883962: Toggle the downloads infobar when the
-    // download button is clicked
+    let notificationBox = Browser.getNotificationBox();
+    notificationBox.notificationsHidden = !notificationBox.notificationsHidden;
     ContextUI.dismiss();
   },
 
@@ -102,7 +110,7 @@ var Appbar = {
   onMenuButton: function(aEvent) {
       let typesArray = [];
 
-      if (!StartUI.isVisible)
+      if (!BrowserUI.isStartTabVisible)
         typesArray.push("find-in-page");
       if (ConsolePanelView.enabled)
         typesArray.push("open-error-console");

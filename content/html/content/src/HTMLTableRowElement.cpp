@@ -38,8 +38,7 @@ NS_IMPL_RELEASE_INHERITED(HTMLTableRowElement, Element)
 
 // QueryInterface implementation for HTMLTableRowElement
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(HTMLTableRowElement)
-  NS_HTML_CONTENT_INTERFACES(nsGenericHTMLElement)
-NS_ELEMENT_INTERFACE_MAP_END
+NS_INTERFACE_MAP_END_INHERITING(nsGenericHTMLElement)
 
 
 NS_IMPL_ELEMENT_CLONE(HTMLTableRowElement)
@@ -50,9 +49,9 @@ HTMLTableSectionElement*
 HTMLTableRowElement::GetSection() const
 {
   nsIContent* parent = GetParent();
-  if (parent->IsHTML() && (parent->Tag() == nsGkAtoms::thead ||
-                           parent->Tag() == nsGkAtoms::tbody ||
-                           parent->Tag() == nsGkAtoms::tfoot)) {
+  if (parent && parent->IsHTML() && (parent->Tag() == nsGkAtoms::thead ||
+                                     parent->Tag() == nsGkAtoms::tbody ||
+                                     parent->Tag() == nsGkAtoms::tfoot)) {
     return static_cast<HTMLTableSectionElement*>(parent);
   }
   return nullptr;

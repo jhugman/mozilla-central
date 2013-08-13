@@ -6,13 +6,13 @@
 #include "SaveProfileTask.h"
 #include "GeckoProfilerImpl.h"
 
-static JSBool
+static bool
 WriteCallback(const jschar *buf, uint32_t len, void *data)
 {
   std::ofstream& stream = *static_cast<std::ofstream*>(data);
   nsAutoCString profile = NS_ConvertUTF16toUTF8(buf, len);
   stream << profile.Data();
-  return JS_TRUE;
+  return true;
 }
 
 nsresult

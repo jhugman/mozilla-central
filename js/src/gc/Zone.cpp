@@ -9,14 +9,16 @@
 #include "jsgc.h"
 
 #ifdef JS_ION
-#include "ion/BaselineJIT.h"
-#include "ion/Ion.h"
-#include "ion/IonCompartment.h"
+#include "jit/BaselineJIT.h"
+#include "jit/Ion.h"
+#include "jit/IonCompartment.h"
 #endif
 #include "vm/Debugger.h"
 #include "vm/Runtime.h"
 
 #include "jsgcinlines.h"
+
+#include "vm/ObjectImpl-inl.h"
 
 using namespace js;
 using namespace js::gc;

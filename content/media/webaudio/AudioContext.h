@@ -12,7 +12,6 @@
 #include "MediaStreamGraph.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/AudioContextBinding.h"
-#include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/TypedArray.h"
 #include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
@@ -52,7 +51,10 @@ class DelayNode;
 class DynamicsCompressorNode;
 class GainNode;
 class GlobalObject;
+class HTMLMediaElement;
+class MediaElementAudioSourceNode;
 class MediaStreamAudioDestinationNode;
+class MediaStreamAudioSourceNode;
 class OfflineRenderSuccessCallback;
 class PannerNode;
 class ScriptProcessorNode;
@@ -160,6 +162,11 @@ public:
   {
     return CreateGain();
   }
+
+  already_AddRefed<MediaElementAudioSourceNode>
+  CreateMediaElementSource(HTMLMediaElement& aMediaElement, ErrorResult& aRv);
+  already_AddRefed<MediaStreamAudioSourceNode>
+  CreateMediaStreamSource(DOMMediaStream& aMediaStream, ErrorResult& aRv);
 
   already_AddRefed<DelayNode>
   CreateDelay(double aMaxDelayTime, ErrorResult& aRv);

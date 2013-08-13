@@ -4212,6 +4212,8 @@ MOZ_TIME_MANAGER=
 MOZ_PAY=
 MOZ_AUDIO_CHANNEL_MANAGER=
 NSS_NO_LIBPKIX=
+MOZ_CONTENT_SANDBOX=
+MOZ_CONTENT_SANDBOX_REPORTER=
 
 case "$target_os" in
     mingw*)
@@ -6477,6 +6479,32 @@ if test -n "$NSS_NO_LIBPKIX"; then
 fi
 AC_SUBST(NSS_NO_LIBPKIX)
 
+dnl ========================================================
+dnl = Content process sandboxing
+dnl ========================================================
+if test -n "$gonkdir"; then
+    MOZ_CONTENT_SANDBOX=1
+fi
+
+MOZ_ARG_ENABLE_BOOL(content-sandbox,
+[  --enable-content-sandbox        Enable sandboxing support for content-processes],
+    MOZ_CONTENT_SANDBOX=1)
+
+if test -n "$MOZ_CONTENT_SANDBOX"; then
+    AC_DEFINE(MOZ_CONTENT_SANDBOX)
+fi
+
+AC_SUBST(MOZ_CONTENT_SANDBOX)
+
+MOZ_ARG_ENABLE_BOOL(content-sandbox-reporter,
+[ --enable-content-sandbox-reporter        Enable syscall reporter to troubleshoot syscalls denied by the content-processes sandbox],
+    MOZ_CONTENT_SANDBOX_REPORTER=1)
+
+if test -n "$MOZ_CONTENT_SANDBOX_REPORTER"; then
+    AC_DEFINE(MOZ_CONTENT_SANDBOX_REPORTER)
+fi
+
+AC_SUBST(MOZ_CONTENT_SANDBOX_REPORTER)
 
 dnl ========================================================
 dnl =
@@ -7565,21 +7593,6 @@ MOZ_ARG_ENABLE_BOOL(reflow-perf,
     MOZ_REFLOW_PERF= )
 if test -n "$MOZ_REFLOW_PERF"; then
     AC_DEFINE(MOZ_REFLOW_PERF)
-fi
-
-dnl ========================================================
-dnl Enable code size metrics.
-dnl ========================================================
-MOZ_ARG_ENABLE_BOOL(codesighs,
-[  --enable-codesighs      Enable code size analysis tools],
-    _ENABLE_CODESIGHS=1,
-    _ENABLE_CODESIGHS= )
-if test -n "$_ENABLE_CODESIGHS"; then
-    if test -d $srcdir/tools/codesighs; then
-        MOZ_MAPINFO=1
-    else
-        AC_MSG_ERROR([Codesighs directory $srcdir/tools/codesighs required.])
-    fi
 fi
 
 dnl ========================================================
@@ -8774,7 +8787,6 @@ if test -n "$MOZ_TELEMETRY_REPORTING" || test -n "$MOZ_SERVICES_HEALTHREPORT" ||
 fi
 
 dnl win32 options
-AC_SUBST(MOZ_MAPINFO)
 AC_SUBST(MOZ_BROWSE_INFO)
 AC_SUBST(MOZ_TOOLS_DIR)
 AC_SUBST(WIN32_REDIST_DIR)
@@ -9054,7 +9066,9 @@ xpcom/xpcom-private.h
 
 AC_SUBST(STLPORT_LIBS)
 
+export WRITE_MOZINFO=1
 AC_OUTPUT([mozilla-config.h])
+unset WRITE_MOZINFO
 
 # Hack around an Apple bug that affects the egrep that comes with OS X 10.7.
 # "env ARCHPREFERENCE=i386,x86_64 arch egrep" first tries to use the 32-bit
@@ -9199,24 +9213,6 @@ dnl so that regeneration via dependencies works correctly
    if test "$?" != 0; then
       AC_MSG_ERROR([failed to generate nICEr Makefiles])
    fi
-fi
-
-# Generate a JSON config file for unittest harnesses etc to read
-# build configuration details from in a standardized way.
-OS_TARGET=${OS_TARGET} \
-TARGET_CPU=${TARGET_CPU} \
-MOZ_DEBUG=${MOZ_DEBUG} \
-MOZ_WIDGET_TOOLKIT=${MOZ_WIDGET_TOOLKIT} \
-UNIVERSAL_BINARY=${UNIVERSAL_BINARY} \
-MOZ_CRASHREPORTER=${MOZ_CRASHREPORTER} \
-MOZ_APP_NAME=${MOZ_APP_NAME} \
-TOPSRCDIR=${_topsrcdir} \
-MOZ_ASAN=${MOZ_ASAN} \
-  $PYTHON ${_topsrcdir}/config/writemozinfo.py ./mozinfo.json.tmp
-if cmp -s ./mozinfo.json.tmp ./mozinfo.json; then
-  rm ./mozinfo.json.tmp
-else
-  mv -f ./mozinfo.json.tmp ./mozinfo.json
 fi
 
 # Run jemalloc configure script
@@ -9416,15 +9412,18 @@ fi
 dist=$MOZ_BUILD_ROOT/dist
 ac_configure_args="$_SUBDIR_CONFIG_ARGS"
 ac_configure_args="$ac_configure_args --enable-threadsafe"
-# Switch to "$MOZ_BUILD_APP" != "browser" when enabling for desktop builds.
-if test "A" = "A"; then
-    # The Internationalization API isn't on by default except in standalone JS
-    # engine builds.  Bugs to enable it in the browser:
+if test "$NIGHTLY_BUILD" = "1" -a "$MOZ_BUILD_APP" = "browser"; then
+    # In desktop nightlies the Internationalization API is disabled, but all
+    # code for it is still built.  Bug 853301 will remove this so that it's
+    # built and the API is enabled.
+    ac_configure_args="$ac_configure_args --with-intl-api=build"
+else
+    # Internationalization isn't built or exposed by default in non-desktop and
+    # non-nightly builds.  Bugs to enable:
     #
-    #   Desktop:  bug 853301
     #   Android:  bug 864843
     #   B2G:      bug 866301
-    ac_configure_args="$ac_configure_args --disable-intl-api"
+    ac_configure_args="$ac_configure_args --without-intl-api"
 fi
 if test "$BUILD_CTYPES"; then
     # Build js-ctypes on the platforms we can.

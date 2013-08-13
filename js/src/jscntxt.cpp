@@ -14,7 +14,7 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Util.h"
 
-#include <locale.h>
+#include <ctype.h>
 #include <stdarg.h>
 #include <string.h>
 #ifdef ANDROID
@@ -30,7 +30,6 @@
 #include "jsfun.h"
 #include "jsgc.h"
 #include "jsiter.h"
-#include "jsmath.h"
 #include "jsobj.h"
 #include "jsopcode.h"
 #include "jsprf.h"
@@ -42,14 +41,14 @@
 
 #include "gc/Marking.h"
 #ifdef JS_ION
-#include "ion/Ion.h"
+#include "jit/Ion.h"
 #endif
 #include "js/CharacterEncoding.h"
-#include "js/MemoryMetrics.h"
 #include "vm/Shape.h"
 #include "yarr/BumpPointerAllocator.h"
 
 #include "jsobjinlines.h"
+#include "jsscriptinlines.h"
 
 #include "vm/Stack-inl.h"
 
@@ -488,21 +487,21 @@ checkReportFlags(JSContext *cx, unsigned *flags)
     return false;
 }
 
-JSBool
+bool
 js_ReportErrorVA(JSContext *cx, unsigned flags, const char *format, va_list ap)
 {
     char *message;
     jschar *ucmessage;
     size_t messagelen;
     JSErrorReport report;
-    JSBool warning;
+    bool warning;
 
     if (checkReportFlags(cx, &flags))
-        return JS_TRUE;
+        return true;
 
     message = JS_vsmprintf(format, ap);
     if (!message)
-        return JS_FALSE;
+        return false;
     messagelen = strlen(message);
 
     PodZero(&report);
@@ -630,7 +629,7 @@ js::PrintError(JSContext *cx, FILE *file, const char *message, JSErrorReport *re
  *
  * Returns true if the expansion succeeds (can fail if out of memory).
  */
-JSBool
+bool
 js_ExpandErrorArguments(JSContext *cx, JSErrorCallback callback,
                         void *userRef, const unsigned errorNumber,
                         char **messagep, JSErrorReport *reportp,
@@ -667,7 +666,7 @@ js_ExpandErrorArguments(JSContext *cx, JSErrorCallback callback,
             } else {
                 reportp->messageArgs = cx->pod_malloc<const jschar*>(argCount + 1);
                 if (!reportp->messageArgs)
-                    return JS_FALSE;
+                    return false;
                 /* NULL-terminate for easy copying. */
                 reportp->messageArgs[argCount] = NULL;
             }
@@ -768,7 +767,7 @@ js_ExpandErrorArguments(JSContext *cx, JSErrorCallback callback,
             goto error;
         JS_snprintf(*messagep, nbytes, defaultErrorMessage, errorNumber);
     }
-    return JS_TRUE;
+    return true;
 
 error:
     if (!messageArgsPassed && reportp->messageArgs) {
@@ -789,20 +788,20 @@ error:
         js_free((void *)*messagep);
         *messagep = NULL;
     }
-    return JS_FALSE;
+    return false;
 }
 
-JSBool
+bool
 js_ReportErrorNumberVA(JSContext *cx, unsigned flags, JSErrorCallback callback,
                        void *userRef, const unsigned errorNumber,
                        ErrorArgumentsType argumentsType, va_list ap)
 {
     JSErrorReport report;
     char *message;
-    JSBool warning;
+    bool warning;
 
     if (checkReportFlags(cx, &flags))
-        return JS_TRUE;
+        return true;
     warning = JSREPORT_IS_WARNING(flags);
 
     PodZero(&report);
@@ -812,7 +811,7 @@ js_ReportErrorNumberVA(JSContext *cx, unsigned flags, JSErrorCallback callback,
 
     if (!js_ExpandErrorArguments(cx, callback, userRef, errorNumber,
                                  &message, &report, argumentsType, ap)) {
-        return JS_FALSE;
+        return false;
     }
 
     ReportError(cx, message, &report, callback, userRef);
@@ -899,16 +898,16 @@ js_ReportIsNotDefined(JSContext *cx, const char *name)
     JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_NOT_DEFINED, name);
 }
 
-JSBool
+bool
 js_ReportIsNullOrUndefined(JSContext *cx, int spindex, HandleValue v,
                            HandleString fallback)
 {
     char *bytes;
-    JSBool ok;
+    bool ok;
 
     bytes = DecompileValueGenerator(cx, spindex, v, fallback);
     if (!bytes)
-        return JS_FALSE;
+        return false;
 
     if (strcmp(bytes, js_undefined_str) == 0 ||
         strcmp(bytes, js_null_str) == 0) {
@@ -955,19 +954,19 @@ js_ReportMissingArg(JSContext *cx, HandleValue v, unsigned arg)
     js_free(bytes);
 }
 
-JSBool
+bool
 js_ReportValueErrorFlags(JSContext *cx, unsigned flags, const unsigned errorNumber,
                          int spindex, HandleValue v, HandleString fallback,
                          const char *arg1, const char *arg2)
 {
     char *bytes;
-    JSBool ok;
+    bool ok;
 
     JS_ASSERT(js_ErrorFormatString[errorNumber].argCount >= 1);
     JS_ASSERT(js_ErrorFormatString[errorNumber].argCount <= 3);
     bytes = DecompileValueGenerator(cx, spindex, v, fallback);
     if (!bytes)
-        return JS_FALSE;
+        return false;
 
     ok = JS_ReportErrorFlagsAndNumber(cx, flags, js_GetErrorMessage,
                                       NULL, errorNumber, bytes, arg1, arg2);
@@ -990,7 +989,7 @@ js_GetErrorMessage(void *userRef, const char *locale, const unsigned errorNumber
     return NULL;
 }
 
-JSBool
+bool
 js_InvokeOperationCallback(JSContext *cx)
 {
     JS_ASSERT_REQUEST_DEPTH(cx);
@@ -1029,7 +1028,7 @@ js_InvokeOperationCallback(JSContext *cx)
      * if it re-enters the JS engine. The embedding must ensure that the
      * callback is disconnected before attempting such re-entry.
      */
-    JSOperationCallback cb = cx->operationCallback;
+    JSOperationCallback cb = cx->runtime()->operationCallback;
     return !cb || cb(cx);
 }
 
@@ -1073,7 +1072,6 @@ JSContext::JSContext(JSRuntime *rt)
     defaultCompartmentObject_(NULL),
     cycleDetectorSet(MOZ_THIS_IN_INITIALIZER_LIST()),
     errorReporter(NULL),
-    operationCallback(NULL),
     data(NULL),
     data2(NULL),
 #ifdef JS_THREADSAFE

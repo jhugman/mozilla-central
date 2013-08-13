@@ -21,7 +21,7 @@
 # 
 # We check the following things in all files.
 #
-# - #includes should have full paths, e.g. "ion/Ion.h", not "Ion.h". 
+# - #includes should have full paths, e.g. "jit/Ion.h", not "Ion.h".
 #
 # - #includes should use the appropriate form for system headers (<...>) and
 #   local headers ("...").
@@ -184,7 +184,7 @@ class FileKind(object):
 
 def get_all_filenames():
     """Get a list of all the files in the (Mercurial or Git) repository."""
-    cmds = [['hg', 'manifest'], ['git', 'ls-files']]
+    cmds = [['hg', 'manifest', '-q'], ['git', 'ls-files']]
     for cmd in cmds:
         try:
             all_filenames = subprocess.check_output(cmd, universal_newlines=True,

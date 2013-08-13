@@ -5760,10 +5760,7 @@ nsCSSFrameConstructor::AppendFramesToParent(nsFrameConstructorState&       aStat
     }
 
     if (!aFrameList.IsEmpty()) {
-      const nsStyleDisplay* parentDisplay = aParentFrame->StyleDisplay();
-      bool positioned =
-        parentDisplay->mPosition == NS_STYLE_POSITION_RELATIVE &&
-        !aParentFrame->IsSVGText();
+      bool positioned = aParentFrame->IsRelativelyPositioned();
       nsFrameItems ibSiblings;
       CreateIBSiblings(aState, aParentFrame, positioned, aFrameList,
                        ibSiblings);
@@ -9795,6 +9792,18 @@ nsCSSFrameConstructor::WrapFramesInFirstLetterFrame(
   }
 }
 
+static nsIFrame*
+FindFirstLetterFrame(nsIFrame* aFrame, nsIFrame::ChildListID aListID)
+{
+  nsFrameList list = aFrame->GetChildList(aListID);
+  for (nsFrameList::Enumerator e(list); !e.AtEnd(); e.Next()) {
+    if (nsGkAtoms::letterFrame == e.get()->GetType()) {
+      return e.get();
+    }
+  }
+  return nullptr;
+}
+
 nsresult
 nsCSSFrameConstructor::RemoveFloatingFirstLetterFrames(
   nsPresContext* aPresContext,
@@ -9802,18 +9811,15 @@ nsCSSFrameConstructor::RemoveFloatingFirstLetterFrames(
   nsIFrame* aBlockFrame,
   bool* aStopLooking)
 {
-  // First look for the float frame that is a letter frame
-  nsIFrame* floatFrame = aBlockFrame->GetFirstChild(nsIFrame::kFloatList);
-  while (floatFrame) {
-    // See if we found a floating letter frame
-    if (nsGkAtoms::letterFrame == floatFrame->GetType()) {
-      break;
-    }
-    floatFrame = floatFrame->GetNextSibling();
-  }
+  // Look for the first letter frame on the kFloatList, then kPushedFloatsList.
+  nsIFrame* floatFrame =
+    ::FindFirstLetterFrame(aBlockFrame, nsIFrame::kFloatList);
   if (!floatFrame) {
-    // No such frame
-    return NS_OK;
+    floatFrame =
+      ::FindFirstLetterFrame(aBlockFrame, nsIFrame::kPushedFloatsList);
+    if (!floatFrame) {
+      return NS_OK;
+    }
   }
 
   // Take the text frame away from the letter frame (so it isn't
@@ -10231,7 +10237,7 @@ nsCSSFrameConstructor::ConstructInline(nsFrameConstructorState& aState,
 
   bool positioned =
     NS_STYLE_DISPLAY_INLINE == aDisplay->mDisplay &&
-    NS_STYLE_POSITION_RELATIVE == aDisplay->mPosition &&
+    aDisplay->IsRelativelyPositionedStyle() &&
     !aParentFrame->IsSVGText();
 
   nsIFrame* newFrame = NS_NewInlineFrame(mPresShell, styleContext);

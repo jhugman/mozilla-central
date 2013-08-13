@@ -169,10 +169,10 @@ struct SortComparatorIds
     bool operator()(jsid a, jsid b, bool *lessOrEqualp)
     {
         /* Pick an arbitrary total order on jsids that is stable across executions. */
-        JSString *astr = IdToString(cx, a);
+        RootedString astr(cx, IdToString(cx, a));
 	if (!astr)
 	    return false;
-        JSString *bstr = IdToString(cx, b);
+        RootedString bstr(cx, IdToString(cx, b));
         if (!bstr)
             return false;
 
@@ -730,7 +730,7 @@ js::GetIteratorObject(JSContext *cx, HandleObject obj, uint32_t flags)
     return &value.toObject();
 }
 
-JSBool
+bool
 js_ThrowStopIteration(JSContext *cx)
 {
     JS_ASSERT(!JS_IsExceptionPending(cx));
@@ -742,7 +742,7 @@ js_ThrowStopIteration(JSContext *cx)
 
 /*** Iterator objects ****************************************************************************/
 
-JSBool
+bool
 js::IteratorConstructor(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -786,7 +786,7 @@ iterator_next_impl(JSContext *cx, CallArgs args)
     return js_IteratorNext(cx, thisObj, args.rval());
 }
 
-static JSBool
+static bool
 iterator_iterator(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -794,7 +794,7 @@ iterator_iterator(JSContext *cx, unsigned argc, Value *vp)
     return true;
 }
 
-JSBool
+bool
 iterator_next(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -808,7 +808,7 @@ static const JSFunctionSpec iterator_methods[] = {
 };
 
 static JSObject *
-iterator_iteratorObject(JSContext *cx, HandleObject obj, JSBool keysonly)
+iterator_iteratorObject(JSContext *cx, HandleObject obj, bool keysonly)
 {
     return obj;
 }
@@ -881,7 +881,7 @@ IsElementIterator(const Value &v)
     return v.isObject() && v.toObject().is<ElementIteratorObject>();
 }
 
-JSBool
+bool
 ElementIteratorObject::next(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -957,7 +957,7 @@ const JSFunctionSpec ElementIteratorObject::methods[] = {
     JS_FS_END
 };
 
-static JSBool
+static bool
 CloseGenerator(JSContext *cx, HandleObject genobj);
 
 bool
@@ -1287,8 +1287,8 @@ js_IteratorNext(JSContext *cx, HandleObject iterobj, MutableHandleValue rval)
     return true;
 }
 
-static JSBool
-stopiter_hasInstance(JSContext *cx, HandleObject obj, MutableHandleValue v, JSBool *bp)
+static bool
+stopiter_hasInstance(JSContext *cx, HandleObject obj, MutableHandleValue v, bool *bp)
 {
     *bp = IsStopIteration(v);
     return true;
@@ -1539,7 +1539,7 @@ typedef enum JSGeneratorOp {
  * Start newborn or restart yielding generator and perform the requested
  * operation inside its frame.
  */
-static JSBool
+static bool
 SendToGenerator(JSContext *cx, JSGeneratorOp op, HandleObject obj,
                 JSGenerator *gen, HandleValue arg)
 {
@@ -1578,7 +1578,7 @@ SendToGenerator(JSContext *cx, JSGeneratorOp op, HandleObject obj,
         break;
     }
 
-    JSBool ok;
+    bool ok;
     {
         GeneratorState state(cx, gen, futureState);
         ok = RunScript(cx, state);
@@ -1615,7 +1615,7 @@ SendToGenerator(JSContext *cx, JSGeneratorOp op, HandleObject obj,
     return false;
 }
 
-static JSBool
+static bool
 CloseGenerator(JSContext *cx, HandleObject obj)
 {
     JSGenerator *gen = obj->as<GeneratorObject>().getGenerator();
@@ -1668,7 +1668,7 @@ generator_send_impl(JSContext *cx, CallArgs args)
     return true;
 }
 
-JSBool
+bool
 generator_send(JSContext *cx, unsigned argc, Value *vp)
 {
     // FIXME: send() is only a method on legacy generator objects.
@@ -1696,7 +1696,7 @@ generator_next_impl(JSContext *cx, CallArgs args)
     return true;
 }
 
-JSBool
+bool
 generator_next(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -1724,7 +1724,7 @@ generator_throw_impl(JSContext *cx, CallArgs args)
     return true;
 }
 
-JSBool
+bool
 generator_throw(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -1759,7 +1759,7 @@ generator_close_impl(JSContext *cx, CallArgs args)
     return true;
 }
 
-JSBool
+bool
 generator_close(JSContext *cx, unsigned argc, Value *vp)
 {
     // FIXME: close() is only a method on legacy generator objects.

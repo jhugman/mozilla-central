@@ -144,7 +144,7 @@ protected:
   }
 
 private:
-  static JSBool
+  static bool
   GetEventListener(JSContext* aCx, JS::Handle<JSObject*> aObj, JS::Handle<jsid> aIdval,
                    JS::MutableHandle<JS::Value> aVp)
   {
@@ -171,9 +171,9 @@ private:
     return true;
   }
 
-  static JSBool
+  static bool
   SetEventListener(JSContext* aCx, JS::Handle<JSObject*> aObj, JS::Handle<jsid> aIdval,
-                   JSBool aStrict, JS::MutableHandle<JS::Value> aVp)
+                   bool aStrict, JS::MutableHandle<JS::Value> aVp)
   {
     JS_ASSERT(JSID_IS_INT(aIdval));
     JS_ASSERT(JSID_TO_INT(aIdval) >= 0 && JSID_TO_INT(aIdval) < STRING_COUNT);
@@ -204,7 +204,7 @@ private:
   static WorkerGlobalScope*
   GetInstancePrivate(JSContext* aCx, JSObject* aObj, const char* aFunctionName);
 
-  static JSBool
+  static bool
   Construct(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
     JS_ReportErrorNumber(aCx, js_GetErrorMessage, NULL, JSMSG_WRONG_CONSTRUCTOR,
@@ -212,7 +212,7 @@ private:
     return false;
   }
 
-  static JSBool
+  static bool
   GetSelf(JSContext* aCx, JS::Handle<JSObject*> aObj, JS::Handle<jsid> aIdval,
           JS::MutableHandle<JS::Value> aVp)
   {
@@ -224,7 +224,7 @@ private:
     return true;
   }
 
-  static JSBool
+  static bool
   GetLocation(JSContext* aCx, JS::Handle<JSObject*> aObj, JS::Handle<jsid> aIdval,
               JS::MutableHandle<JS::Value> aVp)
   {
@@ -250,7 +250,7 @@ private:
     return true;
   }
 
-  static JSBool
+  static bool
   UnwrapErrorEvent(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
     JS_ASSERT(aArgc == 1);
@@ -289,7 +289,7 @@ private:
     return true;
   }
 
-  static JSBool
+  static bool
   GetOnErrorListener(JSContext* aCx, JS::Handle<JSObject*> aObj, JS::Handle<jsid> aIdval,
                      JS::MutableHandle<JS::Value> aVp)
   {
@@ -321,9 +321,9 @@ private:
     return true;
   }
 
-  static JSBool
+  static bool
   SetOnErrorListener(JSContext* aCx, JS::Handle<JSObject*> aObj, JS::Handle<jsid> aIdval,
-                     JSBool aStrict, JS::MutableHandle<JS::Value> aVp)
+                     bool aStrict, JS::MutableHandle<JS::Value> aVp)
   {
     const char* name = sEventStrings[STRING_onerror];
     WorkerGlobalScope* scope = GetInstancePrivate(aCx, aObj, name);
@@ -364,7 +364,7 @@ private:
     return true;
   }
 
-  static JSBool
+  static bool
   GetNavigator(JSContext* aCx, JS::Handle<JSObject*> aObj, JS::Handle<jsid> aIdval,
                JS::MutableHandle<JS::Value> aVp)
   {
@@ -387,7 +387,7 @@ private:
     return true;
   }
 
-  static JSBool
+  static bool
   Close(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
     JSObject* obj = JS_THIS_OBJECT(aCx, aVp);
@@ -403,7 +403,7 @@ private:
     return scope->mWorker->CloseInternal(aCx);
   }
 
-  static JSBool
+  static bool
   ImportScripts(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
     JSObject* obj = JS_THIS_OBJECT(aCx, aVp);
@@ -423,7 +423,7 @@ private:
     return true;
   }
 
-  static JSBool
+  static bool
   SetTimeout(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
     JSObject* obj = JS_THIS_OBJECT(aCx, aVp);
@@ -444,7 +444,7 @@ private:
     return scope->mWorker->SetTimeout(aCx, aArgc, aVp, false);
   }
 
-  static JSBool
+  static bool
   ClearTimeout(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
     JSObject* obj = JS_THIS_OBJECT(aCx, aVp);
@@ -465,7 +465,7 @@ private:
     return scope->mWorker->ClearTimeout(aCx, id);
   }
 
-  static JSBool
+  static bool
   SetInterval(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
     JSObject* obj = JS_THIS_OBJECT(aCx, aVp);
@@ -486,7 +486,7 @@ private:
     return scope->mWorker->SetTimeout(aCx, aArgc, aVp, true);
   }
 
-  static JSBool
+  static bool
   ClearInterval(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
     JSObject* obj = JS_THIS_OBJECT(aCx, aVp);
@@ -507,7 +507,7 @@ private:
     return scope->mWorker->ClearTimeout(aCx, id);
   }
 
-  static JSBool
+  static bool
   Dump(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
     JSObject* obj = JS_THIS_OBJECT(aCx, aVp);
@@ -540,7 +540,7 @@ private:
     return true;
   }
 
-  static JSBool
+  static bool
   AtoB(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
     JSObject* obj = JS_THIS_OBJECT(aCx, aVp);
@@ -566,7 +566,7 @@ private:
     return true;
   }
 
-  static JSBool
+  static bool
   BtoA(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
     JSObject* obj = JS_THIS_OBJECT(aCx, aVp);
@@ -679,7 +679,7 @@ public:
     return proto;
   }
 
-  static JSBool
+  static bool
   InitPrivate(JSContext* aCx, JSObject* aObj, WorkerPrivate* aWorkerPrivate)
   {
     JS_ASSERT(JS_GetClass(aObj) == Class());
@@ -714,7 +714,7 @@ private:
   using EventTarget::GetEventListener;
   using EventTarget::SetEventListener;
 
-  static JSBool
+  static bool
   GetEventListener(JSContext* aCx, JS::Handle<JSObject*> aObj, JS::Handle<jsid> aIdval,
                    JS::MutableHandle<JS::Value> aVp)
   {
@@ -741,9 +741,9 @@ private:
     return true;
   }
 
-  static JSBool
+  static bool
   SetEventListener(JSContext* aCx, JS::Handle<JSObject*> aObj, JS::Handle<jsid> aIdval,
-                   JSBool aStrict, JS::MutableHandle<JS::Value> aVp)
+                   bool aStrict, JS::MutableHandle<JS::Value> aVp)
   {
     JS_ASSERT(JSID_IS_INT(aIdval));
     JS_ASSERT(JSID_TO_INT(aIdval) >= 0 && JSID_TO_INT(aIdval) < STRING_COUNT);
@@ -787,7 +787,7 @@ private:
     return NULL;
   }
 
-  static JSBool
+  static bool
   Construct(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
     JS_ReportErrorNumber(aCx, js_GetErrorMessage, NULL, JSMSG_WRONG_CONSTRUCTOR,
@@ -795,11 +795,11 @@ private:
     return false;
   }
 
-  static JSBool
+  static bool
   Resolve(JSContext* aCx, JS::Handle<JSObject*> aObj, JS::Handle<jsid> aId, unsigned aFlags,
           JS::MutableHandle<JSObject*> aObjp)
   {
-    JSBool resolved;
+    bool resolved;
     if (!JS_ResolveStandardClass(aCx, aObj, aId, &resolved)) {
       return false;
     }
@@ -832,7 +832,7 @@ private:
     }
   }
 
-  static JSBool
+  static bool
   PostMessage(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
     JSObject* obj = JS_THIS_OBJECT(aCx, aVp);

@@ -94,6 +94,7 @@ webidl_files = \
   Function.webidl \
   GainNode.webidl \
   Geolocation.webidl \
+  History.webidl \
   HTMLAnchorElement.webidl \
   HTMLAppletElement.webidl \
   HTMLAreaElement.webidl \
@@ -183,11 +184,13 @@ webidl_files = \
   LinkStyle.webidl \
   LocalMediaStream.webidl \
   Location.webidl \
+  MediaElementAudioSourceNode.webidl \
   MediaError.webidl \
   MediaRecorder.webidl \
   MediaSource.webidl \
   MediaStream.webidl \
   MediaStreamAudioDestinationNode.webidl \
+  MediaStreamAudioSourceNode.webidl \
   MediaStreamEvent.webidl \
   MediaStreamTrack.webidl \
   MessageEvent.webidl \
@@ -221,6 +224,7 @@ webidl_files = \
   PerformanceNavigation.webidl \
   PerformanceTiming.webidl \
   PeriodicWave.webidl \
+  PhoneNumberService.webidl \
   Plugin.webidl \
   PluginArray.webidl \
   Position.webidl \
@@ -435,7 +439,10 @@ endif
 
 ifdef MOZ_B2G_RIL
 webidl_files += \
+  CallsList.webidl \
   MozStkCommandEvent.webidl \
+  Telephony.webidl \
+  TelephonyCall.webidl \
   $(NULL)
 endif
 
@@ -470,7 +477,10 @@ webidl_files += \
 
 ifdef MOZ_B2G_BT
 webidl_files += \
+  BluetoothAdapter.webidl \
+  BluetoothDevice.webidl \
   BluetoothDeviceEvent.webidl \
+  BluetoothManager.webidl \
   BluetoothStatusChangedEvent.webidl \
   $(NULL)
 endif

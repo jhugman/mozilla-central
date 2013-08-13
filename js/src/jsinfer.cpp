@@ -16,9 +16,9 @@
 
 #include "jsapi.h"
 #include "jscntxt.h"
-#include "jsfriendapi.h"
 #include "jsgc.h"
 #include "jsobj.h"
+#include "jsprf.h"
 #include "jsscript.h"
 #include "jsstr.h"
 #include "jsworkers.h"
@@ -26,9 +26,9 @@
 
 #include "gc/Marking.h"
 #ifdef JS_ION
-#include "ion/BaselineJIT.h"
-#include "ion/Ion.h"
-#include "ion/IonCompartment.h"
+#include "jit/BaselineJIT.h"
+#include "jit/Ion.h"
+#include "jit/IonCompartment.h"
 #endif
 #include "js/MemoryMetrics.h"
 #include "vm/Shape.h"
