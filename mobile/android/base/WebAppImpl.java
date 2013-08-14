@@ -71,6 +71,8 @@ public class WebAppImpl extends GeckoApp {
         try {
             mOrigin = new URL(origin);
         } catch (java.net.MalformedURLException ex) {
+            Log.w(LOGTAG, "Unable to parse origin: ", ex);
+
             // If we can't parse the this is an app protocol, just settle for not having an origin
             if (!origin.startsWith("app://")) {
                 return;
@@ -81,7 +83,7 @@ public class WebAppImpl extends GeckoApp {
             try {
                 mOrigin = new URL(getIntent().getData().toString());
             } catch (java.net.MalformedURLException ex2) {
-                Log.e(LOGTAG, "Unable to parse intent url: ", ex);
+                Log.e(LOGTAG, "Unable to parse intent url: ", ex2);
             }
         }
     }
