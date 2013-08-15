@@ -72,22 +72,6 @@ AutoScriptEvaluate::~AutoScriptEvaluate()
 
     JS_EndRequest(mJSContext);
 
-    // If this is a JSContext that has a private context that provides a
-    // nsIXPCScriptNotify interface, then notify the object the script has
-    // been executed.
-    //
-    // Note: We rely on the rule that if any JSContext in our JSRuntime has
-    // private data that points to an nsISupports subclass, it has also set
-    // the JSOPTION_PRIVATE_IS_NSISUPPORTS option.
-
-    if (JS_GetOptions(mJSContext) & JSOPTION_PRIVATE_IS_NSISUPPORTS) {
-        nsCOMPtr<nsIXPCScriptNotify> scriptNotify =
-            do_QueryInterface(static_cast<nsISupports*>
-                                         (JS_GetContextPrivate(mJSContext)));
-        if (scriptNotify)
-            scriptNotify->ScriptExecuted();
-    }
-
     if (mErrorReporterSet)
         JS_SetErrorReporter(mJSContext, NULL);
 }
@@ -266,8 +250,8 @@ nsXPCWrappedJSClass::CallQueryInterfaceOnJSObject(JSContext* cx,
         JS_SetOptions(cx, oldOpts);
 
         if (!success) {
-            NS_ASSERTION(JS_IsExceptionPending(cx),
-                         "JS failed without setting an exception!");
+            MOZ_ASSERT(JS_IsExceptionPending(cx),
+                       "JS failed without setting an exception!");
 
             RootedValue jsexception(cx, NullValue());
 
@@ -843,8 +827,8 @@ nsXPCWrappedJSClass::GetArraySizeFromParam(JSContext* cx,
 
     // This should be enforced by the xpidl compiler, but it's not.
     // See bug 695235.
-    NS_ABORT_IF_FALSE(arg_param.GetType().TagPart() == nsXPTType::T_U32,
-                      "size_is references parameter of invalid type.");
+    MOZ_ASSERT(arg_param.GetType().TagPart() == nsXPTType::T_U32,
+               "size_is references parameter of invalid type.");
 
     if (arg_param.IsIndirect())
         *result = *(uint32_t*)nativeParams[argnum].val.p;
@@ -923,7 +907,7 @@ void
 nsXPCWrappedJSClass::CleanupPointerTypeObject(const nsXPTType& type,
                                               void** pp)
 {
-    NS_ASSERTION(pp,"null pointer");
+    MOZ_ASSERT(pp,"null pointer");
     if (type.IsInterfacePointer()) {
         nsISupports* p = *((nsISupports**)pp);
         if (p) p->Release();
@@ -1491,7 +1475,7 @@ pre_call_clean_up:
     foundDependentParam = false;
     for (i = 0; i < paramCount; i++) {
         const nsXPTParamInfo& param = info->params[i];
-        NS_ABORT_IF_FALSE(!param.IsShared(), "[shared] implies [noscript]!");
+        MOZ_ASSERT(!param.IsShared(), "[shared] implies [noscript]!");
         if (!param.IsOut() && !param.IsDipper())
             continue;
 

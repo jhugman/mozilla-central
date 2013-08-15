@@ -9,7 +9,6 @@
 
 #include "mozilla/MemoryReporting.h"
 
-#include "jsautooplen.h"
 #include "jsdbgapi.h"
 #include "jsfun.h"
 #include "jsscript.h"
@@ -1018,12 +1017,7 @@ class FrameRegs
         fp_ = &fp;
     }
 
-    void setToEndOfScript() {
-        JSScript *script = fp()->script();
-        sp = fp()->base();
-        pc = script->code + script->length - JSOP_STOP_LENGTH;
-        JS_ASSERT(*pc == JSOP_STOP);
-    }
+    void setToEndOfScript();
 
     MutableHandleValue stackHandleAt(int i) {
         return MutableHandleValue::fromMarkedLocation(&sp[i]);
@@ -1226,15 +1220,16 @@ class InterpreterActivation : public Activation
     friend class js::InterpreterFrameIterator;
 
     StackFrame *const entry_; // Entry frame for this activation.
-    StackFrame *current_;     // The most recent frame.
     FrameRegs &regs_;
+    int *const switchMask_; // For debugger interrupts, see js::Interpret.
 
 #ifdef DEBUG
     size_t oldFrameCount_;
 #endif
 
   public:
-    inline InterpreterActivation(JSContext *cx, StackFrame *entry, FrameRegs &regs);
+    inline InterpreterActivation(JSContext *cx, StackFrame *entry, FrameRegs &regs,
+                                 int *const switchMask);
     inline ~InterpreterActivation();
 
     inline bool pushInlineFrame(const CallArgs &args, HandleScript script,
@@ -1242,11 +1237,19 @@ class InterpreterActivation : public Activation
     inline void popInlineFrame(StackFrame *frame);
 
     StackFrame *current() const {
-        JS_ASSERT(current_);
-        return current_;
+        return regs_.fp();
     }
     FrameRegs &regs() const {
         return regs_;
+    }
+
+    // If this js::Interpret frame is running |script|, enable interrupts.
+    void enableInterruptsIfRunning(JSScript *script) {
+        if (regs_.fp()->script() == script)
+            enableInterruptsUnconditionally();
+    }
+    void enableInterruptsUnconditionally() {
+        *switchMask_ = -1;
     }
 };
 

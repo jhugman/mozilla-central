@@ -700,10 +700,7 @@ class JSScript : public js::gc::Cell
     js::ion::IonScript *const *addressOfIonScript() const {
         return &ion;
     }
-    void setIonScript(js::ion::IonScript *ionScript) {
-        ion = ionScript;
-        updateBaselineOrIonRaw();
-    }
+    inline void setIonScript(js::ion::IonScript *ionScript);
 
     bool hasBaselineScript() const {
         return baseline && baseline != BASELINE_DISABLED_SCRIPT;
@@ -715,10 +712,7 @@ class JSScript : public js::gc::Cell
         JS_ASSERT(hasBaselineScript());
         return baseline;
     }
-    void setBaselineScript(js::ion::BaselineScript *baselineScript) {
-        baseline = baselineScript;
-        updateBaselineOrIonRaw();
-    }
+    inline void setBaselineScript(js::ion::BaselineScript *baselineScript);
 
     void updateBaselineOrIonRaw();
 
@@ -741,9 +735,7 @@ class JSScript : public js::gc::Cell
     js::ion::IonScript *maybeParallelIonScript() const {
         return parallelIon;
     }
-    void setParallelIonScript(js::ion::IonScript *ionScript) {
-        parallelIon = ionScript;
-    }
+    inline void setParallelIonScript(js::ion::IonScript *ionScript);
 
     static size_t offsetOfBaselineScript() {
         return offsetof(JSScript, baseline);
@@ -810,9 +802,6 @@ class JSScript : public js::gc::Cell
     inline bool hasAnalysis();
     inline void clearAnalysis();
     inline js::analyze::ScriptAnalysis *analysis();
-
-    /* Heuristic to check if the function is expected to be "short running". */
-    bool isShortRunning();
 
     inline void clearPropertyReadTypes();
 
