@@ -1987,14 +1987,95 @@ this.DOMApplicationRegistry = {
     }
   },
 
-  confirmInstall: function(aData, aProfileDir, aOfflineCacheObserver,
-                           aInstallSuccessCallback) {
-    let isReinstall = false;
-    let app = aData.app;
-    app.removable = true;
+  _setupApp : function(aData, aId) {
+      let app = aData.app;
 
-    let id = this._appIdForManifestURL(app.manifestURL);
-    let localId = this.getAppLocalIdByManifestURL(app.manifestURL);
+      // app can be uninstalled
+      app.removable = true;
+
+      if (aData.isPackage) {
+        // Override the origin with the correct id.
+        app.origin = "app://" + aId;
+      }
+
+      app.id = aId;
+      app.installTime = Date.now();
+      app.lastUpdateCheck = Date.now();
+      return app;
+  },
+
+  _cloneApp : function(aData, aApp, aManifest, aId, aLocalId) {
+
+    let appObject = AppsUtils.cloneAppObject(aApp);
+    appObject.appStatus = aApp.appStatus || Ci.nsIPrincipal.APP_STATUS_INSTALLED;
+
+
+    if (manifest.appcache_path) {
+    let appNote = JSON.stringify(appObject);
+    appNote.id = aId;
+
+    if (aManifest.appcache_path) {
+      appObject.installState = "pending";
+      appObject.downloadAvailable = true;
+      appObject.downloading = true;
+      appObject.downloadSize = 0;
+      appObject.readyToApplyDownload = false;
+    } else if (aManifest.package_path) {
+      appObject.installState = "pending";
+      appObject.downloadAvailable = true;
+      appObject.downloading = true;
+      appObject.downloadSize = aManifest.size;
+      appObject.readyToApplyDownload = false;
+    } else {
+      appObject.installState = "installed";
+      appObject.downloadAvailable = false;
+      appObject.downloading = false;
+      appObject.readyToApplyDownload = false;
+    }
+
+    appObject.localId = aLocalId;
+    appObject.basePath = FileUtils.getDir(DIRECTORY_NAME, ["webapps"], true, true).path;
+    appObject.name = aManifest.name;
+    appObject.csp = aManifest.csp || "";
+    appObject.installerAppId = aData.appId;
+    appObject.installerIsBrowser = aData.isBrowser;
+
+    return {
+        "appNote": appNote,
+        "appObject": appObject
+    };
+  },
+
+  _copyStates: function(aData, aAppObject) {
+    ["installState", "downloadAvailable", "downloading", "downloadSize", "readyToApplyDownload"].forEach(function(aProp) {
+      aData.app[aProp] = aAppObject[aProp];
+     });
+  },
+
+  _writeManifestFile: function(aId, aIsPackage, aJsonManifest) {
+    let dir = FileUtils.getDir(DIRECTORY_NAME, ["webapps", aId], true, true);
+    let manFile = dir.clone();
+
+    // For packaged apps, keep the update manifest distinct from the app manifest.
+    let manifestName = aIsPackage ? "update.webapp" : "manifest.webapp";
+    manFile.append(manifestName);
+    this._writeFile(manFile, JSON.stringify(aJsonManifest), function() { });
+  },
+
+  confirmInstall: function(aData, aFromSync, aProfileDir, aOfflineCacheObserver, aInstallSuccessCallback) {
+    debug("confirmInstall");
+
+    let origin = Services.io.newURI(aData.app.origin, null, null);
+    let id = aData.app.syncId || this._appId(aData.app.origin);
+    let manifestURL = origin.resolve(aData.app.manifestURL);
+    let localId = this.getAppLocalIdByManifestURL(manifestURL);
+
+    // For packaged apps, we need to get the id from the manifestURL.
+    if (localId && !id) {
+      id = this._appIdForManifestURL(manifestURL);
+    }
+
+    let isReinstall = false;
 
     // Installing an application again is considered as an update.
     if (id) {
@@ -2008,104 +2089,58 @@ this.DOMApplicationRegistry = {
       id = this.makeAppId();
       localId = this._nextLocalId();
     }
-    app.id = id;
 
-    let manifestName = "manifest.webapp";
-    if (aData.isPackage) {
-      // Override the origin with the correct id.
-      app.origin = "app://" + id;
+    let app = this._setupApp(aData, id);
 
-      // For packaged apps, keep the update manifest distinct from the app
-      // manifest.
-      manifestName = "update.webapp";
-    }
-
-    let appObject = AppsUtils.cloneAppObject(app);
-    appObject.appStatus = app.appStatus || Ci.nsIPrincipal.APP_STATUS_INSTALLED;
-
-    appObject.installTime = app.installTime = Date.now();
-    appObject.lastUpdateCheck = app.lastUpdateCheck = Date.now();
-    let appNote = JSON.stringify(appObject);
-    appNote.id = id;
-
-    appObject.id = id;
-    appObject.localId = localId;
-    appObject.basePath = FileUtils.getDir(DIRECTORY_NAME, ["webapps"], true, true).path;
-    let dir = this._getAppDir(id);
-    let manFile = dir.clone();
-    manFile.append(manifestName);
     let jsonManifest = aData.isPackage ? app.updateManifest : app.manifest;
-    this._writeFile(manFile, JSON.stringify(jsonManifest), function() { });
+    this._writeManifestFile(id, aData.isPackage, jsonManifest);
 
+    debug("jsonManifest: " + JSON.stringify(jsonManifest));
+    debug("app.origin: " + app.origin);
     let manifest = new ManifestHelper(jsonManifest, app.origin);
 
-    if (manifest.appcache_path) {
-      appObject.installState = "pending";
-      appObject.downloadAvailable = true;
-      appObject.downloading = true;
-      appObject.downloadSize = 0;
-      appObject.readyToApplyDownload = false;
-    } else if (manifest.package_path) {
-      appObject.installState = "pending";
-      appObject.downloadAvailable = true;
-      appObject.downloading = true;
-      appObject.downloadSize = manifest.size;
-      appObject.readyToApplyDownload = false;
-    } else {
-      appObject.installState = "installed";
-      appObject.downloadAvailable = false;
-      appObject.downloading = false;
-      appObject.readyToApplyDownload = false;
-    }
-
-    appObject.name = manifest.name;
-    appObject.csp = manifest.csp || "";
-
-    appObject.installerAppId = aData.appId;
-    appObject.installerIsBrowser = aData.isBrowser;
+    let clonedObjects = this._cloneApp(aData, app, manifest, id, localId);
+    let appNote = clonedObjects["appNote"];
+    let appObject = clonedObjects["appObject"];
 
     this.webapps[id] = appObject;
 
     // For package apps, the permissions are not in the mini-manifest, so
     // don't update the permissions yet.
-    if (!aData.isPackage) {
-      if (supportUseCurrentProfile()) {
-        PermissionsInstaller.installPermissions({ origin: appObject.origin,
-                                                  manifestURL: appObject.manifestURL,
-                                                  manifest: jsonManifest },
-                                                isReinstall, (function() {
-          this.uninstall(aData, aData.mm);
-        }).bind(this));
-      }
+    if (!aData.isPackage && supportUseCurrentProfile()) {
+
+      PermissionsInstaller.installPermissions({ origin: appObject.origin,
+                                                manifestURL: appObject.manifestURL,
+                                                manifest: jsonManifest },
+                                              isReinstall, (function() {
+        this.uninstall(aData, aData.mm);
+      }).bind(this));
     }
 
-    ["installState", "downloadAvailable",
-     "downloading", "downloadSize", "readyToApplyDownload"].forEach(function(aProp) {
-      aData.app[aProp] = appObject[aProp];
-     });
+    this._copyStates(aData, appObject);
 
-    if (manifest.appcache_path) {
-      this.queuedDownload[app.manifestURL] = {
-        manifest: manifest,
-        app: appObject,
-        profileDir: aProfileDir,
-        offlineCacheObserver: aOfflineCacheObserver
-      }
+    this.queuedDownload[app.manifestURL] = {
+      manifest: manifest,
+      app: appObject,
+      profileDir: aProfileDir,
+      offlineCacheObserver: aOfflineCacheObserver
     }
 
     // We notify about the successful installation via mgmt.oninstall and the
     // corresponging DOMRequest.onsuccess event as soon as the app is properly
     // saved in the registry.
-    this._saveApps((function() {
-      this.broadcastMessage("Webapps:AddApp", { id: id, app: appObject });
-      this.broadcastMessage("Webapps:Install:Return:OK", aData);
-      Services.obs.notifyObservers(this, "webapps-sync-install", appNote);
-    }).bind(this));
+    if (!aFromSync) {
+      this._saveApps((function() {
+        this.broadcastMessage("Webapps:AddApp", { id: id, app: appObject });
+        this.broadcastMessage("Webapps:Install:Return:OK", aData);
+        Services.obs.notifyObservers(this, "webapps-sync-install", appNote);
+      }).bind(this));
+    }
 
     if (!aData.isPackage) {
       this.updateAppHandlers(null, app.manifest, app);
       if (aInstallSuccessCallback) {
-        aInstallSuccessCallback(app.manifest);
+        aInstallSuccessCallback(manifest);
       }
     }
 
@@ -2114,19 +2149,64 @@ this.DOMApplicationRegistry = {
       // can't be used to resolve package paths.
       manifest = new ManifestHelper(jsonManifest, app.manifestURL);
 
-      this.queuedPackageDownload[app.manifestURL] = {
-        manifest: manifest,
-        app: appObject,
-        callback: aInstallSuccessCallback
-      }
+      this.downloadPackage(manifest, appObject, false, (function(aId, aManifest) {
+        this._downloadPackageCallback(aId, aManifest, app, appObject, aInstallSuccessCallback);
+      }).bind(this));
     }
   },
-
+  _downloadPackageCallback: function(aId, aManifest, aGeneratedApp, aAppObject, aInstallSuccessCallback) {
+    debug("_downloadPackageCallback");
+    // Success! Move the zip out of TmpD.
+    let app = DOMApplicationRegistry.webapps[aId];
+    let zipFile = FileUtils.getFile("TmpD", ["webapps", aId, "application.zip"], true);
+    let dir = FileUtils.getDir(DIRECTORY_NAME, ["webapps", aId], true, true);
+    zipFile.moveTo(dir, "application.zip");
+    let tmpDir = FileUtils.getDir("TmpD", ["webapps", aId], true, true);
+    try {
+      tmpDir.remove(true);
+    } catch(e) { }
+   
+    // Save the manifest
+    let manFile = dir.clone();
+    manFile.append("manifest.webapp");
+    this._writeFile(manFile, JSON.stringify(aManifest), function() { });
+    // Set state and fire events.
+    aGeneratedApp.installState = "installed";
+    aGeneratedApp.downloading = false;
+    aGeneratedApp.downloadAvailable = false;
+    this._saveApps((function() {
+      this.updateAppHandlers(null, aManifest, aAppObject);
+      if (supportUseCurrentProfile()) {
+        // Update the permissions for this app.
+        PermissionsInstaller.installPermissions({ manifest: aManifest,
+                                                  origin: aAppObject.origin,
+                                                  manifestURL: aAppObject.manifestURL },
+                                                true);
+      }
+      debug("About to fire Webapps:PackageEvent 'installed'");
+      this.broadcastMessage("Webapps:PackageEvent",
+                            { type: "installed",
+                              manifestURL: aAppObject.manifestURL,
+                              app: aGeneratedApp,
+                              manifest: aManifest });
+      if (aInstallSuccessCallback) {
+        aInstallSuccessCallback(aManifest);
+      }
+    }).bind(this));
+  },
   _nextLocalId: function() {
     let id = Services.prefs.getIntPref("dom.mozApps.maxLocalId") + 1;
     Services.prefs.setIntPref("dom.mozApps.maxLocalId", id);
     Services.prefs.savePrefFile(null);
     return id;
+  },
+
+  _appId: function(aURI) {
+    for (let id in this.webapps) {
+      if (this.webapps[id].origin == aURI)
+        return id;
+    }
+    return null;
   },
 
   _appIdForManifestURL: function(aURI) {
@@ -2210,112 +2290,239 @@ this.DOMApplicationRegistry = {
     let app = this.webapps[id];
 
     let self = this;
-    // Removes the directory we created, and sends an error to the DOM side.
-    function cleanup(aError) {
-      debug("Cleanup: " + aError);
-      let dir = FileUtils.getDir("TmpD", ["webapps", id], true, true);
+
+    function cleanupWrapper(aError) {
+      debug("cleanupWrapper" );
+      (function() {
+        this._cleanup(aError, id, app, aApp, aIsUpdate);
+      }).bind(self)();
+    }
+
+    function downloadWrapper() {
+      debug("downloadWrapper" );
+
+      (function() {
+        this._download(aManifest, app, aApp, id, aIsUpdate, cleanupWrapper, aOnSuccess);
+      }).bind(self)();
+    }
+
+    function checkDownloadSizeWrapper(aFreeBytes) {
+      debug("checkDownloadSizeWrapper " +aFreeBytes);
+     
+      (function() {
+        this._checkDownloadSize(aFreeBytes, aApp, cleanupWrapper, downloadWrapper);
+      }).bind(self)();
+    }
+
+    let deviceStorage = Services.wm.getMostRecentWindow("navigator:browser").navigator.getDeviceStorage("apps");
+    if (deviceStorage) {
+      let req = deviceStorage.freeSpace();
+      req.onsuccess = req.onerror = function statResult(e) {
+        // Even if we could not retrieve the device storage free space, we try
+        // to download the package.
+        if (!e.target.result) {
+          downloadWrapper();
+          return;
+        }
+
+        let freeBytes = e.target.result;
+        checkDownloadSizeWrapper(freeBytes);
+      }
+    } else {
+      debug("No deviceStorage");
+      // deviceStorage isn't available, so use FileUtils to find the size of available storage.
+      let dir = FileUtils.getDir(DIRECTORY_NAME, ["webapps"], true, true);
       try {
-        dir.remove(true);
-      } catch (e) { }
-
-      // We avoid notifying the error to the DOM side if the app download
-      // was cancelled via cancelDownload, which already sends its own
-      // notification.
-      if (app.isCanceling) {
-        delete app.isCanceling;
-        return;
+        checkDownloadSizeWrapper(dir.diskSpaceAvailable);
+      } catch(ex) {
+        debug("Error thrown Will try and download: " + ex);
+        // If disk space information isn't available, we'll end up here.
+        // We should either proceed anyway, otherwise devices that support neither
+        // deviceStorage nor diskSpaceAvailable will never be able to install packaged apps.
+        downloadWrapper();
       }
 
-      let download = AppDownloadManager.get(aApp.manifestURL);
-      app.downloading = false;
+    }
+  },
+ 
+  // Removes the directory we created, and sends an error to the DOM side.
+  _cleanup: function(aError, aId, aGeneratedApp, aApp, aIsUpdate) {
+    debug("Cleanup: " + aError);
+    let dir = FileUtils.getDir("TmpD", ["webapps", aId], true, true);
+    try {
+      dir.remove(true);
+    } catch (e) { }
 
-      // If there were not enough storage to download the package we
-      // won't have a record of the download details, so we just set the
-      // installState to 'pending' at first download and to 'installed' when
-      // updating.
-      app.installState = download ? download.previousState
-                                  : aIsUpdate ? "installed"
-                                  : "pending";
-
-      if (app.staged) {
-        delete app.staged;
-      }
-
-      self.broadcastMessage("Webapps:PackageEvent",
-                            { type: "error",
-                              manifestURL:  aApp.manifestURL,
-                              error: aError,
-                              app: app });
-      self._saveApps();
-      AppDownloadManager.remove(aApp.manifestURL);
+    // We avoid notifying the error to the DOM side if the app download
+    // was cancelled via cancelDownload, which already sends its own
+    // notification.
+    if (aGeneratedApp.isCanceling) {
+      delete aGeneratedApp.isCanceling;
+      return;
     }
 
-    function sendProgressEvent() {
-      self.broadcastMessage("Webapps:PackageEvent",
-                            { type: "progress",
-                              manifestURL: aApp.manifestURL,
-                              app: app });
+    let download = AppDownloadManager.get(aApp.manifestURL);
+    aGeneratedApp.downloading = false;
+
+    // If there were not enough storage to download the package we
+    // won't have a record of the download details, so we just set the
+    // installState to 'pending' at first download and to 'installed' when
+    // updating.
+    aGeneratedApp.installState = download ? download.previousState
+                                : aIsUpdate ? "installed"
+                                : "pending";
+
+    if (aGeneratedApp.staged) {
+      delete aGeneratedApp.staged;
     }
 
-    // aStoreId must be a string of the form
-    //   <installOrigin>#<storeId from ids.json>
-    // aStoreVersion must be a positive integer.
-    function checkForStoreIdMatch(aStoreId, aStoreVersion) {
-      // Things to check:
-      // 1. if it's a update:
-      //   a. We should already have this storeId, or the original storeId must start
-      //      with STORE_ID_PENDING_PREFIX
-      //   b. The manifestURL for the stored app should be the same one we're
-      //      updating
-      //   c. And finally the version of the update should be higher than the one
-      //      on the already installed package
-      // 2. else
-      //   a. We should not have this storeId on the list
-      // We're currently launching WRONG_APP_STORE_ID for all the mismatch kind of
-      // errors, and APP_STORE_VERSION_ROLLBACK for the version error.
+    this.broadcastMessage("Webapps:PackageEvent",
+                          { type: "error",
+                            manifestURL:  aApp.manifestURL,
+                            error: aError,
+                            app: aGeneratedApp });
+    this._saveApps();
+    AppDownloadManager.remove(aApp.manifestURL);
+  },
 
-      // Does an app with this storeID exist already?
-      let appId = self.getAppLocalIdByStoreId(aStoreId);
-      let isInstalled = appId != Ci.nsIScriptSecurityManager.NO_APP_ID;
-      if (aIsUpdate) {
-        let isDifferent = app.localId !== appId;
-        let isPending = app.storeId.indexOf(STORE_ID_PENDING_PREFIX) == 0;
+  _download: function(aManifest, aGeneratedApp, aApp, aId, aIsUpdate, aCleanup, aOnSuccess) {
+    debug("_download");
+    debug("About to download " + aManifest.fullPackagePath());
 
-        if ((!isInstalled && !isPending) || (isInstalled && isDifferent)) {
-          throw "WRONG_APP_STORE_ID";
-        }
+    let self = this;
 
-        if (!isPending && (app.storeVersion >= aStoreVersion)) {
-          throw "APP_STORE_VERSION_ROLLBACK";
-        }
-
-      } else if (isInstalled) {
-        throw "WRONG_APP_STORE_ID";
-      }
+    let requestChannel = NetUtil.newChannel(aManifest.fullPackagePath()).QueryInterface(Ci.nsIHttpChannel);
+    requestChannel.loadFlags |= Ci.nsIRequest.INHIBIT_CACHING;
+    if (aGeneratedApp.packageEtag) {
+      debug("Add If-None-Match header: " + aGeneratedApp.packageEtag);
+      requestChannel.setRequestHeader("If-None-Match", aGeneratedApp.packageEtag, false);
     }
 
-    function download() {
-      debug("About to download " + aManifest.fullPackagePath());
-
-      let requestChannel = NetUtil.newChannel(aManifest.fullPackagePath())
-                                  .QueryInterface(Ci.nsIHttpChannel);
-      requestChannel.loadFlags |= Ci.nsIRequest.INHIBIT_CACHING;
-      if (app.packageEtag) {
-        debug("Add If-None-Match header: " + app.packageEtag);
-        requestChannel.setRequestHeader("If-None-Match", app.packageEtag, false);
+    AppDownloadManager.add(aApp.manifestURL,
+      {
+        channel: requestChannel,
+        appId: aId,
+        previousState: aIsUpdate ? "installed" : "pending"
       }
+    );
 
-      AppDownloadManager.add(aApp.manifestURL,
-        {
-          channel: requestChannel,
-          appId: id,
-          previousState: aIsUpdate ? "installed" : "pending"
+    this._setupRequestChannelNotificationCallbacks(requestChannel, aApp, aGeneratedApp);
+     
+ 
+    // We set the 'downloading' flag to true right before starting the fetch.
+    aGeneratedApp.downloading = true;
+    // We determine the app's 'installState' according to its previous
+    // state. Cancelled download should remain as 'pending'. Successfully
+    // installed apps should morph to 'updating'.
+    aGeneratedApp.installState = aIsUpdate ? "updating" : "pending";
+
+    // initialize the progress to 0 right now
+    aGeneratedApp.progress = 0;
+
+    // Staging the zip in TmpD until all the checks are done.
+    let zipFile = FileUtils.getFile("TmpD", ["webapps", aId, "application.zip"], true);
+
+    // We need an output stream to write the channel content to the zip file.
+    let outputStream = Cc["@mozilla.org/network/file-output-stream;1"].createInstance(Ci.nsIFileOutputStream);
+    // write, create, truncate
+    outputStream.init(zipFile, 0x02 | 0x08 | 0x20, parseInt("0664", 8), 0);
+    let bufferedOutputStream = Cc['@mozilla.org/network/buffered-output-stream;1'].createInstance(Ci.nsIBufferedOutputStream);
+    bufferedOutputStream.init(outputStream, 1024);
+
+    // Create a listener that will give data to the file output stream.
+    let listener = Cc["@mozilla.org/network/simple-stream-listener;1"].createInstance(Ci.nsISimpleStreamListener);
+    listener.init(bufferedOutputStream, {
+      onStartRequest: function(aRequest, aContext) {
+        // Nothing to do there anymore.
+      },
+
+      onStopRequest: function(aRequest, aContext, aStatusCode) {
+        debug("onStopRequest " + aStatusCode);
+        bufferedOutputStream.close();
+        outputStream.close();
+
+        if (!Components.isSuccessCode(aStatusCode)) {
+          aCleanup("NETWORK_ERROR");
+          return;
         }
-      );
 
+        // If we get a 4XX or a 5XX http status, bail out like if we had a
+        // network error.
+        let responseStatus = requestChannel.responseStatus;
+        if (responseStatus >= 400 && responseStatus <= 599) {
+          // unrecoverable error, don't bug the user
+          aGeneratedApp.downloadAvailable = false;
+          aCleanup("NETWORK_ERROR");
+          return;
+        }
+        (function() {
+          this._callComputeFileHash(zipFile, aApp, aGeneratedApp, aIsUpdate, aManifest, requestChannel, aId, aOnSuccess, aCleanup, responseStatus);
+        }).bind(self)();
+      }
+    });
+
+    requestChannel.asyncOpen(listener, null);
+   
+    // send a first progress event to correctly set the DOM object's properties
+    this._sendDownloadProgressEvent(this, aApp, aGeneratedApp);
+  },
+
+  _callComputeFileHash: function(zipFile, aApp, aGeneratedApp, aIsUpdate, aManifest, requestChannel, aId, aOnSuccess, aCleanup, aResponseStatus) {
+    debug("_callComputeFileHash");
+    this.computeFileHash(zipFile, (function(aHash) {
+      debug("computeFileHash CALLBACK success");
+      let openJarSuccess = (function(aRv, aZipReader){
+        debug("openJarSuccess");
+        this._openSignedJarFileAsyncCallback(aRv, aZipReader, aApp, aGeneratedApp, aIsUpdate, aManifest, requestChannel, aHash, aId, aOnSuccess, aCleanup);
+      }).bind(this);
+
+      let openJar = function() {
+
+        debug("openJar");
+        let certdb;
+        try {
+          certdb = Cc["@mozilla.org/security/x509certdb;1"].getService(Ci.nsIX509CertDB);
+        } catch (e) {
+          debug("_onHashComputed error: " + e);
+          // unrecoverable error, don't bug the user
+          aGeneratedApp.downloadAvailable = false;
+          aCleanup("CERTDB_ERROR");
+          return;
+        }
+        certdb.openSignedJARFileAsync(zipFile, openJarSuccess);
+      };
+
+      this._onHashComputed(aHash, aResponseStatus != 304, aGeneratedApp, aApp, aId, aCleanup, openJar);
+
+    }).bind(this));
+  },
+
+  _checkDownloadSize: function (aFreeBytes, aApp, aCleanup, aDownLoad) {
+    debug("_checkDownloadSize");
+   if (aFreeBytes) {
+     debug("Free storage: " + aFreeBytes + ". Download size: " + aApp.downloadSize);
+     if (aFreeBytes <= aApp.downloadSize + AppDownloadManager.MIN_REMAINING_FREESPACE) {
+       debug("ack - no storage!");
+       aCleanup("INSUFFICIENT_STORAGE");
+       return;
+     }
+   }
+   aDownLoad();
+  },
+
+  _sendDownloadProgressEvent: function(aSelf, aApp, aGeneratedApp) {
+    debug("_sendDownloadProgressEvent");
+    aSelf.broadcastMessage("Webapps:PackageEvent",
+                         { type: "progress",
+                           manifestURL: aApp.manifestURL,
+                           app: aGeneratedApp });
+  },
+
+  _setupRequestChannelNotificationCallbacks: function(aRequestChannel, aApp, aGeneratedApp) {
+    debug("_setupRequestChannelNotificationCallbacks");
       let lastProgressTime = 0;
-
-      requestChannel.notificationCallbacks = {
+      let self = this;
+      aRequestChannel.notificationCallbacks = {
         QueryInterface: function notifQI(aIID) {
           if (aIID.equals(Ci.nsISupports)          ||
               aIID.equals(Ci.nsIProgressEventSink) ||
@@ -2327,13 +2534,12 @@ this.DOMApplicationRegistry = {
         getInterface: function notifGI(aIID) {
           return this.QueryInterface(aIID);
         },
-        onProgress: function notifProgress(aRequest, aContext,
-                                           aProgress, aProgressMax) {
-          app.progress = aProgress;
+        onProgress: function notifProgress(aRequest, aContext, aProgress, aProgressMax) {
+          aGeneratedApp.progress = aProgress;
           let now = Date.now();
           if (now - lastProgressTime > MIN_PROGRESS_EVENT_DELAY) {
             debug("onProgress: " + aProgress + "/" + aProgressMax);
-            sendProgressEvent();
+            self._sendDownloadProgressEvent(self, aApp, aGeneratedApp);
             lastProgressTime = now;
             self._saveApps();
           }
@@ -2341,9 +2547,9 @@ this.DOMApplicationRegistry = {
         onStatus: function notifStatus(aRequest, aContext, aStatus, aStatusArg) { },
 
         // nsILoadContext
-        appId: app.installerAppId,
-        isInBrowserElement: app.installerIsBrowser,
-        usePrivateBrowsing: false,
+        appId: aGeneratedApp.installerAppId,
+        isInBrowserElement: aGeneratedApp.installerIsBrowser,
+        usePrivateBrowsing: false,        
         isContent: false,
         associatedWindow: null,
         topWindow : null,
@@ -2351,375 +2557,295 @@ this.DOMApplicationRegistry = {
           throw Cr.NS_ERROR_NOT_IMPLEMENTED;
         }
       }
+  },
 
-      // We set the 'downloading' flag to true right before starting the fetch.
-      app.downloading = true;
-      // We determine the app's 'installState' according to its previous
-      // state. Cancelled download should remain as 'pending'. Successfully
-      // installed apps should morph to 'updating'.
-      app.installState = aIsUpdate ? "updating" : "pending";
+  // aStoreId must be a string of the form
+  //   <installOrigin>#<storeId from ids.json>
+  // aStoreVersion must be a positive integer.
+  _checkForStoreIdMatch: function (aIsUpdate, aApp, aStoreId, aStoreVersion) {
+    debug("_checkForStoreIdMatch");
+    // Things to check:
+    // 1. if it's a update:
+    //   a. We should already have this storeId, or the original storeId must start
+    //      with STORE_ID_PENDING_PREFIX
+    //   b. The manifestURL for the stored app should be the same one we're
+    //      updating
+    //   c. And finally the version of the update should be higher than the one
+    //      on the already installed package
+    // 2. else
+    //   a. We should not have this storeId on the list
+    // We're currently launching WRONG_APP_STORE_ID for all the mismatch kind of
+    // errors, and APP_STORE_VERSION_ROLLBACK for the version error.
 
-      // initialize the progress to 0 right now
-      app.progress = 0;
+    // Does an app with this storeID exist already?
+    let appId = this.getAppLocalIdByStoreId(aStoreId);
+    let isInstalled = appId != Ci.nsIScriptSecurityManager.NO_APP_ID;
+    if (aIsUpdate) {
+      let isDifferent = aApp.localId !== appId;
+      let isPending = aApp.storeId.indexOf(STORE_ID_PENDING_PREFIX) == 0;
 
-      // Staging the zip in TmpD until all the checks are done.
-      let zipFile = FileUtils.getFile("TmpD",
-                                      ["webapps", id, "application.zip"], true);
+      if ((!isInstalled && !isPending) || (isInstalled && isDifferent)) {
+        throw "WRONG_APP_STORE_ID";
+      }
 
-      // We need an output stream to write the channel content to the zip file.
-      let outputStream = Cc["@mozilla.org/network/file-output-stream;1"]
-                           .createInstance(Ci.nsIFileOutputStream);
-      // write, create, truncate
-      outputStream.init(zipFile, 0x02 | 0x08 | 0x20, parseInt("0664", 8), 0);
-      let bufferedOutputStream = Cc['@mozilla.org/network/buffered-output-stream;1']
-                                   .createInstance(Ci.nsIBufferedOutputStream);
-      bufferedOutputStream.init(outputStream, 1024);
+      if (!isPending && (aApp.storeVersion >= aStoreVersion)) {
+        throw "APP_STORE_VERSION_ROLLBACK";
+      }
 
-      // Create a listener that will give data to the file output stream.
-      let listener = Cc["@mozilla.org/network/simple-stream-listener;1"]
-                       .createInstance(Ci.nsISimpleStreamListener);
-      listener.init(bufferedOutputStream, {
-        onStartRequest: function(aRequest, aContext) {
-          // Nothing to do there anymore.
-        },
-
-        onStopRequest: function(aRequest, aContext, aStatusCode) {
-          debug("onStopRequest " + aStatusCode);
-          bufferedOutputStream.close();
-          outputStream.close();
-
-          if (!Components.isSuccessCode(aStatusCode)) {
-            cleanup("NETWORK_ERROR");
-            return;
-          }
-
-          // If we get a 4XX or a 5XX http status, bail out like if we had a
-          // network error.
-          let responseStatus = requestChannel.responseStatus;
-          if (responseStatus >= 400 && responseStatus <= 599) {
-            // unrecoverable error, don't bug the user
-            app.downloadAvailable = false;
-            cleanup("NETWORK_ERROR");
-            return;
-          }
-
-          self.computeFileHash(zipFile, function onHashComputed(aHash) {
-            debug("packageHash=" + aHash);
-            let newPackage = (responseStatus != 304) &&
-                             (aHash != app.packageHash);
-
-            if (!newPackage) {
-              // The package's Etag or hash has not changed.
-              // We send a "applied" event right away.
-              app.downloading = false;
-              app.downloadAvailable = false;
-              app.downloadSize = 0;
-              app.installState = "installed";
-              app.readyToApplyDownload = false;
-              self.broadcastMessage("Webapps:PackageEvent", {
-                                      type: "downloaded",
-                                      manifestURL: aApp.manifestURL,
-                                      app: app })
-              self.broadcastMessage("Webapps:PackageEvent", {
-                                      type: "applied",
-                                      manifestURL: aApp.manifestURL,
-                                      app: app });
-              // Save the updated registry, and cleanup the tmp directory.
-              self._saveApps();
-              let file = FileUtils.getFile("TmpD", ["webapps", id], false);
-              if (file && file.exists()) {
-                file.remove(true);
-              }
-              return;
-            }
-
-            let certdb;
-            try {
-              certdb = Cc["@mozilla.org/security/x509certdb;1"]
-                         .getService(Ci.nsIX509CertDB);
-            } catch (e) {
-              // unrecoverable error, don't bug the user
-              app.downloadAvailable = false;
-              cleanup("CERTDB_ERROR");
-              return;
-            }
-
-            certdb.openSignedJARFileAsync(zipFile, function(aRv, aZipReader) {
-              let zipReader;
-              try {
-                let isSigned;
-                if (Components.isSuccessCode(aRv)) {
-                  isSigned = true;
-                  zipReader = aZipReader;
-                } else if (aRv == Cr.NS_ERROR_FILE_CORRUPTED) {
-                  throw "APP_PACKAGE_CORRUPTED";
-                } else if (aRv != Cr.NS_ERROR_SIGNED_JAR_NOT_SIGNED) {
-                  throw "INVALID_SIGNATURE";
-                } else {
-                  isSigned = false;
-                  zipReader = Cc["@mozilla.org/libjar/zip-reader;1"]
-                                .createInstance(Ci.nsIZipReader);
-                  zipReader.open(zipFile);
-                }
-
-                // XXX Security: You CANNOT safely add a new app store for
-                // installing privileged apps just by modifying this pref and
-                // adding the signing cert for that store to the cert trust
-                // database. *Any* origin listed can install apps signed with
-                // *any* certificate trusted; we don't try to maintain a strong
-                // association between certificate with installOrign. The
-                // expectation here is that in production builds the pref will
-                // contain exactly one origin. However, in custom development
-                // builds it may contain more than one origin so we can test
-                // different stages (dev, staging, prod) of the same app store.
-                //
-                // Only allow signed apps to be installed from a whitelist of
-                // domains, and require all packages installed from any of the
-                // domains on the whitelist to be signed. This is a stopgap until
-                // we have a real story for handling multiple app stores signing
-                // apps.
-                let signedAppOriginsStr =
-                  Services.prefs.getCharPref(
-                    "dom.mozApps.signed_apps_installable_from");
-                let isSignedAppOrigin
-                  = signedAppOriginsStr.split(",").indexOf(aApp.installOrigin) > -1;
-                if (!isSigned && isSignedAppOrigin) {
-                  // Packaged apps installed from these origins must be signed;
-                  // if not, assume somebody stripped the signature.
-                  throw "INVALID_SIGNATURE";
-                } else if (isSigned && !isSignedAppOrigin) {
-                  // Other origins are *prohibited* from installing signed apps.
-                  // One reason is that our app revocation mechanism requires
-                  // strong cooperation from the host of the mini-manifest, which
-                  // we assume to be under the control of the install origin,
-                  // even if it has a different origin.
-                  throw "INSTALL_FROM_DENIED";
-                }
-
-                if (!zipReader.hasEntry("manifest.webapp")) {
-                  throw "MISSING_MANIFEST";
-                }
-
-                let istream = zipReader.getInputStream("manifest.webapp");
-
-                // Obtain a converter to read from a UTF-8 encoded input stream.
-                let converter = Cc["@mozilla.org/intl/scriptableunicodeconverter"]
-                                  .createInstance(Ci.nsIScriptableUnicodeConverter);
-                converter.charset = "UTF-8";
-
-                let manifest = JSON.parse(converter.ConvertToUnicode(NetUtil.readInputStreamToString(istream,
-                                                                     istream.available()) || ""));
-
-                if (!AppsUtils.checkManifest(manifest, app)) {
-                  throw "INVALID_MANIFEST";
-                }
-
-                // For app updates we don't forbid apps to rename themselves but
-                // we still retain the old name of the app. In the future we
-                // will use UI to allow updates to rename an app after we check
-                // with the user that the rename is ok.
-                if (aIsUpdate) {
-                  // Call ensureSameAppName before compareManifests as `manifest`
-                  // has been normalized to avoid app rename.
-                  AppsUtils.ensureSameAppName(aManifest._manifest, manifest,
-                                              app);
-                }
-
-                if (!AppsUtils.compareManifests(manifest,
-                                                aManifest._manifest)) {
-                  throw "MANIFEST_MISMATCH";
-                }
-
-                if (!AppsUtils.checkInstallAllowed(manifest, aApp.installOrigin)) {
-                  throw "INSTALL_FROM_DENIED";
-                }
-
-                let maxStatus = isSigned ? Ci.nsIPrincipal.APP_STATUS_PRIVILEGED
-                                         : Ci.nsIPrincipal.APP_STATUS_INSTALLED;
-
-                if (AppsUtils.getAppManifestStatus(manifest) > maxStatus) {
-                  throw "INVALID_SECURITY_LEVEL";
-                }
-                app.appStatus = AppsUtils.getAppManifestStatus(manifest);
-
-                // Save the new Etag for the package.
-                if (aIsUpdate) {
-                  if (!app.staged) {
-                    app.staged = { };
-                  }
-                  try {
-                    app.staged.packageEtag =
-                      requestChannel.getResponseHeader("Etag");
-                  } catch(e) { }
-                  app.staged.packageHash = aHash;
-                  app.staged.appStatus =
-                    AppsUtils.getAppManifestStatus(manifest);
-                } else {
-                  try {
-                    app.packageEtag = requestChannel.getResponseHeader("Etag");
-                  } catch(e) { }
-                  app.packageHash = aHash;
-                  app.appStatus = AppsUtils.getAppManifestStatus(manifest);
-                }
-
-                // Check if the app declares which origin it will use.
-                if (isSigned &&
-                    app.appStatus >= Ci.nsIPrincipal.APP_STATUS_PRIVILEGED &&
-                    manifest.origin !== undefined) {
-
-                  let uri;
-                  try {
-                    uri = Services.io.newURI(manifest.origin, null, null);
-                  } catch(e) {
-                    throw "INVALID_ORIGIN";
-                  }
-
-                  if (uri.scheme != "app") {
-                    throw "INVALID_ORIGIN";
-                  }
-
-                  if (aIsUpdate) {
-                    // Changing the origin during an update is not allowed.
-                    if (uri.prePath != app.origin) {
-                      throw "INVALID_ORIGIN_CHANGE";
-                    }
-                    // Nothing else to do for an update... since the
-                    // origin can't change we don't need to move the
-                    // app nor can we have a duplicated origin
-                  } else {
-                    debug("Setting origin to " + uri.prePath +
-                          " for " + app.manifestURL);
-                    let newId = uri.prePath.substring(6); // "app://".length
-
-                    if (newId in self.webapps) {
-                      throw "DUPLICATE_ORIGIN";
-                    }
-                    app.origin = uri.prePath;
-
-                    app.id = newId;
-                    self.webapps[newId] = app;
-                    delete self.webapps[id];
-
-                    // Rename the directories where the files are installed.
-                    [DIRECTORY_NAME, "TmpD"].forEach(function(aDir) {
-                        let parent = FileUtils.getDir(aDir,
-                          ["webapps"], true, true);
-                        let dir = FileUtils.getDir(aDir,
-                          ["webapps", id], true, true);
-                        dir.moveTo(parent, newId);
-                    });
-
-                    // Signals that we need to swap the old id with the new app.
-                    self.broadcastMessage("Webapps:RemoveApp", { id: id });
-                    self.broadcastMessage("Webapps:AddApp", { id: newId,
-                                                              app: app });
-                  }
-                }
-
-                // Get ids.json if the file is signed
-                if (isSigned) {
-                  let idsStream;
-                  try {
-                    idsStream = zipReader.getInputStream("META-INF/ids.json");
-                  } catch (e) {
-                    throw zipReader.hasEntry("META-INF/ids.json")
-                          ? e
-                          : "MISSING_IDS_JSON";
-                  }
-                  let ids =
-                    JSON.parse(
-                      converter.ConvertToUnicode(
-                        NetUtil.readInputStreamToString(
-                          idsStream, idsStream.available()) || ""));
-                  if ((!ids.id) || !Number.isInteger(ids.version) ||
-                      (ids.version <= 0)) {
-                     throw "INVALID_IDS_JSON";
-                  }
-                  let storeId = aApp.installOrigin + "#" + ids.id;
-                  checkForStoreIdMatch(storeId, ids.version);
-                  app.storeId = storeId;
-                  app.storeVersion = ids.version;
-                }
-
-                if (aOnSuccess) {
-                  aOnSuccess(app.id, manifest);
-                }
-              } catch (e) {
-                // Something bad happened when reading the package.
-                // Unrecoverable error, don't bug the user.
-                // Apps with installState 'pending' does not produce any
-                // notification, so we are safe with its current
-                // downloadAvailable state.
-                if (app.installState !== "pending") {
-                  app.downloadAvailable = false;
-                }
-                if (typeof e == 'object') {
-                  Cu.reportError("Error while reading package:" + e);
-                  cleanup("INVALID_PACKAGE");
-                } else {
-                  cleanup(e);
-                }
-              } finally {
-                AppDownloadManager.remove(aApp.manifestURL);
-                if (zipReader)
-                  zipReader.close();
-              }
-            });
-          });
-        }
-      });
-
-      requestChannel.asyncOpen(listener, null);
-
-      // send a first progress event to correctly set the DOM object's properties
-      sendProgressEvent();
-    };
-
-    let checkDownloadSize = function (freeBytes) {
-       if (freeBytes) {
-         debug("Free storage: " + freeBytes + ". Download size: " +
-               aApp.downloadSize);
-         if (freeBytes <=
-             aApp.downloadSize + AppDownloadManager.MIN_REMAINING_FREESPACE) {
-           cleanup("INSUFFICIENT_STORAGE");
-           return;
-         }
-       }
-       download();
-    };
-
-    let navigator = Services.wm.getMostRecentWindow("navigator:browser")
-                            .navigator;
-    let deviceStorage = null;
-
-    if (navigator.getDeviceStorage) {
-      deviceStorage = navigator.getDeviceStorage("apps");
+    } else if (isInstalled) {
+      throw "WRONG_APP_STORE_ID";
     }
+  },
 
-    if (deviceStorage) {
-      let req = deviceStorage.freeSpace();
-      req.onsuccess = req.onerror = function statResult(e) {
-        // Even if we could not retrieve the device storage free space, we try
-        // to download the package.
-        if (!e.target.result) {
-          download();
-          return;
+  _onHashComputed: function(aHash, aNotModified, aGeneratedApp, aApp, aId, aCleanup, aOpenJarFunction) {
+    debug("_onHashComputed packageHash=" + aHash);
+    
+    let newPackage = (aNotModified) &&
+                     (aHash != aGeneratedApp.packageHash);
+
+    if (!newPackage) {
+      // The package's Etag or hash has not changed.
+      // We send a "applied" event right away.
+      aGeneratedApp.downloading = false;
+      aGeneratedApp.downloadAvailable = false;
+      aGeneratedApp.downloadSize = 0;
+      aGeneratedApp.installState = "installed";
+      aGeneratedApp.readyToApplyDownload = false;
+      this.broadcastMessage("Webapps:PackageEvent", {
+                              type: "downloaded",
+                              manifestURL: aApp.manifestURL,
+                              app: aGeneratedApp })
+      this.broadcastMessage("Webapps:PackageEvent", {
+                              type: "applied",
+                              manifestURL: aApp.manifestURL,
+                              app: aGeneratedApp });
+      // Save the updated registry, and cleanup the tmp directory.
+      this._saveApps();
+      let file = FileUtils.getFile("TmpD", ["webapps", aId], false);
+      if (file && file.exists()) {
+        file.remove(true);
+      }
+      return;
+    }
+    aOpenJarFunction();
+
+  },
+
+  _openSignedJarFileAsyncCallback: function(aRv, aZipReader, aApp, aGeneratedApp, aIsUpdate, aManifest, aRequestChannel, aHash, aId, aOnSuccess, aCleanup) {
+
+    debug("_openSignedJarFileAsyncCallback");
+    let zipReader;
+    try {
+      let isSigned;
+      if (Components.isSuccessCode(aRv)) {
+        isSigned = true;
+        zipReader = aZipReader;
+      } else if (aRv == Cr.NS_ERROR_FILE_CORRUPTED) {
+        throw "APP_PACKAGE_CORRUPTED";
+      } else if (aRv != Cr.NS_ERROR_SIGNED_JAR_NOT_SIGNED) {
+        throw "INVALID_SIGNATURE";
+      } else {
+        isSigned = false;
+        zipReader = Cc["@mozilla.org/libjar/zip-reader;1"].createInstance(Ci.nsIZipReader);
+        zipReader.open(aZipFile);
+      }
+
+      this._checkSignature(aApp, isSigned);
+
+      let istream = zipReader.getInputStream("manifest.webapp");
+
+      // Obtain a converter to read from a UTF-8 encoded input stream.
+      let converter = Cc["@mozilla.org/intl/scriptableunicodeconverter"].createInstance(Ci.nsIScriptableUnicodeConverter);
+      converter.charset = "UTF-8";
+
+      let manifest = JSON.parse(converter.ConvertToUnicode(NetUtil.readInputStreamToString(istream, istream.available()) || ""));
+
+      if (!AppsUtils.checkManifest(manifest, aGeneratedApp)) {
+        throw "INVALID_MANIFEST";
+      }
+
+      // For app updates we don't forbid apps to rename themselves but
+      // we still retain the old name of the app. In the future we
+      // will use UI to allow updates to rename an app after we check
+      // with the user that the rename is ok.
+      if (aIsUpdate) {
+        // Call ensureSameAppName before compareManifests as `manifest`
+        // has been normalized to avoid app rename.
+        AppsUtils.ensureSameAppName(aManifest._manifest, manifest, aGeneratedApp);
+      }
+
+      if (!AppsUtils.compareManifests(manifest, aManifest._manifest)) {
+        throw "MANIFEST_MISMATCH";
+      }
+
+      if (!AppsUtils.checkInstallAllowed(manifest, aApp.installOrigin)) {
+        throw "INSTALL_FROM_DENIED";
+      }
+      let maxStatus = isSigned ? Ci.nsIPrincipal.APP_STATUS_PRIVILEGED
+                             : Ci.nsIPrincipal.APP_STATUS_INSTALLED;
+
+      if (AppsUtils.getAppManifestStatus(manifest) > maxStatus) {
+        throw "INVALID_SECURITY_LEVEL";
+      }
+      this._getIds(isSigned, zipReader, converter, aApp, aGeneratedApp, aIsUpdate); 
+
+      aGeneratedApp.appStatus = AppsUtils.getAppManifestStatus(manifest);
+
+      this._saveEtag(aIsUpdate, aGeneratedApp, aRequestChannel, aHash, manifest);
+      this._checkOrigin(isSigned, aGeneratedApp, manifest, aIsUpdate);
+                         
+      if (aOnSuccess) {
+        debug("call aOnSuccess");
+        debug("aGeneratedApp.id : " + aGeneratedApp.id);
+        debug("aId : " + aId);
+        aOnSuccess(aId, manifest);
+      }
+    } catch (e) {
+      debug("_openSignedJarFileAsyncCallback error: " + e);
+      // Something bad happened when reading the package.
+      // Unrecoverable error, don't bug the user.
+      // Apps with installState 'pending' does not produce any
+      // notification, so we are safe with its current
+      // downloadAvailable state.
+      if (aGeneratedApp.installState !== "pending") {
+        aGeneratedApp.downloadAvailable = false;
+      }
+      if (typeof e == 'object') {
+        Cu.reportError("Error while reading package:" + e);
+        aCleanup("INVALID_PACKAGE");
+      } else {
+        aCleanup(e);
+      }
+    } finally {
+      AppDownloadManager.remove(aApp.manifestURL);
+      if (zipReader) {
+        zipReader.close();
+      }
+    }
+  },
+  _checkSignature: function(aApp, aIsSigned) {
+    debug("_checkSignature");
+      // XXX Security: You CANNOT safely add a new app store for
+      // installing privileged apps just by modifying this pref and
+      // adding the signing cert for that store to the cert trust
+      // database. *Any* origin listed can install apps signed with
+      // *any* certificate trusted; we don't try to maintain a strong
+      // association between certificate with installOrign. The
+      // expectation here is that in production builds the pref will
+      // contain exactly one origin. However, in custom development
+      // builds it may contain more than one origin so we can test
+      // different stages (dev, staging, prod) of the same app store.
+      //
+      // Only allow signed apps to be installed from a whitelist of
+      // domains, and require all packages installed from any of the
+      // domains on the whitelist to be signed. This is a stopgap until
+      // we have a real story for handling multiple app stores signing
+      // apps.
+      let signedAppOriginsStr = Services.prefs.getCharPref("dom.mozApps.signed_apps_installable_from");
+      let isSignedAppOrigin = signedAppOriginsStr.split(",").indexOf(aApp.installOrigin) > -1;
+      if (!aIsSigned && isSignedAppOrigin) {
+        // Packaged apps installed from these origins must be signed;
+        // if not, assume somebody stripped the signature.
+        throw "INVALID_SIGNATURE";
+      } else if (aIsSigned && !isSignedAppOrigin) {
+        // Other origins are *prohibited* from installing signed apps.
+        // One reason is that our app revocation mechanism requires
+        // strong cooperation from the host of the mini-manifest, which
+        // we assume to be under the control of the install origin,
+        // even if it has a different origin.
+        throw "INSTALL_FROM_DENIED";
+      }
+  },
+  _checkOrigin: function(aIsSigned, aGeneratedApp, aManifest, aIsUpdate) {
+    debug("_checkOrigin");
+
+      // Check if the app declares which origin it will use.
+      if (aIsSigned && aGeneratedApp.appStatus >= Ci.nsIPrincipal.APP_STATUS_PRIVILEGED && aManifest.origin !== undefined) {
+
+        let uri;
+        try {
+          uri = Services.io.newURI(aManifest.origin, null, null);
+        } catch(e) {
+          throw "INVALID_ORIGIN";
         }
 
-        let freeBytes = e.target.result;
-        checkDownloadSize(freeBytes);
+        if (uri.scheme != "app") {
+          throw "INVALID_ORIGIN";
+        }
+
+        // Changing the origin during an update is not allowed.
+        if (aIsUpdate && uri.prePath != aGeneratedApp.origin) {
+          throw "INVALID_ORIGIN_CHANGE";
+        }
+
+        debug("Setting origin to " + uri.prePath + " for " + aGeneratedApp.manifestURL);
+        let newId = uri.prePath.substring(6); // "app://".length
+
+        if (newId in this.webapps) {
+          throw "DUPLICATE_ORIGIN";
+        }
+        aGeneratedApp.origin = uri.prePath;
+
+        // Update the registry.
+        aGeneratedApp.id = newId;
+        this.webapps[newId] = aGeneratedApp;
+        delete this.webapps[aId];
+
+        // Rename the directories where the files are installed.
+        [DIRECTORY_NAME, "TmpD"].forEach(function(aDir) {
+          let parent = FileUtils.getDir(aDir, ["webapps"], true, true);
+          let dir = FileUtils.getDir(aDir, ["webapps", aId], true, true);
+          dir.moveTo(parent, newId);
+        });
+
+        // Signals that we need to swap the old id with the new app.
+        this.broadcastMessage("Webapps:RemoveApp", { id: aId });
+        this.broadcastMessage("Webapps:AddApp", { id: newId,
+                                                  app: aGeneratedApp });
       }
-    } else {
-      // deviceStorage isn't available, so use FileUtils to find the size of available storage.
-      let dir = FileUtils.getDir(DIRECTORY_NAME, ["webapps"], true, true);
+  },
+  _saveEtag: function(aIsUpdate, aGeneratedApp, aRequestChannel, aHash, aManifest) {
+    debug("_saveEtag");
+      // Save the new Etag for the package.
+      if (aIsUpdate) {
+        if (!aGeneratedApp.staged) {
+          aGeneratedApp.staged = { };
+        }
+        try {
+          aGeneratedApp.staged.packageEtag = aRequestChannel.getResponseHeader("Etag");
+        } catch(e) { }
+        aGeneratedApp.staged.packageHash = aHash;
+        aGeneratedApp.staged.appStatus = AppsUtils.getAppManifestStatus(aManifest);
+      } else {
+        try {
+          aGeneratedApp.packageEtag = aRequestChannel.getResponseHeader("Etag");
+        } catch(e) {
+          // NO-OP
+        }
+        aGeneratedApp.packageHash = aHash;
+        aGeneratedApp.appStatus = AppsUtils.getAppManifestStatus(aManifest);
+      }
+  },
+  _getIds: function(aIsSigned, aZipReader, aConverter, aApp, aGeneratedApp, aIsUpdate) {
+    debug("_getIds");
+
+    // Get ids.json if the file is signed
+    if (aIsSigned) {
+      let idsStream;
       try {
-        checkDownloadSize(dir.diskSpaceAvailable);
-      } catch(ex) {
-        // If disk space information isn't available, we'll end up here.
-        // We should either proceed anyway, otherwise devices that support neither
-        // deviceStorage nor diskSpaceAvailable will never be able to install packaged apps.
-        download();
+        idsStream = aZipReader.getInputStream("META-INF/ids.json");
+      } catch (e) {
+        throw aZipReader.hasEntry("META-INF/ids.json") ? e : "MISSING_IDS_JSON";
       }
+      let ids = JSON.parse(aConverter.ConvertToUnicode(NetUtil.readInputStreamToString( idsStream, idsStream.available()) || ""));
+      if ((!ids.id) || !Number.isInteger(ids.version) ||
+          (ids.version <= 0)) {
+         throw "INVALID_IDS_JSON";
+      }
+      let storeId = aApp.installOrigin + "#" + ids.id;
+      this._checkForStoreIdMatch(aIsUpdate, aGeneratedApp, storeId, ids.version);
+      aGeneratedApp.storeId = storeId;
+      aGeneratedApp.storeVersion = ids.version;
     }
   },
 
