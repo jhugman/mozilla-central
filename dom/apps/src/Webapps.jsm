@@ -1943,7 +1943,7 @@ this.DOMApplicationRegistry = {
       delete this.queuedPackageDownload[aManifestURL];
 
       this.downloadPackage(manifest, appObject, false, (function(aId, aManifest) {
-        this._downloadPackageCallback(aId, aManifest, app, appObject, aInstallSuccessCallback);
+        this._downloadPackageCallback(aId, aManifest, appObject, installSuccessCallback);
       }).bind(this));
     }
   },
@@ -2127,7 +2127,7 @@ this.DOMApplicationRegistry = {
       }
     }
   },
-  _downloadPackageCallback: function(aId, aManifest, aGeneratedApp, aAppObject, aInstallSuccessCallback) {
+  _downloadPackageCallback: function(aId, aManifest, aAppObject, aInstallSuccessCallback) {
     debug("_downloadPackageCallback");
     // Success! Move the zip out of TmpD.
     let app = DOMApplicationRegistry.webapps[aId];
@@ -2144,9 +2144,9 @@ this.DOMApplicationRegistry = {
     manFile.append("manifest.webapp");
     this._writeFile(manFile, JSON.stringify(aManifest), function() { });
     // Set state and fire events.
-    aGeneratedApp.installState = "installed";
-    aGeneratedApp.downloading = false;
-    aGeneratedApp.downloadAvailable = false;
+    app.installState = "installed";
+    app.downloading = false;
+    app.downloadAvailable = false;
     this._saveApps((function() {
       this.updateAppHandlers(null, aManifest, aAppObject);
       if (supportUseCurrentProfile()) {
@@ -2160,7 +2160,7 @@ this.DOMApplicationRegistry = {
       this.broadcastMessage("Webapps:PackageEvent",
                             { type: "installed",
                               manifestURL: aAppObject.manifestURL,
-                              app: aGeneratedApp,
+                              app: app,
                               manifest: aManifest });
       if (aInstallSuccessCallback) {
         aInstallSuccessCallback(aManifest);
@@ -2453,7 +2453,7 @@ this.DOMApplicationRegistry = {
       debug("computeFileHash CALLBACK success");
       let openJarSuccess = (function(aRv, aZipReader){
         debug("openJarSuccess");
-        this._openSignedJarFileAsyncCallback(aRv, aZipReader, aApp, aGeneratedApp, aIsUpdate, aManifest, requestChannel, aHash, aId, aOnSuccess, aCleanup);
+        this._openSignedJarFileAsyncCallback(aRv, aZipReader, zipFile, aApp, aGeneratedApp, aIsUpdate, aManifest, requestChannel, aHash, aId, aOnSuccess, aCleanup);
       }).bind(this);
 
       let openJar = function() {
@@ -2611,7 +2611,7 @@ this.DOMApplicationRegistry = {
 
   },
 
-  _openSignedJarFileAsyncCallback: function(aRv, aZipReader, aApp, aGeneratedApp, aIsUpdate, aManifest, aRequestChannel, aHash, aId, aOnSuccess, aCleanup) {
+  _openSignedJarFileAsyncCallback: function(aRv, aZipReader, aZipFile, aApp, aGeneratedApp, aIsUpdate, aManifest, aRequestChannel, aHash, aId, aOnSuccess, aCleanup) {
 
     debug("_openSignedJarFileAsyncCallback");
     let zipReader;
