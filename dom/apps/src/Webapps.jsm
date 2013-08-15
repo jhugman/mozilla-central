@@ -1937,45 +1937,7 @@ this.DOMApplicationRegistry = {
       delete this.queuedPackageDownload[aManifestURL];
 
       this.downloadPackage(manifest, appObject, false, (function(aId, aManifest) {
-        // Move the zip out of TmpD.
-        let app = DOMApplicationRegistry.webapps[aId];
-        let zipFile = FileUtils.getFile("TmpD", ["webapps", aId, "application.zip"], true);
-        let dir = this._getAppDir(aId);
-        zipFile.moveTo(dir, "application.zip");
-        let tmpDir = FileUtils.getDir("TmpD", ["webapps", aId], true, true);
-        try {
-          tmpDir.remove(true);
-        } catch(e) { }
-
-        // Save the manifest
-        let manFile = dir.clone();
-        manFile.append("manifest.webapp");
-        this._writeFile(manFile, JSON.stringify(aManifest), function() { });
-        // Set state and fire events.
-        app.installState = "installed";
-        app.downloading = false;
-        app.downloadAvailable = false;
-        this._saveApps((function() {
-          this.updateAppHandlers(null, aManifest, appObject);
-          this.broadcastMessage("Webapps:AddApp", { id: aId, app: appObject });
-
-          if (supportUseCurrentProfile()) {
-            // Update the permissions for this app.
-            PermissionsInstaller.installPermissions({ manifest: aManifest,
-                                                      origin: appObject.origin,
-                                                      manifestURL: appObject.manifestURL },
-                                                    true);
-          }
-          debug("About to fire Webapps:PackageEvent 'installed'");
-          this.broadcastMessage("Webapps:PackageEvent",
-                                { type: "installed",
-                                  manifestURL: appObject.manifestURL,
-                                  app: app,
-                                  manifest: aManifest });
-          if (installSuccessCallback) {
-            installSuccessCallback(aManifest);
-          }
-        }).bind(this));
+        this._downloadPackageCallback(aId, aManifest, appObject, installSuccessCallback);
       }).bind(this));
     }
   },
