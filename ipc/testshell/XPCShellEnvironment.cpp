@@ -1,4 +1,5 @@
-/* This Source Code Form is subject to the terms of the Mozilla Public
+/* vim: set ts=8 sts=4 et sw=4 tw=80:
+ * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -45,12 +46,11 @@
 #include "TestShellChild.h"
 #include "TestShellParent.h"
 
-#define EXITCODE_RUNTIME_ERROR 3
-#define EXITCODE_FILE_NOT_FOUND 4
-
 using mozilla::ipc::XPCShellEnvironment;
 using mozilla::ipc::TestShellChild;
 using mozilla::ipc::TestShellParent;
+using mozilla::AutoSafeJSContext;
+using namespace JS;
 
 namespace {
 
@@ -73,126 +73,20 @@ private:
 };
 
 inline XPCShellEnvironment*
-Environment(JSContext* cx)
+Environment(Handle<JSObject*> global)
 {
-    XPCShellEnvironment* env = 
-        static_cast<XPCShellEnvironment*>(JS_GetContextPrivate(cx));
-    NS_ASSERTION(env, "Should never be null!");
-    return env;
+    AutoSafeJSContext cx;
+    JSAutoCompartment ac(cx, global);
+    Rooted<Value> v(cx);
+    if (!JS_GetProperty(cx, global, "__XPCShellEnvironment", &v) ||
+        !v.get().isDouble())
+    {
+        return nullptr;
+    }
+    return static_cast<XPCShellEnvironment*>(v.get().toPrivate());
 }
 
-static void
-ScriptErrorReporter(JSContext *cx,
-                    const char *message,
-                    JSErrorReport *report)
-{
-    int i, j, k, n;
-    char *prefix = NULL, *tmp;
-    const char *ctmp;
-    nsCOMPtr<nsIXPConnect> xpc;
-
-    // Don't report an exception from inner JS frames as the callers may intend
-    // to handle it.
-    if (JS_DescribeScriptedCaller(cx, nullptr, nullptr)) {
-        return;
-    }
-
-    // In some cases cx->fp is null here so use XPConnect to tell us about inner
-    // frames.
-    if ((xpc = do_GetService(nsIXPConnect::GetCID()))) {
-        nsAXPCNativeCallContext *cc = nullptr;
-        xpc->GetCurrentNativeCallContext(&cc);
-        if (cc) {
-            nsAXPCNativeCallContext *prev = cc;
-            while (NS_SUCCEEDED(prev->GetPreviousCallContext(&prev)) && prev) {
-                uint16_t lang;
-                if (NS_SUCCEEDED(prev->GetLanguage(&lang)) &&
-                    lang == nsAXPCNativeCallContext::LANG_JS) {
-                    return;
-                }
-            }
-        }
-    }
-
-    if (!report) {
-        fprintf(stderr, "%s\n", message);
-        return;
-    }
-
-    /* Conditionally ignore reported warnings. */
-    if (JSREPORT_IS_WARNING(report->flags) &&
-        !Environment(cx)->ShouldReportWarnings()) {
-        return;
-    }
-
-    if (report->filename)
-        prefix = JS_smprintf("%s:", report->filename);
-    if (report->lineno) {
-        tmp = prefix;
-        prefix = JS_smprintf("%s%u: ", tmp ? tmp : "", report->lineno);
-        JS_free(cx, tmp);
-    }
-    if (JSREPORT_IS_WARNING(report->flags)) {
-        tmp = prefix;
-        prefix = JS_smprintf("%s%swarning: ",
-                             tmp ? tmp : "",
-                             JSREPORT_IS_STRICT(report->flags) ? "strict " : "");
-        JS_free(cx, tmp);
-    }
-
-    /* embedded newlines -- argh! */
-    while ((ctmp = strchr(message, '\n')) != 0) {
-        ctmp++;
-        if (prefix) fputs(prefix, stderr);
-        fwrite(message, 1, ctmp - message, stderr);
-        message = ctmp;
-    }
-    /* If there were no filename or lineno, the prefix might be empty */
-    if (prefix)
-        fputs(prefix, stderr);
-    fputs(message, stderr);
-
-    if (!report->linebuf) {
-        fputc('\n', stderr);
-        goto out;
-    }
-
-    fprintf(stderr, ":\n%s%s\n%s", prefix, report->linebuf, prefix);
-    n = report->tokenptr - report->linebuf;
-    for (i = j = 0; i < n; i++) {
-        if (report->linebuf[i] == '\t') {
-            for (k = (j + 8) & ~7; j < k; j++) {
-                fputc('.', stderr);
-            }
-            continue;
-        }
-        fputc('.', stderr);
-        j++;
-    }
-    fputs("^\n", stderr);
- out:
-    if (!JSREPORT_IS_WARNING(report->flags)) {
-        Environment(cx)->SetExitCode(EXITCODE_RUNTIME_ERROR);
-    }
-    JS_free(cx, prefix);
-}
-
-JSContextCallback gOldContextCallback = NULL;
-
-static JSBool
-ContextCallback(JSContext *cx,
-                unsigned contextOp)
-{
-    if (gOldContextCallback && !gOldContextCallback(cx, contextOp))
-        return JS_FALSE;
-
-    if (contextOp == JSCONTEXT_NEW) {
-        JS_SetErrorReporter(cx, ScriptErrorReporter);
-    }
-    return JS_TRUE;
-}
-
-static JSBool
+static bool
 Print(JSContext *cx,
       unsigned argc,
       JS::Value *vp)
@@ -204,10 +98,10 @@ Print(JSContext *cx,
     for (i = n = 0; i < argc; i++) {
         str = JS_ValueToString(cx, argv[i]);
         if (!str)
-            return JS_FALSE;
+            return false;
         JSAutoByteString bytes(cx, str);
         if (!bytes)
-            return JS_FALSE;
+            return false;
         fprintf(stdout, "%s%s", i ? " " : "", bytes.ptr());
         fflush(stdout);
     }
@@ -215,10 +109,10 @@ Print(JSContext *cx,
     if (n)
         fputc('\n', stdout);
     JS_SET_RVAL(cx, vp, JSVAL_VOID);
-    return JS_TRUE;
+    return true;
 }
 
-static JSBool
+static bool
 GetLine(char *bufp,
         FILE *file,
         const char *prompt)
@@ -227,12 +121,12 @@ GetLine(char *bufp,
     fputs(prompt, stdout);
     fflush(stdout);
     if (!fgets(line, sizeof line, file))
-        return JS_FALSE;
+        return false;
     strcpy(bufp, line);
-    return JS_TRUE;
+    return true;
 }
 
-static JSBool
+static bool
 Dump(JSContext *cx,
      unsigned argc,
      JS::Value *vp)
@@ -241,21 +135,21 @@ Dump(JSContext *cx,
 
     JSString *str;
     if (!argc)
-        return JS_TRUE;
+        return true;
 
     str = JS_ValueToString(cx, JS_ARGV(cx, vp)[0]);
     if (!str)
-        return JS_FALSE;
+        return false;
     JSAutoByteString bytes(cx, str);
     if (!bytes)
-      return JS_FALSE;
+      return false;
 
     fputs(bytes.ptr(), stdout);
     fflush(stdout);
-    return JS_TRUE;
+    return true;
 }
 
-static JSBool
+static bool
 Load(JSContext *cx,
      unsigned argc,
      JS::Value *vp)
@@ -264,42 +158,42 @@ Load(JSContext *cx,
 
     JS::Rooted<JSObject*> obj(cx, JS_THIS_OBJECT(cx, vp));
     if (!obj)
-        return JS_FALSE;
+        return false;
 
     JS::Value *argv = JS_ARGV(cx, vp);
     for (unsigned i = 0; i < argc; i++) {
         JSString *str = JS_ValueToString(cx, argv[i]);
         if (!str)
-            return JS_FALSE;
+            return false;
         argv[i] = STRING_TO_JSVAL(str);
         JSAutoByteString filename(cx, str);
         if (!filename)
-            return JS_FALSE;
+            return false;
         FILE *file = fopen(filename.ptr(), "r");
         if (!file) {
             JS_ReportError(cx, "cannot open file '%s' for reading", filename.ptr());
-            return JS_FALSE;
+            return false;
         }
+        Rooted<JSObject*> global(cx, JS::CurrentGlobalOrNull(cx));
         JS::CompileOptions options(cx);
         options.setUTF8(true)
                .setFileAndLine(filename.ptr(), 1)
-               .setPrincipals(Environment(cx)->GetPrincipal());
+               .setPrincipals(Environment(global)->GetPrincipal());
         JS::RootedObject rootedObj(cx, obj);
         JSScript *script = JS::Compile(cx, rootedObj, options, file);
         fclose(file);
         if (!script)
-            return JS_FALSE;
+            return false;
 
-        if (!Environment(cx)->ShouldCompileOnly() &&
-            !JS_ExecuteScript(cx, obj, script, result.address())) {
-            return JS_FALSE;
+        if (!JS_ExecuteScript(cx, obj, script, result.address())) {
+            return false;
         }
     }
     JS_SET_RVAL(cx, vp, JSVAL_VOID);
-    return JS_TRUE;
+    return true;
 }
 
-static JSBool
+static bool
 Version(JSContext *cx,
         unsigned argc,
         JS::Value *vp)
@@ -309,32 +203,29 @@ Version(JSContext *cx,
     if (argc > 0 && JSVAL_IS_INT(argv[0]))
         JS_SetVersionForCompartment(js::GetContextCompartment(cx),
                                     JSVersion(JSVAL_TO_INT(argv[0])));
-    return JS_TRUE;
+    return true;
 }
 
-static JSBool
+static bool
 BuildDate(JSContext *cx, unsigned argc, JS::Value *vp)
 {
     fprintf(stdout, "built on %s at %s\n", __DATE__, __TIME__);
-    return JS_TRUE;
+    return true;
 }
 
-static JSBool
+static bool
 Quit(JSContext *cx,
      unsigned argc,
      JS::Value *vp)
 {
-    int exitCode = 0;
-    JS_ConvertArguments(cx, argc, JS_ARGV(cx, vp), "/ i", &exitCode);
-
-    XPCShellEnvironment* env = Environment(cx);
-    env->SetExitCode(exitCode);
+    Rooted<JSObject*> global(cx, JS::CurrentGlobalOrNull(cx));
+    XPCShellEnvironment* env = Environment(global);
     env->SetIsQuitting();
 
-    return JS_FALSE;
+    return false;
 }
 
-static JSBool
+static bool
 DumpXPC(JSContext *cx,
         unsigned argc,
         JS::Value *vp)
@@ -343,17 +234,17 @@ DumpXPC(JSContext *cx,
 
     if (argc > 0) {
         if (!JS_ValueToInt32(cx, JS_ARGV(cx, vp)[0], &depth))
-            return JS_FALSE;
+            return false;
     }
 
     nsCOMPtr<nsIXPConnect> xpc = do_GetService(nsIXPConnect::GetCID());
     if(xpc)
         xpc->DebugDump(int16_t(depth));
     JS_SET_RVAL(cx, vp, JSVAL_VOID);
-    return JS_TRUE;
+    return true;
 }
 
-static JSBool
+static bool
 GC(JSContext *cx,
    unsigned argc,
    JS::Value *vp)
@@ -364,11 +255,11 @@ GC(JSContext *cx,
     js_DumpGCStats(rt, stdout);
 #endif
     JS_SET_RVAL(cx, vp, JSVAL_VOID);
-    return JS_TRUE;
+    return true;
 }
 
 #ifdef JS_GC_ZEAL
-static JSBool
+static bool
 GCZeal(JSContext *cx, 
        unsigned argc,
        JS::Value *vp)
@@ -377,16 +268,16 @@ GCZeal(JSContext *cx,
 
   uint32_t zeal;
   if (!JS_ValueToECMAUint32(cx, argv[0], &zeal))
-    return JS_FALSE;
+    return false;
 
   JS_SetGCZeal(cx, uint8_t(zeal), JS_DEFAULT_ZEAL_FREQ);
-  return JS_TRUE;
+  return true;
 }
 #endif
 
 #ifdef DEBUG
 
-static JSBool
+static bool
 DumpHeap(JSContext *cx,
          unsigned argc,
          JS::Value *vp)
@@ -398,7 +289,7 @@ DumpHeap(JSContext *cx,
     size_t maxDepth = (size_t)-1;
     void *thingToIgnore = NULL;
     FILE *dumpFile;
-    JSBool ok;
+    bool ok;
 
     JS::Value *argv = JS_ARGV(cx, vp);
     JS_SET_RVAL(cx, vp, JSVAL_VOID);
@@ -409,10 +300,10 @@ DumpHeap(JSContext *cx,
 
         str = JS_ValueToString(cx, *vp);
         if (!str)
-            return JS_FALSE;
+            return false;
         *vp = STRING_TO_JSVAL(str);
         if (!fileName.encodeLatin1(cx, str))
-            return JS_FALSE;
+            return false;
     }
 
     vp = argv + 1;
@@ -435,7 +326,7 @@ DumpHeap(JSContext *cx,
         uint32_t depth;
 
         if (!JS_ValueToECMAUint32(cx, *vp, &depth))
-            return JS_FALSE;
+            return false;
         maxDepth = depth;
     }
 
@@ -453,7 +344,7 @@ DumpHeap(JSContext *cx,
         if (!dumpFile) {
             fprintf(stderr, "dumpHeap: can't open %s: %s\n",
                     fileName.ptr(), strerror(errno));
-            return JS_FALSE;
+            return false;
         }
     }
 
@@ -469,7 +360,7 @@ DumpHeap(JSContext *cx,
     fprintf(stderr,
             "dumpHeap: argument %u is not null or a heap-allocated thing\n",
             (unsigned)(vp - argv));
-    return JS_FALSE;
+    return false;
 }
 
 #endif /* DEBUG */
@@ -503,21 +394,21 @@ typedef enum JSShellErrNum
 #undef MSGDEF
 } JSShellErrNum;
 
-static void
-ProcessFile(JSContext *cx,
-            JS::Handle<JSObject*> obj,
-            const char *filename,
-            FILE *file,
-            JSBool forceTTY)
+} /* anonymous namespace */
+
+void
+XPCShellEnvironment::ProcessFile(JSContext *cx,
+                                 JS::Handle<JSObject*> obj,
+                                 const char *filename,
+                                 FILE *file,
+                                 bool forceTTY)
 {
-    XPCShellEnvironment* env = Environment(cx);
-    nsCxPusher pusher;
-    pusher.Push(env->GetContext());
+    XPCShellEnvironment* env = this;
 
     JSScript *script;
     JS::Rooted<JS::Value> result(cx);
     int lineno, startline;
-    JSBool ok, hitEOF;
+    bool ok, hitEOF;
     char *bufp, buffer[4096];
     JSString *str;
 
@@ -554,7 +445,7 @@ ProcessFile(JSContext *cx,
                .setFileAndLine(filename, 1)
                .setPrincipals(env->GetPrincipal());
         JSScript* script = JS::Compile(cx, obj, options, file);
-        if (script && !env->ShouldCompileOnly())
+        if (script)
             (void)JS_ExecuteScript(cx, obj, script, result.address());
 
         return;
@@ -562,7 +453,7 @@ ProcessFile(JSContext *cx,
 
     /* It's an interactive filehandle; drop into read-eval-print loop. */
     lineno = 1;
-    hitEOF = JS_FALSE;
+    hitEOF = false;
     do {
         bufp = buffer;
         *bufp = '\0';
@@ -579,7 +470,7 @@ ProcessFile(JSContext *cx,
         startline = lineno;
         do {
             if (!GetLine(bufp, file, startline == lineno ? "js> " : "")) {
-                hitEOF = JS_TRUE;
+                hitEOF = true;
                 break;
             }
             bufp += strlen(bufp);
@@ -594,30 +485,26 @@ ProcessFile(JSContext *cx,
         if (script) {
             JSErrorReporter older;
 
-            if (!env->ShouldCompileOnly()) {
-                ok = JS_ExecuteScript(cx, obj, script, result.address());
-                if (ok && result != JSVAL_VOID) {
-                    /* Suppress error reports from JS_ValueToString(). */
-                    older = JS_SetErrorReporter(cx, NULL);
-                    str = JS_ValueToString(cx, result);
-                    JSAutoByteString bytes;
-                    if (str)
-                        bytes.encodeLatin1(cx, str);
-                    JS_SetErrorReporter(cx, older);
+            ok = JS_ExecuteScript(cx, obj, script, result.address());
+            if (ok && result != JSVAL_VOID) {
+                /* Suppress error reports from JS_ValueToString(). */
+                older = JS_SetErrorReporter(cx, NULL);
+                str = JS_ValueToString(cx, result);
+                JSAutoByteString bytes;
+                if (str)
+                    bytes.encodeLatin1(cx, str);
+                JS_SetErrorReporter(cx, older);
 
-                    if (!!bytes)
-                        fprintf(stdout, "%s\n", bytes.ptr());
-                    else
-                        ok = JS_FALSE;
-                }
+                if (!!bytes)
+                    fprintf(stdout, "%s\n", bytes.ptr());
+                else
+                    ok = false;
             }
         }
     } while (!hitEOF && !env->IsQuitting());
 
     fprintf(stdout, "\n");
 }
-
-} /* anonymous namespace */
 
 NS_IMETHODIMP_(nsrefcnt)
 XPCShellDirProvider::AddRef()
@@ -667,41 +554,24 @@ XPCShellEnvironment::CreateEnvironment()
 }
 
 XPCShellEnvironment::XPCShellEnvironment()
-:   mCx(NULL),
-    mJSPrincipals(NULL),
-    mExitCode(0),
-    mQuitting(JS_FALSE),
-    mReportWarnings(JS_TRUE),
-    mCompileOnly(JS_FALSE)
+:   mQuitting(false)
 {
 }
 
 XPCShellEnvironment::~XPCShellEnvironment()
 {
-    if (mCx) {
-        JS_BeginRequest(mCx);
 
-        JSObject* global = GetGlobalObject();
-        if (global) {
-            JS_SetAllNonReservedSlotsToUndefined(mCx, global);
+    AutoSafeJSContext cx;
+    Rooted<JSObject*> global(cx, GetGlobalObject());
+    if (global) {
+        {
+            JSAutoCompartment ac(cx, global);
+            JS_SetAllNonReservedSlotsToUndefined(cx, global);
         }
         mGlobalHolder.Release();
 
-        JSRuntime *rt = JS_GetRuntime(mCx);
+        JSRuntime *rt = JS_GetRuntime(cx);
         JS_GC(rt);
-
-        if (mJSPrincipals) {
-            JS_DropPrincipals(rt, mJSPrincipals);
-        }
-
-        JS_EndRequest(mCx);
-        JS_DestroyContext(mCx);
-
-        if (gOldContextCallback) {
-            NS_ASSERTION(rt, "Should never be null!");
-            JS_SetContextCallback(rt, gOldContextCallback);
-            gOldContextCallback = NULL;
-        }
     }
 }
 
@@ -734,18 +604,7 @@ XPCShellEnvironment::Init()
         return false;
     }
 
-    gOldContextCallback = JS_SetContextCallback(rt, ContextCallback);
-
-    JSContext *cx = JS_NewContext(rt, 8192);
-    if (!cx) {
-        NS_ERROR("JS_NewContext failed!");
-
-        JS_SetContextCallback(rt, gOldContextCallback);
-        gOldContextCallback = NULL;
-
-        return false;
-    }
-    mCx = cx;
+    AutoSafeJSContext cx;
 
     JS_SetContextPrivate(cx, this);
 
@@ -763,17 +622,10 @@ XPCShellEnvironment::Init()
         rv = securityManager->GetSystemPrincipal(getter_AddRefs(principal));
         if (NS_FAILED(rv)) {
             fprintf(stderr, "+++ Failed to obtain SystemPrincipal from ScriptSecurityManager service.\n");
-        } else {
-            // fetch the JS principals and stick in a global
-            mJSPrincipals = nsJSPrincipals::get(principal);
-            JS_HoldPrincipals(mJSPrincipals);
         }
     } else {
         fprintf(stderr, "+++ Failed to get ScriptSecurityManager service, running without principals");
     }
-
-    nsCxPusher pusher;
-    pusher.Push(mCx);
 
     nsRefPtr<BackstagePass> backstagePass;
     rv = NS_NewBackstagePass(getter_AddRefs(backstagePass));
@@ -801,18 +653,19 @@ XPCShellEnvironment::Init()
         NS_ERROR("Failed to get global JSObject!");
         return false;
     }
+    JSAutoCompartment ac(cx, globalObj);
 
     backstagePass->SetGlobalObject(globalObj);
 
+    if (!JS_DefineProperty(cx, globalObj, "__XPCShellEnvironment",
+                           PRIVATE_TO_JSVAL(this), JS_PropertyStub,
+                           JS_StrictPropertyStub,
+                           JSPROP_READONLY | JSPROP_PERMANENT) ||
+        !JS_DefineFunctions(cx, globalObj, gGlobalFunctions) ||
+        !JS_DefineProfilingFunctions(cx, globalObj))
     {
-        JSAutoRequest ar(cx);
-        JSAutoCompartment ac(cx, globalObj);
-
-        if (!JS_DefineFunctions(cx, globalObj, gGlobalFunctions) ||
-	    !JS_DefineProfilingFunctions(cx, globalObj)) {
-            NS_ERROR("JS_DefineFunctions failed!");
-            return false;
-        }
+        NS_ERROR("JS_DefineFunctions failed!");
+        return false;
     }
 
     mGlobalHolder = globalObj;
@@ -821,7 +674,7 @@ XPCShellEnvironment::Init()
     if (runtimeScriptFile) {
         fprintf(stdout, "[loading '%s'...]\n", kDefaultRuntimeScriptFilename);
         ProcessFile(cx, globalObj, kDefaultRuntimeScriptFilename,
-                    runtimeScriptFile, JS_FALSE);
+                    runtimeScriptFile, false);
         fclose(runtimeScriptFile);
     }
 
@@ -832,43 +685,34 @@ bool
 XPCShellEnvironment::EvaluateString(const nsString& aString,
                                     nsString* aResult)
 {
-  XPCShellEnvironment* env = Environment(mCx);
-  nsCxPusher pusher;
-  pusher.Push(env->GetContext());
-
-  JSAutoRequest ar(mCx);
-
-  JS_ClearPendingException(mCx);
-
-  JS::Rooted<JSObject*> global(mCx, GetGlobalObject());
-  JSAutoCompartment ac(mCx, global);
+  AutoSafeJSContext cx;
+  JS::Rooted<JSObject*> global(cx, GetGlobalObject());
+  JSAutoCompartment ac(cx, global);
 
   JSScript* script =
-      JS_CompileUCScriptForPrincipals(mCx, global, GetPrincipal(),
+      JS_CompileUCScriptForPrincipals(cx, global, GetPrincipal(),
                                       aString.get(), aString.Length(),
                                       "typein", 0);
   if (!script) {
      return false;
   }
 
-  if (!ShouldCompileOnly()) {
-      if (aResult) {
-          aResult->Truncate();
-      }
+  if (aResult) {
+      aResult->Truncate();
+  }
 
-      JS::Rooted<JS::Value> result(mCx);
-      JSBool ok = JS_ExecuteScript(mCx, global, script, result.address());
-      if (ok && result != JSVAL_VOID) {
-          JSErrorReporter old = JS_SetErrorReporter(mCx, NULL);
-          JSString* str = JS_ValueToString(mCx, result);
-          nsDependentJSString depStr;
-          if (str)
-              depStr.init(mCx, str);
-          JS_SetErrorReporter(mCx, old);
+  JS::Rooted<JS::Value> result(cx);
+  bool ok = JS_ExecuteScript(cx, global, script, result.address());
+  if (ok && result != JSVAL_VOID) {
+      JSErrorReporter old = JS_SetErrorReporter(cx, NULL);
+      JSString* str = JS_ValueToString(cx, result);
+      nsDependentJSString depStr;
+      if (str)
+          depStr.init(cx, str);
+      JS_SetErrorReporter(cx, old);
 
-          if (!depStr.IsEmpty() && aResult) {
-              aResult->Assign(depStr);
-          }
+      if (!depStr.IsEmpty() && aResult) {
+          aResult->Assign(depStr);
       }
   }
 

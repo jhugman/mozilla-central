@@ -3,6 +3,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 'use strict';
 
+module.metadata = {
+  'engines': {
+    'Firefox': '*'
+  }
+};
+
 const { Cc, Ci } = require('chrome');
 const { request } = require('sdk/addon/host');
 const { filter } = require('sdk/event/utils');
@@ -13,24 +19,21 @@ const { defer, all } = require('sdk/core/promise');
 const { defer: async } = require('sdk/lang/functional');
 const { before, after } = require('sdk/test/utils');
 
-// Test for unsupported platforms
-try {
 const {
   Bookmark, Group, Separator,
   save, search, remove,
   MENU, TOOLBAR, UNSORTED
 } = require('sdk/places/bookmarks');
 const {
-  invalidResolve, invalidReject, clearBookmarks, createTree,
-  compareWithHost, clearAllBookmarks, createBookmark, createBookmarkItem,
-  createBookmarkTree, addVisits
+  invalidResolve, invalidReject, createTree,
+  compareWithHost, createBookmark, createBookmarkItem,
+  createBookmarkTree, addVisits, resetPlaces
 } = require('./places-helper');
 const { promisedEmitter } = require('sdk/places/utils');
 const bmsrv = Cc['@mozilla.org/browser/nav-bookmarks-service;1'].
                     getService(Ci.nsINavBookmarksService);
 const tagsrv = Cc['@mozilla.org/browser/tagging-service;1'].
                     getService(Ci.nsITaggingService);
-} catch (e) { unsupported(e); }
 
 exports.testDefaultFolders = function (assert) {
   var ids = [
@@ -520,27 +523,30 @@ exports.testResolution = function (assert, done) {
     firstSave = item;
     assert.ok(item.updated, 'bookmark has updated time');
     item.title = 'my title';
-    save(item).on('data', (item) => {
-      secondSave = item;
-      assert.ok(firstSave.updated < secondSave.updated, 'snapshots have different update times');
-      firstSave.title = 'updated title';
-      save(firstSave, { resolve: (mine, theirs) => {
-        assert.equal(mine.title, 'updated title', 'correct data for my object');
-        assert.equal(theirs.title, 'my title', 'correct data for their object');
-        assert.equal(mine.url, theirs.url, 'other data is equal');
-        assert.equal(mine.group, theirs.group, 'other data is equal');
-        assert.ok(mine !== firstSave, 'instance is not passed in');
-        assert.ok(theirs !== secondSave, 'instance is not passed in');
-        assert.equal(mine.toString(), '[object Object]', 'serialized objects');
-        assert.equal(theirs.toString(), '[object Object]', 'serialized objects');
-        mine.title = 'a new title';
-        return mine;
-      }}).on('end', (results) => {
-        let result = results[0];
-        assert.equal(result.title, 'a new title', 'resolve handles results');
-        done();
-      });
-    });
+    // Ensure delay so a different save time is set
+    return delayed(item);
+  }).then(saveP)
+  .then(items => {
+    let item = items[0];
+    secondSave = item;
+    assert.ok(firstSave.updated < secondSave.updated, 'snapshots have different update times');
+    firstSave.title = 'updated title';
+    return saveP(firstSave, { resolve: (mine, theirs) => {
+      assert.equal(mine.title, 'updated title', 'correct data for my object');
+      assert.equal(theirs.title, 'my title', 'correct data for their object');
+      assert.equal(mine.url, theirs.url, 'other data is equal');
+      assert.equal(mine.group, theirs.group, 'other data is equal');
+      assert.ok(mine !== firstSave, 'instance is not passed in');
+      assert.ok(theirs !== secondSave, 'instance is not passed in');
+      assert.equal(mine.toString(), '[object Object]', 'serialized objects');
+      assert.equal(theirs.toString(), '[object Object]', 'serialized objects');
+      mine.title = 'a new title';
+      return mine;
+    }});
+  }).then((results) => {
+    let result = results[0];
+    assert.equal(result.title, 'a new title', 'resolve handles results');
+    done();
   });
 };
 
@@ -549,28 +555,31 @@ exports.testResolution = function (assert, done) {
  */
 exports.testResolutionMapping = function (assert, done) {
   let bookmark = Bookmark({ title: 'moz', url: 'http://bookmarks4life.com/' });
-  save(bookmark).on('end', (saved) => {
-    saved = saved[0];
+  let saved;
+  saveP(bookmark).then(data => {
+    saved = data[0];
     saved.title = 'updated title';
-    save(saved).on('end', () => {
-      bookmark.title = 'conflicting title';
-      save(bookmark, { resolve: (mine, theirs) => {
-        assert.equal(mine.title, 'conflicting title', 'correct data for my object');
-        assert.equal(theirs.title, 'updated title', 'correct data for their object');
-        assert.equal(mine.url, theirs.url, 'other data is equal');
-        assert.equal(mine.group, theirs.group, 'other data is equal');
-        assert.ok(mine !== bookmark, 'instance is not passed in');
-        assert.ok(theirs !== saved, 'instance is not passed in');
-        assert.equal(mine.toString(), '[object Object]', 'serialized objects');
-        assert.equal(theirs.toString(), '[object Object]', 'serialized objects');
-        mine.title = 'a new title';
-        return mine;
-      }}).on('end', (results) => {
-        let result = results[0];
-        assert.equal(result.title, 'a new title', 'resolve handles results');
-        done();
-      });
-    });
+    // Ensure a delay for different updated times
+    return delayed(saved);
+  }).then(saveP)
+  .then(() => {
+    bookmark.title = 'conflicting title';
+    return saveP(bookmark, { resolve: (mine, theirs) => {
+      assert.equal(mine.title, 'conflicting title', 'correct data for my object');
+      assert.equal(theirs.title, 'updated title', 'correct data for their object');
+      assert.equal(mine.url, theirs.url, 'other data is equal');
+      assert.equal(mine.group, theirs.group, 'other data is equal');
+      assert.ok(mine !== bookmark, 'instance is not passed in');
+      assert.ok(theirs !== saved, 'instance is not passed in');
+      assert.equal(mine.toString(), '[object Object]', 'serialized objects');
+      assert.equal(theirs.toString(), '[object Object]', 'serialized objects');
+      mine.title = 'a new title';
+      return mine;
+    }});
+  }).then((results) => {
+    let result = results[0];
+    assert.equal(result.title, 'a new title', 'resolve handles results');
+    done();
   });
 };
 
@@ -938,27 +947,8 @@ exports.testCheckSaveOrder = function (assert, done) {
   });
 };
 
-before(exports, name => {
-  clearAllBookmarks();
-});
-
-after(exports, name => {
-  clearAllBookmarks();
-});
-
-// If the module doesn't support the app we're being run in, require() will
-// throw.  In that case, remove all tests above from exports, and add one dummy
-// test that passes.
-function unsupported (err) {
-  if (!/^Unsupported Application/.test(err.message))
-    throw err;
-
-  module.exports = {
-    "test Unsupported Application": function Unsupported (assert) {
-      assert.pass(err.message);
-    }
-  };
-}
+before(exports, (name, assert, done) => resetPlaces(done));
+after(exports, (name, assert, done) => resetPlaces(done));
 
 function saveP () {
   return promisedEmitter(save.apply(null, Array.slice(arguments)));
@@ -967,4 +957,11 @@ function saveP () {
 function searchP () {
   return promisedEmitter(search.apply(null, Array.slice(arguments)));
 }
+
+function delayed (value, ms) {
+  let { promise, resolve } = defer();
+  setTimeout(() => resolve(value), ms || 10);
+  return promise;
+}
+
 require('test').run(exports);

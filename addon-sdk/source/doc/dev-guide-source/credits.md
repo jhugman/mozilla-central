@@ -43,6 +43,7 @@ We'd like to thank our many Jetpack project contributors!  They include:
 
 ### F ###
 
+* [Corey Farwell](http://github.com/frewsxcv)
 * [Matteo Ferretti](https://github.com/ZER0)
 * fuzzykiller
 
@@ -139,6 +140,7 @@ We'd like to thank our many Jetpack project contributors!  They include:
 * Tim Taubert
 * Shane Tomlinson
 * Dave Townsend
+* [Fraser Tweedale](https://github.com/frasertweedale)
 * [Matthias Tylkowski](https://github.com/tylkomat)
 
 ### V ###

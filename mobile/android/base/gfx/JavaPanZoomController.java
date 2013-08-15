@@ -806,7 +806,11 @@ class JavaPanZoomController
         if (FloatUtils.fuzzyEquals(displacement.x, 0.0f) && FloatUtils.fuzzyEquals(displacement.y, 0.0f)) {
             return;
         }
-        if (! mSubscroller.scrollBy(displacement)) {
+        if (mSubscroller.scrollBy(displacement)) {
+            synchronized (mTarget.getLock()) {
+                mTarget.onSubdocumentScrollBy(displacement.x, displacement.y);
+            }
+        } else {
             synchronized (mTarget.getLock()) {
                 scrollBy(displacement.x, displacement.y);
             }
@@ -1352,5 +1356,10 @@ class JavaPanZoomController
     @Override
     public int getOverScrollMode() {
         return mX.getOverScrollMode();
+    }
+
+    @Override
+    public void updateScrollOffset(float cssX, float cssY) {
+        // Nothing to update, this class doesn't store the scroll offset locally.
     }
 }

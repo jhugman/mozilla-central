@@ -12,27 +12,23 @@
 
 #include <string.h>
 
-#include "jsprvtd.h"
-#include "jstypes.h"
 #include "jsapi.h"
 #include "jscntxt.h"
 #include "jsfun.h"
 #include "jsgc.h"
 #include "jsobj.h"
 #include "jsopcode.h"
+#include "jsprf.h"
 #include "jsscript.h"
 #include "jsstr.h"
+#include "jstypes.h"
 #include "jswatchpoint.h"
 
 #include "frontend/SourceNotes.h"
-#include "ion/AsmJS.h"
+#include "jit/AsmJSModule.h"
 #include "vm/Debugger.h"
 #include "vm/Interpreter.h"
 #include "vm/Shape.h"
-
-#ifdef JS_ION
-#include "ion/AsmJSModule.h"
-#endif
 
 #include "jsatominlines.h"
 #include "jsinferinlines.h"
@@ -47,20 +43,20 @@ using namespace js::gc;
 
 using mozilla::PodZero;
 
-JS_PUBLIC_API(JSBool)
+JS_PUBLIC_API(bool)
 JS_GetDebugMode(JSContext *cx)
 {
     return cx->compartment()->debugMode();
 }
 
-JS_PUBLIC_API(JSBool)
-JS_SetDebugMode(JSContext *cx, JSBool debug)
+JS_PUBLIC_API(bool)
+JS_SetDebugMode(JSContext *cx, bool debug)
 {
     return JS_SetDebugModeForCompartment(cx, cx->compartment(), debug);
 }
 
 JS_PUBLIC_API(void)
-JS_SetRuntimeDebugMode(JSRuntime *rt, JSBool debug)
+JS_SetRuntimeDebugMode(JSRuntime *rt, bool debug)
 {
     rt->debugMode = !!debug;
 }
@@ -115,7 +111,7 @@ js::ScriptDebugEpilogue(JSContext *cx, AbstractFramePtr frame, bool okArg)
 {
     JS_ASSERT_IF(frame.isStackFrame(), frame.asStackFrame() == cx->interpreterFrame());
 
-    JSBool ok = okArg;
+    bool ok = okArg;
 
     // We don't add hook data for self-hosted scripts, so we don't need to check for them, here.
     if (void *hookData = frame.maybeHookData()) {
@@ -173,8 +169,8 @@ js::DebugExceptionUnwind(JSContext *cx, AbstractFramePtr frame, jsbytecode *pc)
     return status;
 }
 
-JS_FRIEND_API(JSBool)
-JS_SetDebugModeForAllCompartments(JSContext *cx, JSBool debug)
+JS_FRIEND_API(bool)
+JS_SetDebugModeForAllCompartments(JSContext *cx, bool debug)
 {
     AutoDebugModeGC dmgc(cx->runtime());
 
@@ -188,17 +184,17 @@ JS_SetDebugModeForAllCompartments(JSContext *cx, JSBool debug)
     return true;
 }
 
-JS_FRIEND_API(JSBool)
-JS_SetDebugModeForCompartment(JSContext *cx, JSCompartment *comp, JSBool debug)
+JS_FRIEND_API(bool)
+JS_SetDebugModeForCompartment(JSContext *cx, JSCompartment *comp, bool debug)
 {
     AutoDebugModeGC dmgc(cx->runtime());
     return comp->setDebugModeFromC(cx, !!debug, dmgc);
 }
 
-static JSBool
+static bool
 CheckDebugMode(JSContext *cx)
 {
-    JSBool debugMode = JS_GetDebugMode(cx);
+    bool debugMode = JS_GetDebugMode(cx);
     /*
      * :TODO:
      * This probably should be an assertion, since it's indicative of a severe
@@ -211,19 +207,19 @@ CheckDebugMode(JSContext *cx)
     return debugMode;
 }
 
-JS_PUBLIC_API(JSBool)
-JS_SetSingleStepMode(JSContext *cx, JSScript *scriptArg, JSBool singleStep)
+JS_PUBLIC_API(bool)
+JS_SetSingleStepMode(JSContext *cx, JSScript *scriptArg, bool singleStep)
 {
     RootedScript script(cx, scriptArg);
     assertSameCompartment(cx, script);
 
     if (!CheckDebugMode(cx))
-        return JS_FALSE;
+        return false;
 
     return script->setStepModeFlag(cx, singleStep);
 }
 
-JS_PUBLIC_API(JSBool)
+JS_PUBLIC_API(bool)
 JS_SetTrap(JSContext *cx, JSScript *scriptArg, jsbytecode *pc, JSTrapHandler handler, jsval closureArg)
 {
     RootedScript script(cx, scriptArg);
@@ -266,7 +262,7 @@ JS_ClearAllTrapsForCompartment(JSContext *cx)
     cx->compartment()->clearTraps(cx->runtime()->defaultFreeOp());
 }
 
-JS_PUBLIC_API(JSBool)
+JS_PUBLIC_API(bool)
 JS_SetInterrupt(JSRuntime *rt, JSInterruptHook hook, void *closure)
 {
     rt->debugHooks.interruptHook = hook;
@@ -276,7 +272,7 @@ JS_SetInterrupt(JSRuntime *rt, JSInterruptHook hook, void *closure)
     return true;
 }
 
-JS_PUBLIC_API(JSBool)
+JS_PUBLIC_API(bool)
 JS_ClearInterrupt(JSRuntime *rt, JSInterruptHook *hoop, void **closurep)
 {
     if (hoop)
@@ -285,12 +281,12 @@ JS_ClearInterrupt(JSRuntime *rt, JSInterruptHook *hoop, void **closurep)
         *closurep = rt->debugHooks.interruptHookData;
     rt->debugHooks.interruptHook = 0;
     rt->debugHooks.interruptHookData = 0;
-    return JS_TRUE;
+    return true;
 }
 
 /************************************************************************/
 
-JS_PUBLIC_API(JSBool)
+JS_PUBLIC_API(bool)
 JS_SetWatchPoint(JSContext *cx, JSObject *obj_, jsid id_,
                  JSWatchPointHandler handler, JSObject *closure_)
 {
@@ -352,7 +348,7 @@ JS_SetWatchPoint(JSContext *cx, JSObject *obj_, jsid id_,
     return wpmap->watch(cx, obj, propid, handler, closure);
 }
 
-JS_PUBLIC_API(JSBool)
+JS_PUBLIC_API(bool)
 JS_ClearWatchPoint(JSContext *cx, JSObject *obj, jsid id,
                    JSWatchPointHandler *handlerp, JSObject **closurep)
 {
@@ -363,7 +359,7 @@ JS_ClearWatchPoint(JSContext *cx, JSObject *obj, jsid id,
     return true;
 }
 
-JS_PUBLIC_API(JSBool)
+JS_PUBLIC_API(bool)
 JS_ClearWatchPointsForObject(JSContext *cx, JSObject *obj)
 {
     assertSameCompartment(cx, obj);
@@ -373,7 +369,7 @@ JS_ClearWatchPointsForObject(JSContext *cx, JSObject *obj)
     return true;
 }
 
-JS_PUBLIC_API(JSBool)
+JS_PUBLIC_API(bool)
 JS_ClearAllWatchPoints(JSContext *cx)
 {
     if (JSCompartment *comp = cx->compartment()) {
@@ -403,7 +399,7 @@ JS_EndPC(JSContext *cx, JSScript *script)
     return script->code + script->length;
 }
 
-JS_PUBLIC_API(JSBool)
+JS_PUBLIC_API(bool)
 JS_GetLinePCs(JSContext *cx, JSScript *script,
               unsigned startLine, unsigned maxLines,
               unsigned* count, unsigned** retLines, jsbytecode*** retPCs)
@@ -411,12 +407,12 @@ JS_GetLinePCs(JSContext *cx, JSScript *script,
     size_t len = (script->length > maxLines ? maxLines : script->length);
     unsigned *lines = cx->pod_malloc<unsigned>(len);
     if (!lines)
-        return JS_FALSE;
+        return false;
 
     jsbytecode **pcs = cx->pod_malloc<jsbytecode*>(len);
     if (!pcs) {
         js_free(lines);
-        return JS_FALSE;
+        return false;
     }
 
     unsigned lineno = script->lineno;
@@ -451,7 +447,7 @@ JS_GetLinePCs(JSContext *cx, JSScript *script,
     else
         js_free(pcs);
 
-    return JS_TRUE;
+    return true;
 }
 
 JS_PUBLIC_API(unsigned)
@@ -460,7 +456,7 @@ JS_GetFunctionArgumentCount(JSContext *cx, JSFunction *fun)
     return fun->nargs;
 }
 
-JS_PUBLIC_API(JSBool)
+JS_PUBLIC_API(bool)
 JS_FunctionHasLocalNames(JSContext *cx, JSFunction *fun)
 {
     return fun->nonLazyScript()->bindings.count() > 0;
@@ -543,7 +539,7 @@ JS_GetScriptPrincipals(JSScript *script)
 JS_PUBLIC_API(JSPrincipals *)
 JS_GetScriptOriginPrincipals(JSScript *script)
 {
-    return script->originPrincipals;
+    return script->originPrincipals();
 }
 
 /************************************************************************/
@@ -629,7 +625,7 @@ JS_SetDestroyScriptHook(JSRuntime *rt, JSDestroyScriptHook hook,
 
 /* This all should be reworked to avoid requiring JSScopeProperty types. */
 
-static JSBool
+static bool
 GetPropertyDesc(JSContext *cx, JSObject *obj_, HandleShape shape, JSPropertyDesc *pd)
 {
     assertSameCompartment(cx, obj_);
@@ -637,7 +633,7 @@ GetPropertyDesc(JSContext *cx, JSObject *obj_, HandleShape shape, JSPropertyDesc
 
     RootedObject obj(cx, obj_);
 
-    JSBool wasThrowing = cx->isExceptionPending();
+    bool wasThrowing = cx->isExceptionPending();
     RootedValue lastException(cx, UndefinedValue());
     if (wasThrowing)
         lastException = cx->getPendingException();
@@ -667,10 +663,10 @@ GetPropertyDesc(JSContext *cx, JSObject *obj_, HandleShape shape, JSPropertyDesc
     pd->spare = 0;
     pd->alias = JSVAL_VOID;
 
-    return JS_TRUE;
+    return true;
 }
 
-JS_PUBLIC_API(JSBool)
+JS_PUBLIC_API(bool)
 JS_GetPropertyDescArray(JSContext *cx, JSObject *obj_, JSPropertyDescArray *pda)
 {
     RootedObject obj(cx, obj_);
@@ -778,52 +774,52 @@ JS_PutPropertyDescArray(JSContext *cx, JSPropertyDescArray *pda)
 
 /************************************************************************/
 
-JS_PUBLIC_API(JSBool)
+JS_PUBLIC_API(bool)
 JS_SetDebuggerHandler(JSRuntime *rt, JSDebuggerHandler handler, void *closure)
 {
     rt->debugHooks.debuggerHandler = handler;
     rt->debugHooks.debuggerHandlerData = closure;
-    return JS_TRUE;
+    return true;
 }
 
-JS_PUBLIC_API(JSBool)
+JS_PUBLIC_API(bool)
 JS_SetSourceHandler(JSRuntime *rt, JSSourceHandler handler, void *closure)
 {
     rt->debugHooks.sourceHandler = handler;
     rt->debugHooks.sourceHandlerData = closure;
-    return JS_TRUE;
+    return true;
 }
 
-JS_PUBLIC_API(JSBool)
+JS_PUBLIC_API(bool)
 JS_SetExecuteHook(JSRuntime *rt, JSInterpreterHook hook, void *closure)
 {
     rt->debugHooks.executeHook = hook;
     rt->debugHooks.executeHookData = closure;
-    return JS_TRUE;
+    return true;
 }
 
-JS_PUBLIC_API(JSBool)
+JS_PUBLIC_API(bool)
 JS_SetCallHook(JSRuntime *rt, JSInterpreterHook hook, void *closure)
 {
     rt->debugHooks.callHook = hook;
     rt->debugHooks.callHookData = closure;
-    return JS_TRUE;
+    return true;
 }
 
-JS_PUBLIC_API(JSBool)
+JS_PUBLIC_API(bool)
 JS_SetThrowHook(JSRuntime *rt, JSThrowHook hook, void *closure)
 {
     rt->debugHooks.throwHook = hook;
     rt->debugHooks.throwHookData = closure;
-    return JS_TRUE;
+    return true;
 }
 
-JS_PUBLIC_API(JSBool)
+JS_PUBLIC_API(bool)
 JS_SetDebugErrorHook(JSRuntime *rt, JSDebugErrorHook hook, void *closure)
 {
     rt->debugHooks.debugErrorHook = hook;
     rt->debugHooks.debugErrorHookData = closure;
-    return JS_TRUE;
+    return true;
 }
 
 /************************************************************************/
@@ -934,7 +930,23 @@ JS_DumpCompartmentPCCounts(JSContext *cx)
 #endif
 }
 
-JS_FRIEND_API(JSBool)
+JS_FRIEND_API(bool)
+js::CanCallContextDebugHandler(JSContext *cx)
+{
+    return !!cx->runtime()->debugHooks.debuggerHandler;
+}
+
+static JSTrapStatus
+CallContextDebugHandler(JSContext *cx, JSScript *script, jsbytecode *bc, Value *rval)
+{
+    if (!cx->runtime()->debugHooks.debuggerHandler)
+        return JSTRAP_RETURN;
+
+    return cx->runtime()->debugHooks.debuggerHandler(cx, script, bc, rval,
+                                                     cx->runtime()->debugHooks.debuggerHandlerData);
+}
+
+JS_FRIEND_API(bool)
 js_CallContextDebugHandler(JSContext *cx)
 {
     NonBuiltinScriptFrameIter iter(cx);
@@ -942,17 +954,17 @@ js_CallContextDebugHandler(JSContext *cx)
 
     RootedValue rval(cx);
     RootedScript script(cx, iter.script());
-    switch (js::CallContextDebugHandler(cx, script, iter.pc(), rval.address())) {
+    switch (CallContextDebugHandler(cx, script, iter.pc(), rval.address())) {
       case JSTRAP_ERROR:
         JS_ClearPendingException(cx);
-        return JS_FALSE;
+        return false;
       case JSTRAP_THROW:
         JS_SetPendingException(cx, rval);
-        return JS_FALSE;
+        return false;
       case JSTRAP_RETURN:
       case JSTRAP_CONTINUE:
       default:
-        return JS_TRUE;
+        return true;
     }
 }
 
@@ -1034,8 +1046,9 @@ FormatValue(JSContext *cx, const Value &vArg, JSAutoByteString &bytes)
 
 static char *
 FormatFrame(JSContext *cx, const NonBuiltinScriptFrameIter &iter, char *buf, int num,
-            JSBool showArgs, JSBool showLocals, JSBool showThisProps)
+            bool showArgs, bool showLocals, bool showThisProps)
 {
+    JS_ASSERT(!cx->isExceptionPending());
     RootedScript script(cx, iter.script());
     jsbytecode* pc = iter.pc();
 
@@ -1061,7 +1074,7 @@ FormatFrame(JSContext *cx, const NonBuiltinScriptFrameIter &iter, char *buf, int
 
     RootedValue thisVal(cx);
     AutoPropertyDescArray thisProps(cx);
-    if (iter.computeThis()) {
+    if (iter.computeThis(cx)) {
         thisVal = iter.thisv();
         if (showThisProps && !thisVal.isPrimitive())
             thisProps.fetch(&thisVal.toObject());
@@ -1086,30 +1099,36 @@ FormatFrame(JSContext *cx, const NonBuiltinScriptFrameIter &iter, char *buf, int
             JSPropertyDesc* desc = &callProps->array[i];
             JSAutoByteString nameBytes;
             const char *name = NULL;
-            if (JSVAL_IS_STRING(desc->id))
+            bool hasName = JSVAL_IS_STRING(desc->id);
+            if (hasName)
                 name = FormatValue(cx, desc->id, nameBytes);
-
             JSAutoByteString valueBytes;
             const char *value = FormatValue(cx, desc->value, valueBytes);
 
-            buf = JS_sprintf_append(buf, "%s%s%s%s%s%s",
-                                    namedArgCount ? ", " : "",
-                                    name ? name :"",
-                                    name ? " = " : "",
-                                    desc->value.isString() ? "\"" : "",
-                                    value ? value : "?unknown?",
-                                    desc->value.isString() ? "\"" : "");
-            if (!buf)
-                return buf;
+            if (value && (name || !hasName)) {
+                buf = JS_sprintf_append(buf, "%s%s%s%s%s%s",
+                                        namedArgCount ? ", " : "",
+                                        name ? name :"",
+                                        name ? " = " : "",
+                                        desc->value.isString() ? "\"" : "",
+                                        value ? value : "?unknown?",
+                                        desc->value.isString() ? "\"" : "");
+                if (!buf)
+                    return buf;
+            } else {
+                buf = JS_sprintf_append(buf, "    <Failed to get named argument while inspecting stack frame>\n");
+                cx->clearPendingException();
+
+            }
             namedArgCount++;
         }
 
         // print any unnamed trailing args (found in 'arguments' object)
         RootedValue val(cx);
-        if (JS_GetProperty(cx, callObj, "arguments", val.address()) && val.isObject()) {
+        if (JS_GetProperty(cx, callObj, "arguments", &val) && val.isObject()) {
             uint32_t argCount;
             RootedObject argsObj(cx, &val.toObject());
-            if (JS_GetProperty(cx, argsObj, "length", val.address()) &&
+            if (JS_GetProperty(cx, argsObj, "length", &val) &&
                 ToUint32(cx, val, &argCount) &&
                 argCount > namedArgCount)
             {
@@ -1117,9 +1136,11 @@ FormatFrame(JSContext *cx, const NonBuiltinScriptFrameIter &iter, char *buf, int
                     char number[8];
                     JS_snprintf(number, 8, "%d", (int) k);
 
-                    if (JS_GetProperty(cx, argsObj, number, val.address())) {
-                        JSAutoByteString valueBytes;
-                        const char *value = FormatValue(cx, val, valueBytes);
+                    JSAutoByteString valueBytes;
+                    const char *value = NULL;
+                    if (JS_GetProperty(cx, argsObj, number, &val) &&
+                        (value = FormatValue(cx, val, valueBytes)))
+                    {
                         buf = JS_sprintf_append(buf, "%s%s%s%s",
                                                 k ? ", " : "",
                                                 val.isString() ? "\"" : "",
@@ -1127,9 +1148,18 @@ FormatFrame(JSContext *cx, const NonBuiltinScriptFrameIter &iter, char *buf, int
                                                 val.isString() ? "\"" : "");
                         if (!buf)
                             return buf;
+                    } else {
+                        buf = JS_sprintf_append(buf, "    <Failed to get argument while inspecting stack frame>\n");
+                        cx->clearPendingException();
                     }
                 }
+            } else {
+                buf = JS_sprintf_append(buf, "    <Failed to get 'length' while inspecting stack frame>\n");
+                cx->clearPendingException();
             }
+        } else {
+            buf = JS_sprintf_append(buf, "    <Failed to get 'arguments' while inspecting stack frame>\n");
+            cx->clearPendingException();
         }
     }
 
@@ -1158,6 +1188,9 @@ FormatFrame(JSContext *cx, const NonBuiltinScriptFrameIter &iter, char *buf, int
                                         desc->value.isString() ? "\"" : "");
                 if (!buf)
                     return buf;
+            } else {
+                buf = JS_sprintf_append(buf, "    <Failed to get local while inspecting stack frame>\n");
+                cx->clearPendingException();
             }
         }
     }
@@ -1167,15 +1200,17 @@ FormatFrame(JSContext *cx, const NonBuiltinScriptFrameIter &iter, char *buf, int
         if (!thisVal.isUndefined()) {
             JSAutoByteString thisValBytes;
             RootedString thisValStr(cx, ToString<CanGC>(cx, thisVal));
-            if (thisValStr) {
-                if (const char *str = thisValBytes.encodeLatin1(cx, thisValStr)) {
-                    buf = JS_sprintf_append(buf, "    this = %s\n", str);
-                    if (!buf)
-                        return buf;
-                }
+            const char *str = NULL;
+            if (thisValStr &&
+                (str = thisValBytes.encodeLatin1(cx, thisValStr)))
+            {
+                buf = JS_sprintf_append(buf, "    this = %s\n", str);
+                if (!buf)
+                    return buf;
+            } else {
+                buf = JS_sprintf_append(buf, "    <failed to get 'this' value>\n");
+                cx->clearPendingException();
             }
-        } else {
-            buf = JS_sprintf_append(buf, "    <failed to get 'this' value>\n");
         }
     }
 
@@ -1196,18 +1231,20 @@ FormatFrame(JSContext *cx, const NonBuiltinScriptFrameIter &iter, char *buf, int
                                             desc->value.isString() ? "\"" : "");
                     if (!buf)
                         return buf;
+                } else {
+                    buf = JS_sprintf_append(buf, "    <Failed to format values while inspecting stack frame>\n");
+                    cx->clearPendingException();
                 }
             }
         }
     }
 
+    JS_ASSERT(!cx->isExceptionPending());
     return buf;
 }
 
 JS_PUBLIC_API(char *)
-JS::FormatStackDump(JSContext *cx, char *buf,
-                      JSBool showArgs, JSBool showLocals,
-                      JSBool showThisProps)
+JS::FormatStackDump(JSContext *cx, char *buf, bool showArgs, bool showLocals, bool showThisProps)
 {
     int num = 0;
 

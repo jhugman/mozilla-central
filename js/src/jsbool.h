@@ -16,7 +16,7 @@ extern JSObject *
 js_InitBooleanClass(JSContext *cx, js::HandleObject obj);
 
 extern JSString *
-js_BooleanToString(JSContext *cx, JSBool b);
+js_BooleanToString(js::ExclusiveContext *cx, bool b);
 
 namespace js {
 

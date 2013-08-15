@@ -12,9 +12,10 @@
 
 [Pref="media.mediasource.enabled"]
 interface VideoPlaybackQuality {
+  readonly attribute DOMHighResTimeStamp creationTime;
   readonly attribute unsigned long totalVideoFrames;
   readonly attribute unsigned long droppedVideoFrames;
   readonly attribute unsigned long corruptedVideoFrames;
-  readonly attribute double playbackJitter;
+  readonly attribute double totalFrameDelay;
 };
 

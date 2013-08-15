@@ -35,7 +35,6 @@
 #include "nsTextFragment.h"
 #include "nsTextNode.h"
 
-#include "nsIScriptContext.h"
 #include "nsIScriptError.h"
 
 #include "nsIStyleRuleProcessor.h"
@@ -52,29 +51,6 @@ using namespace mozilla;
 using namespace mozilla::dom;
 
 // Helper Classes =====================================================================
-
-// Internal helper class for managing our IID table.
-class nsIIDKey : public nsHashKey {
-  public:
-    nsIID mKey;
-
-  public:
-    nsIIDKey(REFNSIID key) : mKey(key) {}
-    ~nsIIDKey(void) {}
-
-    uint32_t HashCode(void) const {
-      // Just use the 32-bit m0 field.
-      return mKey.m0;
-    }
-
-    bool Equals(const nsHashKey *aKey) const {
-      return mKey.Equals( ((nsIIDKey*) aKey)->mKey);
-    }
-
-    nsHashKey *Clone(void) const {
-      return new nsIIDKey(mKey);
-    }
-};
 
 // nsXBLAttributeEntry and helpers.  This class is used to efficiently handle
 // attribute changes in anonymous content.
@@ -125,10 +101,10 @@ nsXBLPrototypeBinding::nsXBLPrototypeBinding()
   mChromeOnlyContent(false),
   mResources(nullptr),
   mAttributeTable(nullptr),
-  mInterfaceTable(nullptr),
   mBaseNameSpaceID(kNameSpaceID_None)
 {
   MOZ_COUNT_CTOR(nsXBLPrototypeBinding);
+  mInterfaceTable.Init();
 }
 
 nsresult
@@ -168,16 +144,6 @@ bool nsXBLPrototypeBinding::CompareBindingURI(nsIURI* aURI) const
   return equal;
 }
 
-static bool
-TraverseBinding(nsHashKey *aKey, void *aData, void* aClosure)
-{
-  nsCycleCollectionTraversalCallback *cb = 
-    static_cast<nsCycleCollectionTraversalCallback*>(aClosure);
-  NS_CYCLE_COLLECTION_NOTE_EDGE_NAME((*cb), "proto mInterfaceTable data");
-  cb->NoteXPCOMChild(static_cast<nsISupports*>(aData));
-  return kHashEnumerateNext;
-}
-
 void
 nsXBLPrototypeBinding::Traverse(nsCycleCollectionTraversalCallback &cb) const
 {
@@ -187,8 +153,7 @@ nsXBLPrototypeBinding::Traverse(nsCycleCollectionTraversalCallback &cb) const
     NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "proto mResources mLoader");
     cb.NoteXPCOMChild(mResources->mLoader);
   }
-  if (mInterfaceTable)
-    mInterfaceTable->Enumerate(TraverseBinding, &cb);
+  ImplCycleCollectionTraverse(cb, mInterfaceTable, "proto mInterfaceTable");
 }
 
 void
@@ -218,7 +183,6 @@ nsXBLPrototypeBinding::~nsXBLPrototypeBinding(void)
 {
   delete mResources;
   delete mAttributeTable;
-  delete mInterfaceTable;
   delete mImplementation;
   MOZ_COUNT_DTOR(nsXBLPrototypeBinding);
 }
@@ -474,13 +438,7 @@ bool
 nsXBLPrototypeBinding::ImplementsInterface(REFNSIID aIID) const
 {
   // Check our IID table.
-  if (mInterfaceTable) {
-    nsIIDKey key(aIID);
-    nsCOMPtr<nsISupports> supports = dont_AddRef(mInterfaceTable->Get(&key));
-    return supports != nullptr;
-  }
-
-  return false;
+  return !!mInterfaceTable.GetWeak(aIID);
 }
 
 // Internal helpers ///////////////////////////////////////////////////////////////////////
@@ -803,10 +761,6 @@ nsXBLPrototypeBinding::ConstructInterfaceTable(const nsAString& aImpls)
     if (!infoManager)
       return NS_ERROR_FAILURE;
 
-    // Create the table.
-    if (!mInterfaceTable)
-      mInterfaceTable = new nsSupportsHashtable(4);
-
     // The user specified at least one attribute.
     NS_ConvertUTF16toUTF8 utf8impl(aImpls);
     char* str = utf8impl.BeginWriting();
@@ -827,8 +781,7 @@ nsXBLPrototypeBinding::ConstructInterfaceTable(const nsAString& aImpls)
 
         if (iid) {
           // We found a valid iid.  Add it to our table.
-          nsIIDKey key(*iid);
-          mInterfaceTable->Put(&key, mBinding);
+          mInterfaceTable.Put(*iid, mBinding);
 
           // this block adds the parent interfaces of each interface
           // defined in the xbl definition (implements="nsI...")
@@ -843,8 +796,7 @@ nsXBLPrototypeBinding::ConstructInterfaceTable(const nsAString& aImpls)
               break;
 
             // add the iid to the table
-            nsIIDKey parentKey(*iid);
-            mInterfaceTable->Put(&parentKey, mBinding);
+            mInterfaceTable.Put(*iid, mBinding);
 
             // look for the next parent
             iinfo = parentInfo;
@@ -987,25 +939,16 @@ nsXBLPrototypeBinding::Read(nsIObjectInputStream* aStream,
   rv = aStream->Read32(&interfaceCount);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  if (interfaceCount > 0) {
-    NS_ASSERTION(!mInterfaceTable, "non-null mInterfaceTable");
-    mInterfaceTable = new nsSupportsHashtable(interfaceCount);
-    NS_ENSURE_TRUE(mInterfaceTable, NS_ERROR_OUT_OF_MEMORY);
-
-    for (; interfaceCount > 0; interfaceCount--) {
-      nsIID iid;
-      aStream->ReadID(&iid);
-      nsIIDKey key(iid);
-      mInterfaceTable->Put(&key, mBinding);
-    }
+  for (; interfaceCount > 0; interfaceCount--) {
+    nsIID iid;
+    aStream->ReadID(&iid);
+    mInterfaceTable.Put(iid, mBinding);
   }
 
-  nsCOMPtr<nsIScriptGlobalObjectOwner> globalOwner(do_QueryObject(aDocInfo));
-  nsIScriptGlobalObject* globalObject = globalOwner->GetScriptGlobalObject();
-  NS_ENSURE_TRUE(globalObject, NS_ERROR_UNEXPECTED);
-
-  nsIScriptContext *context = globalObject->GetContext();
-  NS_ENSURE_TRUE(context, NS_ERROR_FAILURE);
+  AutoSafeJSContext cx;
+  JS::Rooted<JSObject*> compilationGlobal(cx, aDocInfo->GetCompilationGlobal());
+  NS_ENSURE_TRUE(compilationGlobal, NS_ERROR_UNEXPECTED);
+  JSAutoCompartment ac(cx, compilationGlobal);
 
   bool isFirstBinding = aFlags & XBLBinding_Serialize_IsFirstBinding;
   rv = Init(id, aDocInfo, nullptr, isFirstBinding);
@@ -1030,7 +973,7 @@ nsXBLPrototypeBinding::Read(nsIObjectInputStream* aStream,
     // retrieve the mapped bindings from within here. However, if an error
     // occurs, the mapping should be removed again so that we don't keep an
     // invalid binding around.
-    rv = mImplementation->Read(context, aStream, this, globalObject);
+    rv = mImplementation->Read(aStream, this);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
@@ -1049,7 +992,7 @@ nsXBLPrototypeBinding::Read(nsIObjectInputStream* aStream,
                  "invalid handler type");
 
     nsXBLPrototypeHandler* handler = new nsXBLPrototypeHandler(this);
-    rv = handler->Read(context, aStream);
+    rv = handler->Read(aStream);
     if (NS_FAILED(rv)) {
       delete handler;
       return rv;
@@ -1092,15 +1035,13 @@ nsXBLPrototypeBinding::Read(nsIObjectInputStream* aStream,
   return NS_OK;
 }
 
-static
-bool
-WriteInterfaceID(nsHashKey *aKey, void *aData, void* aClosure)
+static PLDHashOperator
+WriteInterfaceID(const nsIID& aKey, nsIContent* aData, void* aClosure)
 {
   // We can just write out the ids. The cache will be invalidated when a
   // different build is used, so we don't need to worry about ids changing.
-  nsID iid = ((nsIIDKey *)aKey)->mKey;
-  static_cast<nsIObjectOutputStream *>(aClosure)->WriteID(iid);
-  return kHashEnumerateNext;
+  static_cast<nsIObjectOutputStream *>(aClosure)->WriteID(aKey);
+  return PL_DHASH_NEXT;
 }
 
 nsresult
@@ -1110,12 +1051,10 @@ nsXBLPrototypeBinding::Write(nsIObjectOutputStream* aStream)
   // mKeyHandlersRegistered and mKeyHandlers are not serialized as they are
   // computed on demand.
 
-  nsCOMPtr<nsIScriptGlobalObjectOwner> globalOwner(do_QueryObject(mXBLDocInfoWeak));
-  nsIScriptGlobalObject* globalObject = globalOwner->GetScriptGlobalObject();
-  NS_ENSURE_TRUE(globalObject, NS_ERROR_UNEXPECTED);
-
-  nsIScriptContext *context = globalObject->GetContext();
-  NS_ENSURE_TRUE(context, NS_ERROR_FAILURE);
+  AutoSafeJSContext cx;
+  JS::Rooted<JSObject*> compilationGlobal(cx, mXBLDocInfoWeak->GetCompilationGlobal());
+  NS_ENSURE_TRUE(compilationGlobal, NS_ERROR_UNEXPECTED);
+  JSAutoCompartment ac(cx, compilationGlobal);
 
   uint8_t flags = mInheritStyle ? XBLBinding_Serialize_InheritStyle : 0;
 
@@ -1167,20 +1106,14 @@ nsXBLPrototypeBinding::Write(nsIObjectOutputStream* aStream)
   }
 
   // Enumerate and write out the implemented interfaces.
-  if (mInterfaceTable) {
-    rv = aStream->Write32(mInterfaceTable->Count());
-    NS_ENSURE_SUCCESS(rv, rv);
+  rv = aStream->Write32(mInterfaceTable.Count());
+  NS_ENSURE_SUCCESS(rv, rv);
 
-    mInterfaceTable->Enumerate(WriteInterfaceID, aStream);
-  }
-  else {
-    rv = aStream->Write32(0);
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
+  mInterfaceTable.EnumerateRead(WriteInterfaceID, aStream);
 
   // Write out the implementation details.
   if (mImplementation) {
-    rv = mImplementation->Write(context, aStream, this);
+    rv = mImplementation->Write(aStream, this);
     NS_ENSURE_SUCCESS(rv, rv);
   }
   else {
@@ -1193,7 +1126,7 @@ nsXBLPrototypeBinding::Write(nsIObjectOutputStream* aStream)
   // Write out the handlers.
   nsXBLPrototypeHandler* handler = mPrototypeHandler;
   while (handler) {
-    rv = handler->Write(context, aStream);
+    rv = handler->Write(aStream);
     NS_ENSURE_SUCCESS(rv, rv);
 
     handler = handler->GetNextHandler();

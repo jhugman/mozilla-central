@@ -6,14 +6,13 @@
 
 #include "vm/ObjectImpl-inl.h"
 
+#include "gc/Marking.h"
 #include "js/Value.h"
 #include "vm/Debugger.h"
-#include "vm/ObjectImpl.h"
 
 #include "jsobjinlines.h"
 
 #include "gc/Barrier-inl.h"
-#include "gc/Marking.h"
 
 using namespace js;
 
@@ -156,13 +155,13 @@ PropDesc::wrapInto(JSContext *cx, HandleObject obj, const jsid &id, jsid *wrappe
     desc->value_ = value;
     desc->get_ = get;
     desc->set_ = set;
-    return !obj->isProxy() || desc->makeObject(cx);
+    return !obj->is<ProxyObject>() || desc->makeObject(cx);
 }
 
-static ObjectElements emptyElementsHeader(0, 0);
+static const ObjectElements emptyElementsHeader(0, 0);
 
 /* Objects with no elements share one empty set of elements. */
-HeapSlot *js::emptyObjectElements =
+HeapSlot *const js::emptyObjectElements =
     reinterpret_cast<HeapSlot *>(uintptr_t(&emptyElementsHeader) + sizeof(ObjectElements));
 
 /* static */ bool
@@ -265,7 +264,7 @@ js::ObjectImpl::initializeSlotRange(uint32_t start, uint32_t length)
     HeapSlot *fixedStart, *fixedEnd, *slotsStart, *slotsEnd;
     getSlotRangeUnchecked(start, length, &fixedStart, &fixedEnd, &slotsStart, &slotsEnd);
 
-    JSRuntime *rt = runtime();
+    JSRuntime *rt = runtimeFromAnyThread();
     uint32_t offset = start;
     for (HeapSlot *sp = fixedStart; sp < fixedEnd; sp++)
         sp->init(rt, this->asObjectPtr(), HeapSlot::Slot, offset++, UndefinedValue());
@@ -276,7 +275,7 @@ js::ObjectImpl::initializeSlotRange(uint32_t start, uint32_t length)
 void
 js::ObjectImpl::initSlotRange(uint32_t start, const Value *vector, uint32_t length)
 {
-    JSRuntime *rt = runtime();
+    JSRuntime *rt = runtimeFromAnyThread();
     HeapSlot *fixedStart, *fixedEnd, *slotsStart, *slotsEnd;
     getSlotRange(start, length, &fixedStart, &fixedEnd, &slotsStart, &slotsEnd);
     for (HeapSlot *sp = fixedStart; sp < fixedEnd; sp++)
@@ -322,7 +321,7 @@ js::ObjectImpl::slotInRange(uint32_t slot, SentinelAllowed sentinel) const
 MOZ_NEVER_INLINE
 #endif
 Shape *
-js::ObjectImpl::nativeLookup(JSContext *cx, jsid id)
+js::ObjectImpl::nativeLookup(ExclusiveContext *cx, jsid id)
 {
     MOZ_ASSERT(isNative());
     Shape **spp;
@@ -524,7 +523,7 @@ js::ArrayBufferDelegate(JSContext *cx, Handle<ObjectImpl*> obj)
     MOZ_ASSERT(obj->hasClass(&ArrayBufferObject::class_));
     if (obj->getPrivate())
         return static_cast<JSObject *>(obj->getPrivate());
-    JSObject *delegate = NewObjectWithGivenProto(cx, &ObjectClass, obj->getProto(), NULL);
+    JSObject *delegate = NewObjectWithGivenProto(cx, &JSObject::class_, obj->getProto(), NULL);
     obj->setPrivateGCThing(delegate);
     return delegate;
 }
@@ -568,9 +567,8 @@ js::GetOwnProperty(JSContext *cx, Handle<ObjectImpl*> obj, PropertyId pid_, unsi
 
     Rooted<PropertyId> pid(cx, pid_);
 
-    if (static_cast<JSObject *>(obj.get())->isProxy()) {
+    if (Downcast(obj)->is<ProxyObject>())
         MOZ_ASSUME_UNREACHABLE("NYI: proxy [[GetOwnProperty]]");
-    }
 
     RootedShape shape(cx, obj->nativeLookup(cx, pid));
     if (!shape) {
@@ -662,9 +660,8 @@ js::GetProperty(JSContext *cx, Handle<ObjectImpl*> obj, Handle<ObjectImpl*> rece
     do {
         MOZ_ASSERT(obj);
 
-        if (Downcast(current)->isProxy()) {
+        if (Downcast(current)->is<ProxyObject>())
             MOZ_ASSUME_UNREACHABLE("NYI: proxy [[GetP]]");
-        }
 
         AutoPropDescRooter desc(cx);
         if (!GetOwnProperty(cx, current, pid, resolveFlags, &desc.getPropDesc()))
@@ -725,9 +722,8 @@ js::GetElement(JSContext *cx, Handle<ObjectImpl*> obj, Handle<ObjectImpl*> recei
     do {
         MOZ_ASSERT(current);
 
-        if (Downcast(current)->isProxy()) {
+        if (Downcast(current)->is<ProxyObject>())
             MOZ_ASSUME_UNREACHABLE("NYI: proxy [[GetP]]");
-        }
 
         PropDesc desc;
         if (!GetOwnElement(cx, current, index, resolveFlags, &desc))
@@ -788,9 +784,8 @@ js::HasElement(JSContext *cx, Handle<ObjectImpl*> obj, uint32_t index, unsigned 
     do {
         MOZ_ASSERT(current);
 
-        if (Downcast(current)->isProxy()) {
+        if (Downcast(current)->is<ProxyObject>())
             MOZ_ASSUME_UNREACHABLE("NYI: proxy [[HasProperty]]");
-        }
 
         PropDesc prop;
         if (!GetOwnElement(cx, current, index, resolveFlags, &prop))
@@ -952,9 +947,8 @@ js::SetElement(JSContext *cx, Handle<ObjectImpl*> obj, Handle<ObjectImpl*> recei
     do {
         MOZ_ASSERT(current);
 
-        if (Downcast(current)->isProxy()) {
+        if (Downcast(current)->is<ProxyObject>())
             MOZ_ASSUME_UNREACHABLE("NYI: proxy [[SetP]]");
-        }
 
         PropDesc ownDesc;
         if (!GetOwnElement(cx, current, index, resolveFlags, &ownDesc))
@@ -991,7 +985,7 @@ js::SetElement(JSContext *cx, Handle<ObjectImpl*> obj, Handle<ObjectImpl*> recei
                 /* Push set, receiver, and v as the sole argument. */
                 args.setCallee(setter);
                 args.setThis(ObjectValue(*current));
-                args[0] = v;
+                args[0].set(v);
 
                 *succeeded = true;
                 return Invoke(cx, args);

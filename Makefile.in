@@ -60,7 +60,7 @@ ifndef MOZ_PROFILE_USE
 # We need to explicitly put backend.RecursiveMakeBackend.built here
 # otherwise the rule in rules.mk doesn't run early enough.
 default alldep all:: CLOBBER $(topsrcdir)/configure config.status backend.RecursiveMakeBackend.built
-	$(PYTHON) $(topsrcdir)/config/purge_directories.py -d _build_manifests/purge .
+	$(call py_action,purge_manifests,-d _build_manifests/purge .)
 endif
 
 CLOBBER: $(topsrcdir)/CLOBBER
@@ -167,9 +167,6 @@ uploadsymbols:
 ifdef MOZ_CRASHREPORTER
 	$(SHELL) $(topsrcdir)/toolkit/crashreporter/tools/upload_symbols.sh $(SYMBOL_INDEX_NAME) "$(DIST)/$(PKG_PATH)$(SYMBOL_FULL_ARCHIVE_BASENAME).zip"
 endif
-
-codesighs:
-	$(MAKE) -C $(MOZ_BUILD_APP)/installer codesighs
 
 # defined in package-name.mk
 export MOZ_SOURCE_STAMP

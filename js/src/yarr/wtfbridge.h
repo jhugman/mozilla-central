@@ -15,12 +15,10 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include "jsstr.h"
-#include "jsprvtd.h"
 #include "vm/String.h"
 #include "assembler/wtf/Platform.h"
 #include "assembler/jit/ExecutableAllocator.h"
 #include "yarr/CheckedArithmetic.h"
-#include "js/TemplateLib.h"
 
 namespace JSC { namespace Yarr {
 
@@ -172,7 +170,7 @@ class Vector {
 
     template <size_t M>
     void append(const Vector<T,M> &v) {
-        if (!impl.append(v.impl))
+        if (!impl.appendAll(v.impl))
             MOZ_CRASH();
     }
 

@@ -4,7 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Endian.h"
 /*
  * This file implements the structured clone algorithm of
  * http://www.whatwg.org/specs/web-apps/current-work/multipage/common-dom-interfaces.html#safe-passing-of-structured-data
@@ -30,14 +29,17 @@
 
 #include "jsclone.h"
 
+#include "mozilla/Endian.h"
 #include "mozilla/FloatingPoint.h"
 
 #include "jsdate.h"
+#include "jswrapper.h"
 
 #include "vm/TypedArrayObject.h"
+#include "vm/WrapperObject.h"
 
-#include "vm/BooleanObject-inl.h"
-#include "vm/RegExpObject-inl.h"
+#include "jscntxtinlines.h"
+#include "jsobjinlines.h"
 
 using namespace js;
 
@@ -134,6 +136,12 @@ js::ClearStructuredClone(const uint64_t *data, size_t nbytes)
                 if (tag == SCTAG_TRANSFER_MAP) {
                     u = LittleEndian::readUint64(point++);
                     js_free(reinterpret_cast<void*>(u));
+                } else {
+                    // The only things in the transfer map should be
+                    // SCTAG_TRANSFER_MAP tags paired with pointers. If we find
+                    // any other tag, we've walked off the end of the transfer
+                    // map.
+                    break;
                 }
             }
         }
@@ -470,7 +478,7 @@ JSStructuredCloneWriter::parseTransferable()
     RootedValue v(context());
 
     for (uint32_t i = 0; i < length; ++i) {
-        if (!JS_GetElement(context(), array, i, v.address())) {
+        if (!JS_GetElement(context(), array, i, &v)) {
             return false;
         }
 
@@ -553,7 +561,7 @@ JSStructuredCloneWriter::checkStack()
 #endif
 }
 
-JS_PUBLIC_API(JSBool)
+JS_PUBLIC_API(bool)
 JS_WriteTypedArray(JSStructuredCloneWriter *w, jsval v)
 {
     JS_ASSERT(v.isObject());
@@ -562,7 +570,7 @@ JS_WriteTypedArray(JSStructuredCloneWriter *w, jsval v)
 
     // If the object is a security wrapper, see if we're allowed to unwrap it.
     // If we aren't, throw.
-    if (obj->isWrapper())
+    if (obj->is<WrapperObject>())
         obj = CheckedUnwrap(obj);
     if (!obj) {
         JS_ReportError(w->context(), "Permission denied to access object");
@@ -692,7 +700,7 @@ JSStructuredCloneWriter::startWrite(const Value &v)
             return writeTypedArray(obj);
         } else if (obj->is<ArrayBufferObject>() && obj->as<ArrayBufferObject>().hasData()) {
             return writeArrayBuffer(obj);
-        } else if (obj->isObject() || obj->is<ArrayObject>()) {
+        } else if (obj->is<JSObject>() || obj->is<ArrayObject>()) {
             return traverseObject(obj);
         } else if (obj->is<BooleanObject>()) {
             return out.writePair(SCTAG_BOOLEAN_OBJECT, obj->as<BooleanObject>().unbox());
@@ -844,7 +852,7 @@ TagToV1ArrayType(uint32_t tag)
     return tag - SCTAG_TYPED_ARRAY_V1_MIN;
 }
 
-JS_PUBLIC_API(JSBool)
+JS_PUBLIC_API(bool)
 JS_ReadTypedArray(JSStructuredCloneReader *r, jsval *vp)
 {
     uint32_t tag, nelems;
@@ -1099,7 +1107,7 @@ JSStructuredCloneReader::startRead(Value *vp)
       case SCTAG_OBJECT_OBJECT: {
         JSObject *obj = (tag == SCTAG_ARRAY_OBJECT)
                         ? NewDenseEmptyArray(context())
-                        : NewBuiltinClassInstance(context(), &ObjectClass);
+                        : NewBuiltinClassInstance(context(), &JSObject::class_);
         if (!obj || !objs.append(ObjectValue(*obj)))
             return false;
         vp->setObject(*obj);

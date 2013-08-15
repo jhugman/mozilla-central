@@ -20,11 +20,9 @@ RESOURCES_HTML = \
 		$(srcdir)/folder.png \
 		$(NULL)
 
-FORCE_STATIC_LIB = 1
-
 include $(topsrcdir)/config/config.mk
-include $(topsrcdir)/ipc/chromium/chromium-config.mk
 include $(topsrcdir)/config/rules.mk
+include $(topsrcdir)/ipc/chromium/chromium-config.mk
 
 LOCAL_INCLUDES += \
 		-I$(srcdir) \
@@ -57,4 +55,3 @@ libs::
 install::
 	$(SYSINSTALL) $(IFLAGS1) $(RESOURCES_HTML) $(DESTDIR)$(mozappdir)/res/html
 
-DEFINES += -D_IMPL_NS_LAYOUT

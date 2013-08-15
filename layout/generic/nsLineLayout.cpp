@@ -778,7 +778,7 @@ nsLineLayout::ReflowFrame(nsIFrame* aFrame,
     pfd->mMargin = reflowState.mComputedMargin;
     pfd->mBorderPadding = reflowState.mComputedBorderPadding;
     pfd->SetFlag(PFD_RELATIVEPOS,
-                 (reflowState.mStyleDisplay->mPosition == NS_STYLE_POSITION_RELATIVE));
+                 reflowState.mStyleDisplay->IsRelativelyPositionedStyle());
     if (pfd->GetFlag(PFD_RELATIVEPOS)) {
       pfd->mOffsets = reflowState.mComputedOffsets;
     }
@@ -2628,8 +2628,9 @@ nsLineLayout::RelativePositionFrames(PerSpanData* psd, nsOverflowAreas& aOverflo
     if (pfd->GetFlag(PFD_RELATIVEPOS)) {
       // right and bottom are handled by
       // nsHTMLReflowState::ComputeRelativeOffsets
-      nsPoint change(pfd->mOffsets.left, pfd->mOffsets.top);
-      origin += change;
+      nsHTMLReflowState::ApplyRelativePositioning(pfd->mFrame,
+                                                  pfd->mOffsets,
+                                                  &origin);
       frame->SetPosition(origin);
     }
 

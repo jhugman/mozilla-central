@@ -54,7 +54,6 @@
 #include "nsFrameMessageManager.h"
 #include "mozilla/LinkedList.h"
 #include "mozilla/TimeStamp.h"
-#include "nsIDOMTouchEvent.h"
 #include "nsIInlineEventHandlers.h"
 #include "nsWrapperCacheInlines.h"
 #include "nsIIdleObserver.h"
@@ -63,6 +62,7 @@
 #include "mozilla/dom/Gamepad.h"
 #endif
 #include "nsIDocument.h"
+#include "nsIDOMTouchEvent.h"
 
 #include "mozilla/dom/EventTarget.h"
 #include "Units.h"
@@ -446,8 +446,8 @@ public:
   // Outer windows only.
   virtual NS_HIDDEN_(void) EnsureSizeUpToDate();
 
-  virtual NS_HIDDEN_(nsIDOMWindow*) EnterModalState();
-  virtual NS_HIDDEN_(void) LeaveModalState(nsIDOMWindow* aWindow);
+  virtual NS_HIDDEN_(void) EnterModalState();
+  virtual NS_HIDDEN_(void) LeaveModalState();
 
   virtual NS_HIDDEN_(bool) CanClose();
   virtual NS_HIDDEN_(nsresult) ForceClose();
@@ -469,6 +469,8 @@ public:
   // WebIDL interface.
   uint32_t GetLength();
   already_AddRefed<nsIDOMWindow> IndexedGetter(uint32_t aIndex, bool& aFound);
+
+  void GetSupportedNames(nsTArray<nsString>& aNames);
 
   // Object Management
   nsGlobalWindow(nsGlobalWindow *aOuterWindow);
@@ -631,8 +633,6 @@ public:
 
   virtual nsresult SetArguments(nsIArray *aArguments);
 
-  static bool DOMWindowDumpEnabled();
-
   void MaybeForgiveSpamCount();
   bool IsClosedOrClosing() {
     return (mIsClosed ||
@@ -691,6 +691,13 @@ public:
   {
     mAllowScriptsToClose = true;
   }
+
+  enum SlowScriptResponse {
+    ContinueSlowScript = 0,
+    AlwaysContinueSlowScript,
+    KillSlowScript
+  };
+  SlowScriptResponse ShowSlowScriptDialog();
 
 #ifdef MOZ_GAMEPAD
   void AddGamepad(uint32_t aIndex, mozilla::dom::Gamepad* aGamepad);
@@ -809,7 +816,7 @@ protected:
 
   // Object Management
   virtual ~nsGlobalWindow();
-  void CleanUp(bool aIgnoreModalDialog);
+  void CleanUp();
   void ClearControllers();
   nsresult FinalClose();
 
@@ -1225,7 +1232,9 @@ protected:
 
   // These member variables are used on both inner and the outer windows.
   nsCOMPtr<nsIPrincipal> mDocumentPrincipal;
-  JSObject* mJSObject;
+
+  // The JS global object.  Global objects are always allocated tenured.
+  JS::TenuredHeap<JSObject*> mJSObject;
 
   typedef nsCOMArray<nsIDOMStorageEvent> nsDOMStorageEventArray;
   nsDOMStorageEventArray mPendingStorageEvents;
@@ -1242,7 +1251,12 @@ protected:
   nsCOMPtr<nsIURI> mLastOpenedURI;
 #endif
 
-  bool mCleanedUp, mCallCleanUpAfterModalDialogCloses;
+#ifdef MOZ_B2G
+  bool mNetworkUploadObserverEnabled;
+  bool mNetworkDownloadObserverEnabled;
+#endif // MOZ_B2G
+
+  bool mCleanedUp;
 
   nsCOMPtr<nsIDOMOfflineResourceList> mApplicationCache;
 

@@ -118,7 +118,7 @@ xpc_FastGetCachedWrapper(nsWrapperCache *cache, JSObject *scope, jsval *vp)
 // The JS GC marks objects gray that are held alive directly or
 // indirectly by an XPConnect root. The cycle collector explores only
 // this subset of the JS heap.
-inline JSBool
+inline bool
 xpc_IsGrayGCThing(void *thing)
 {
     return JS::GCThingIsMarkedGray(thing);
@@ -126,7 +126,7 @@ xpc_IsGrayGCThing(void *thing)
 
 // The cycle collector only cares about some kinds of GCthings that are
 // reachable from an XPConnect root. Implemented in nsXPConnect.cpp.
-extern JSBool
+extern bool
 xpc_GCThingIsGrayCCThing(void *thing);
 
 // Unmark gray for known-nonnull cases
@@ -159,10 +159,10 @@ inline JSContext *
 xpc_UnmarkGrayContext(JSContext *cx)
 {
     if (cx) {
-        JSObject *global = js::GetDefaultGlobalForContext(cx);
+        JSObject *global = js::DefaultObjectForContextOrNull(cx);
         xpc_UnmarkGrayObject(global);
         if (global && JS_IsInRequest(JS_GetRuntime(cx))) {
-            JSObject *scope = JS_GetGlobalForScopeChain(cx);
+            JSObject *scope = JS::CurrentGlobalOrNull(cx);
             if (scope != global)
                 xpc_UnmarkGrayObject(scope);
         }
@@ -321,8 +321,6 @@ nsIPrincipal *GetObjectPrincipal(JSObject *obj);
 
 bool IsXBLScope(JSCompartment *compartment);
 
-void DumpJSHeap(FILE* file);
-
 void SetLocationForGlobal(JSObject *global, const nsACString& location);
 void SetLocationForGlobal(JSObject *global, nsIURI *locationURI);
 
@@ -413,6 +411,30 @@ GetNativeForGlobal(JSObject *global);
  */
 JSObject *
 GetJunkScope();
+
+/**
+ * Returns the native global of the junk scope. See comment of GetJunkScope
+ * about the conditions of using it.
+ */
+nsIGlobalObject *
+GetJunkScopeGlobal();
+
+// Error reporter used when there is no associated DOM window on to which to
+// report errors and warnings.
+void
+SystemErrorReporter(JSContext *cx, const char *message, JSErrorReport *rep);
+
+// We have a separate version that's exported with external linkage for use by
+// xpcshell, since external linkage on windows changes the signature to make it
+// incompatible with the JSErrorReporter type, causing JS_SetErrorReporter calls
+// to fail to compile.
+NS_EXPORT_(void)
+SystemErrorReporterExternal(JSContext *cx, const char *message,
+                            JSErrorReport *rep);
+
+NS_EXPORT_(void)
+SimulateActivityCallback(bool aActive);
+
 } // namespace xpc
 
 namespace mozilla {
@@ -435,7 +457,7 @@ inline bool IsDOMProxy(JSObject *obj)
 
 typedef JSObject*
 (*DefineInterface)(JSContext *cx, JS::Handle<JSObject*> global,
-                   JS::Handle<jsid> id, bool *enabled);
+                   JS::Handle<jsid> id, bool defineOnGlobal);
 
 typedef JSObject*
 (*ConstructNavigatorProperty)(JSContext *cx, JS::Handle<JSObject*> naviObj);
@@ -453,6 +475,12 @@ extern bool
 DefineStaticJSVals(JSContext *cx);
 void
 Register(nsScriptNameSpaceManager* aNameSpaceManager);
+
+/**
+ * A test for whether WebIDL methods that should only be visible to
+ * chrome or XBL scopes should be exposed.
+ */
+bool IsChromeOrXBL(JSContext* cx, JSObject* /* unused */);
 
 } // namespace dom
 } // namespace mozilla

@@ -8,16 +8,9 @@
 #define jscompartment_h
 
 #include "mozilla/MemoryReporting.h"
-#include "mozilla/Util.h"
-
-#include "jscntxt.h"
-#include "jsgc.h"
-#include "jsobj.h"
 
 #include "gc/Zone.h"
 #include "vm/GlobalObject.h"
-#include "vm/RegExpObject.h"
-#include "vm/Shape.h"
 
 namespace js {
 
@@ -122,19 +115,27 @@ class WeakMapBase;
 
 struct JSCompartment
 {
-    JS::Zone                     *zone_;
     JS::CompartmentOptions       options_;
 
-    JSRuntime                    *rt;
+  private:
+    JS::Zone                     *zone_;
+    JSRuntime                    *runtime_;
+
+  public:
     JSPrincipals                 *principals;
     bool                         isSystem;
     bool                         marked;
+
+#ifdef DEBUG
+    bool                         firedOnNewGlobalObject;
+#endif
 
     void mark() { marked = true; }
 
   private:
     friend struct JSRuntime;
     friend struct JSContext;
+    friend class js::ExclusiveContext;
     js::ReadBarriered<js::GlobalObject> global_;
 
     unsigned                     enterCompartmentDepth;
@@ -142,11 +143,23 @@ struct JSCompartment
   public:
     void enter() { enterCompartmentDepth++; }
     void leave() { enterCompartmentDepth--; }
+    bool hasBeenEntered() { return !!enterCompartmentDepth; }
 
     JS::Zone *zone() { return zone_; }
     const JS::Zone *zone() const { return zone_; }
     JS::CompartmentOptions &options() { return options_; }
     const JS::CompartmentOptions &options() const { return options_; }
+
+    JSRuntime *runtimeFromMainThread() {
+        JS_ASSERT(CurrentThreadCanAccessRuntime(runtime_));
+        return runtime_;
+    }
+
+    // Note: Unrestricted access to the zone's runtime from an arbitrary
+    // thread can easily lead to races. Use this method very carefully.
+    JSRuntime *runtimeFromAnyThread() const {
+        return runtime_;
+    }
 
     /*
      * Nb: global_ might be NULL, if (a) it's the atoms compartment, or (b) the
@@ -225,9 +238,6 @@ struct JSCompartment
     js::types::TypeObjectSet     lazyTypeObjects;
     void sweepNewTypeObjectTable(js::types::TypeObjectSet &table);
 
-    js::types::TypeObject *getNewType(JSContext *cx, js::Class *clasp, js::TaggedProto proto,
-                                      JSFunction *fun = NULL);
-
     js::types::TypeObject *getLazyType(JSContext *cx, js::Class *clasp, js::TaggedProto proto);
 
     /*
@@ -278,7 +288,7 @@ struct JSCompartment
     bool wrapId(JSContext *cx, jsid *idp);
     bool wrap(JSContext *cx, js::PropertyOp *op);
     bool wrap(JSContext *cx, js::StrictPropertyOp *op);
-    bool wrap(JSContext *cx, js::PropertyDescriptor *desc);
+    bool wrap(JSContext *cx, JS::MutableHandle<js::PropertyDescriptor> desc);
     bool wrap(JSContext *cx, js::AutoIdVector &props);
 
     bool putWrapper(const js::CrossCompartmentKey& wrapped, const js::Value& wrapper);
@@ -411,14 +421,20 @@ class js::AutoDebugModeGC
     }
 };
 
+namespace js {
+
 inline bool
-JSContext::typeInferenceEnabled() const
+ExclusiveContext::typeInferenceEnabled() const
 {
-    return compartment()->zone()->types.inferenceEnabled;
+    // Type inference cannot be enabled in compartments which are accessed off
+    // the main thread by an ExclusiveContext. TI data is stored in per-zone
+    // allocators which could otherwise race with main thread operations.
+    JS_ASSERT_IF(!isJSContext(), !compartment_->zone()->types.inferenceEnabled);
+    return compartment_->zone()->types.inferenceEnabled;
 }
 
 inline js::Handle<js::GlobalObject*>
-JSContext::global() const
+ExclusiveContext::global() const
 {
     /*
      * It's safe to use |unsafeGet()| here because any compartment that is
@@ -426,10 +442,8 @@ JSContext::global() const
      * barrier on it. Once the compartment is popped, the handle is no longer
      * safe to use.
      */
-    return js::Handle<js::GlobalObject*>::fromMarkedLocation(compartment()->global_.unsafeGet());
+    return Handle<GlobalObject*>::fromMarkedLocation(compartment_->global_.unsafeGet());
 }
-
-namespace js {
 
 class AssertCompartmentUnchanged
 {
@@ -453,14 +467,15 @@ class AssertCompartmentUnchanged
 
 class AutoCompartment
 {
-    JSContext * const cx_;
+    ExclusiveContext * const cx_;
     JSCompartment * const origin_;
 
   public:
-    inline AutoCompartment(JSContext *cx, JSObject *target);
+    inline AutoCompartment(ExclusiveContext *cx, JSObject *target);
+    inline AutoCompartment(ExclusiveContext *cx, JSCompartment *target);
     inline ~AutoCompartment();
 
-    JSContext *context() const { return cx_; }
+    ExclusiveContext *context() const { return cx_; }
     JSCompartment *origin() const { return origin_; }
 
   private:

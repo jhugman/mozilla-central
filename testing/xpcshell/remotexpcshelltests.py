@@ -93,7 +93,12 @@ class XPCShellRemote(xpcshell.XPCShellTests, object):
     def setupUtilities(self):
         if (not self.device.dirExists(self.remoteBinDir)):
             # device.mkDir may fail here where shellCheckOutput may succeed -- see bug 817235
-            self.device.shellCheckOutput(["mkdir", self.remoteBinDir]);
+            try:
+                self.device.shellCheckOutput(["mkdir", self.remoteBinDir]);
+            except devicemanager.DMError:
+                # Might get a permission error; try again as root, if available
+                self.device.shellCheckOutput(["mkdir", self.remoteBinDir], root=True);
+                self.device.shellCheckOutput(["chmod", "777", self.remoteBinDir], root=True);
 
         remotePrefDir = self.remoteJoin(self.remoteBinDir, "defaults/pref")
         if (self.device.dirExists(self.remoteTmpDir)):
@@ -248,6 +253,29 @@ class XPCShellRemote(xpcshell.XPCShellTests, object):
         return ['-e', 'const _TEST_FILE = ["%s"];' %
                  replaceBackSlashes(remoteName)]
 
+    def setupTempDir(self):
+        # make sure the temp dir exists
+        if not self.device.dirExists(self.remoteTmpDir):
+            self.device.mkDir(self.remoteTmpDir)
+
+        self.env["XPCSHELL_TEST_TEMP_DIR"] = self.remoteTmpDir
+        if self.interactive:
+            self.log.info("TEST-INFO | temp dir is %s" % self.remoteTmpDir)
+        return self.remoteTmpDir
+
+    def setupPluginsDir(self):
+        if not os.path.isdir(self.pluginsPath):
+            return None
+
+        # making sure tmp dir is set up
+        self.setupTempDir()
+
+        pluginsDir = self.remoteJoin(self.remoteTmpDir, "plugins")
+        self.device.pushDir(self.pluginsPath, pluginsDir)
+        if self.interactive:
+            self.log.info("TEST-INFO | plugins dir is %s" % pluginsDir)
+        return pluginsDir
+
     def setupProfileDir(self):
         self.device.removeDir(self.profileDir)
         self.device.mkDir(self.profileDir)
@@ -299,6 +327,7 @@ class XPCShellRemote(xpcshell.XPCShellTests, object):
         self.env["XPCSHELL_TEST_PROFILE_DIR"]=self.profileDir
         self.env["TMPDIR"]=self.remoteTmpDir
         self.env["HOME"]=self.profileDir
+        self.setupTempDir()
         if self.options.setup:
             self.pushWrapper()
 

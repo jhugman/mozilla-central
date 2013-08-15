@@ -6,6 +6,7 @@ this.EXPORTED_SYMBOLS = ["Services"];
 
 const Ci = Components.interfaces;
 const Cc = Components.classes;
+const Cr = Components.results;
 
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
 
@@ -18,9 +19,15 @@ XPCOMUtils.defineLazyGetter(Services, "prefs", function () {
 });
 
 XPCOMUtils.defineLazyGetter(Services, "appinfo", function () {
-  return Cc["@mozilla.org/xre/app-info;1"]
-           .getService(Ci.nsIXULAppInfo)
-           .QueryInterface(Ci.nsIXULRuntime);
+  let appinfo = Cc["@mozilla.org/xre/app-info;1"]
+                  .getService(Ci.nsIXULRuntime);
+  try {
+    appinfo.QueryInterface(Ci.nsIXULAppInfo);
+  } catch (ex if ex instanceof Components.Exception &&
+                 ex.result == Cr.NS_NOINTERFACE) {
+    // Not all applications implement nsIXULAppInfo (e.g. xpcshell doesn't).
+  }
+  return appinfo;
 });
 
 XPCOMUtils.defineLazyGetter(Services, "dirsvc", function () {
@@ -30,6 +37,9 @@ XPCOMUtils.defineLazyGetter(Services, "dirsvc", function () {
 });
 
 let initTable = [
+#ifdef MOZ_WIDGET_ANDROID
+  ["androidBridge", "@mozilla.org/android/bridge;1", "nsIAndroidBridge"],
+#endif
   ["appShell", "@mozilla.org/appshell/appShellService;1", "nsIAppShellService"],
   ["cache", "@mozilla.org/network/cache-service;1", "nsICacheService"],
   ["console", "@mozilla.org/consoleservice;1", "nsIConsoleService"],

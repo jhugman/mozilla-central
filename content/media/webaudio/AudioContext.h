@@ -7,19 +7,19 @@
 #ifndef AudioContext_h_
 #define AudioContext_h_
 
-#include "nsDOMEventTargetHelper.h"
-#include "nsCycleCollectionParticipant.h"
-#include "mozilla/Attributes.h"
-#include "nsCOMPtr.h"
 #include "EnableWebAudioCheck.h"
-#include "nsAutoPtr.h"
-#include "mozilla/dom/TypedArray.h"
-#include "mozilla/dom/BindingUtils.h"
-#include "mozilla/dom/AudioContextBinding.h"
 #include "MediaBufferDecoder.h"
-#include "StreamBuffer.h"
 #include "MediaStreamGraph.h"
+#include "mozilla/Attributes.h"
+#include "mozilla/dom/AudioContextBinding.h"
+#include "mozilla/dom/TypedArray.h"
+#include "nsAutoPtr.h"
+#include "nsCOMPtr.h"
+#include "nsCycleCollectionParticipant.h"
+#include "nsDOMEventTargetHelper.h"
+#include "nsHashKeys.h"
 #include "nsTHashtable.h"
+#include "StreamBuffer.h"
 
 // X11 has a #define for CurrentTime. Unbelievable :-(.
 // See content/media/DOMMediaStream.h for more fun!
@@ -51,7 +51,10 @@ class DelayNode;
 class DynamicsCompressorNode;
 class GainNode;
 class GlobalObject;
+class HTMLMediaElement;
+class MediaElementAudioSourceNode;
 class MediaStreamAudioDestinationNode;
+class MediaStreamAudioSourceNode;
 class OfflineRenderSuccessCallback;
 class PannerNode;
 class ScriptProcessorNode;
@@ -123,11 +126,11 @@ public:
                ErrorResult& aRv);
 
   already_AddRefed<AudioBuffer>
-  CreateBuffer(JSContext* aJSContext, ArrayBuffer& aBuffer,
+  CreateBuffer(JSContext* aJSContext, const ArrayBuffer& aBuffer,
                bool aMixToMono, ErrorResult& aRv);
 
   already_AddRefed<MediaStreamAudioDestinationNode>
-  CreateMediaStreamDestination();
+  CreateMediaStreamDestination(ErrorResult& aRv);
 
   already_AddRefed<ScriptProcessorNode>
   CreateScriptProcessor(uint32_t aBufferSize,
@@ -159,6 +162,11 @@ public:
   {
     return CreateGain();
   }
+
+  already_AddRefed<MediaElementAudioSourceNode>
+  CreateMediaElementSource(HTMLMediaElement& aMediaElement, ErrorResult& aRv);
+  already_AddRefed<MediaStreamAudioSourceNode>
+  CreateMediaStreamSource(DOMMediaStream& aMediaStream, ErrorResult& aRv);
 
   already_AddRefed<DelayNode>
   CreateDelay(double aMaxDelayTime, ErrorResult& aRv);
@@ -217,6 +225,7 @@ public:
 
 private:
   void RemoveFromDecodeQueue(WebAudioDecodeJob* aDecodeJob);
+  void ShutdownDecoder();
 
   friend struct ::mozilla::WebAudioDecodeJob;
 
@@ -227,7 +236,7 @@ private:
   nsRefPtr<AudioDestinationNode> mDestination;
   nsRefPtr<AudioListener> mListener;
   MediaBufferDecoder mDecoder;
-  nsTArray<nsAutoPtr<WebAudioDecodeJob> > mDecodeJobs;
+  nsTArray<nsRefPtr<WebAudioDecodeJob> > mDecodeJobs;
   // Two hashsets containing all the PannerNodes and AudioBufferSourceNodes,
   // to compute the doppler shift, and also to stop AudioBufferSourceNodes.
   // These are all weak pointers.

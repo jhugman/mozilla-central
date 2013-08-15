@@ -12,7 +12,6 @@ include $(DEPTH)/config/autoconf.mk
 
 LIBRARY_NAME    = xpconnect_s
 MSVC_ENABLE_PGO := 1
-FORCE_STATIC_LIB = 1
 LIBXUL_LIBRARY = 1
 FAIL_ON_WARNINGS := 1
 
@@ -35,7 +34,11 @@ LOCAL_INCLUDES = \
 		-I$(topsrcdir)/js/ipc \
 		$(NULL)
 
-include $(topsrcdir)/ipc/chromium/chromium-config.mk
+ifdef MOZ_B2G_BT
+LOCAL_INCLUDES += \
+    -I$(topsrcdir)/dom/bluetooth \
+    $(NULL)
+endif
 
 SHARED_LIBRARY_LIBS = \
   ../loader/$(LIB_PREFIX)jsloader_s.$(LIB_SUFFIX) \
@@ -45,6 +48,7 @@ SHARED_LIBRARY_LIBS = \
 EXTRA_MDDEPEND_FILES = dom_qsgen.pp dictionary_helper_gen.pp event_impl_gen.pp
 
 include $(topsrcdir)/config/rules.mk
+include $(topsrcdir)/ipc/chromium/chromium-config.mk
 
 DEFINES += \
   -DJSFILE \
@@ -174,5 +178,3 @@ GARBAGE += \
 		$(MDDEPDIR)/event_impl_gen.pp \
 		$(wildcard $(topsrcdir)/other-licenses/ply/ply/*.pyc) \
 		$(NULL)
-
-DEFINES += -D_IMPL_NS_LAYOUT

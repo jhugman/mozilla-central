@@ -39,6 +39,8 @@ this.EXPORTED_SYMBOLS = ['UtteranceGenerator', 'BrailleGenerator'];
 
 this.OutputGenerator = {
 
+  defaultOutputOrder: OUTPUT_DESC_LAST,
+
   /**
    * Generates output for a PivotContext.
    * @param {PivotContext} aContext object that generates and caches
@@ -162,6 +164,19 @@ this.OutputGenerator = {
       name = aAccessible.name;
     }
 
+    let description = aAccessible.description;
+    if (description) {
+      // Compare against the calculated name unconditionally, regardless of name rule,
+      // so we can make sure we don't speak duplicated descriptions
+      let tmpName = name || aAccessible.name;
+      if (tmpName && (description !== tmpName)) {
+        name = name || '';
+        name = this.outputOrder === OUTPUT_DESC_FIRST ?
+          description + ' - ' + name :
+          name + ' - ' + description;
+      }
+    }
+
     if (name) {
       aOutput[this.outputOrder === OUTPUT_DESC_FIRST ?
         'push' : 'unshift'](name);
@@ -174,22 +189,12 @@ this.OutputGenerator = {
    * @param {nsIAccessible} aAccessible current accessible object.
    */
   _addLandmark: function _addLandmark(aOutput, aAccessible) {
-    let getLandmarkName = function getLandmarkName(aAccessible) {
-      let roles = Utils.getAttributes(aAccessible)['xml-roles'];
-      if (!roles) {
-        return;
-      }
+    let landmarkName = Utils.getLandmarkName(aAccessible);
+    if (!landmarkName) {
+      return;
+    }
 
-      // Looking up a role that would match a landmark.
-      for (let landmark of this.gLandmarks) {
-        if (roles.indexOf(landmark) > -1) {
-          return gStringBundle.GetStringFromName(landmark);
-        }
-      }
-    };
-
-    let landmark = getLandmarkName.apply(this, [aAccessible]);
-
+    let landmark = gStringBundle.GetStringFromName(landmarkName);
     if (!landmark) {
       return;
     }
@@ -219,15 +224,6 @@ this.OutputGenerator = {
     str = PluralForm.get(aCount, str);
     return str.replace('#1', aCount);
   },
-
-  gLandmarks: [
-    'banner',
-    'complementary',
-    'contentinfo',
-    'main',
-    'navigation',
-    'search'
-  ],
 
   roleRuleMap: {
     'menubar': INCLUDE_DESC,
@@ -382,8 +378,6 @@ this.OutputGenerator = {
  */
 this.UtteranceGenerator = {
   __proto__: OutputGenerator,
-
-  defaultOutputOrder: OUTPUT_DESC_FIRST,
 
   gActionMap: {
     jump: 'jumpAction',
@@ -595,10 +589,10 @@ this.UtteranceGenerator = {
   _getListUtterance: function _getListUtterance(aAccessible, aRoleStr, aFlags, aItemCount) {
     let desc = [];
     let roleStr = this._getLocalizedRole(aRoleStr);
-    if (roleStr)
+    if (roleStr) {
       desc.push(roleStr);
-    desc.push
-      (gStringBundle.formatStringFromName('listItemCount', [aItemCount], 1));
+    }
+    desc.push(this._getPluralFormString('listItemsCount', aItemCount));
     let utterance = [desc.join(' ')];
 
     this._addName(utterance, aAccessible, aFlags);
@@ -611,8 +605,6 @@ this.UtteranceGenerator = {
 
 this.BrailleGenerator = {
   __proto__: OutputGenerator,
-
-  defaultOutputOrder: OUTPUT_DESC_LAST,
 
   genForContext: function genForContext(aContext) {
     let output = OutputGenerator.genForContext.apply(this, arguments);

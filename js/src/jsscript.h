@@ -12,13 +12,14 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/PodOperations.h"
 
-#include "jsdbgapi.h"
-#include "jsinfer.h"
+#include "jsatom.h"
+#ifdef JS_THREADSAFE
+#include "jslock.h"
+#endif
 #include "jsobj.h"
 #include "jsopcode.h"
 
 #include "gc/Barrier.h"
-#include "js/RootingAPI.h"
 #include "vm/Shape.h"
 
 namespace js {
@@ -34,17 +35,19 @@ namespace ion {
 
 # define BASELINE_DISABLED_SCRIPT ((js::ion::BaselineScript *)0x1)
 
-class Shape;
-
+class BreakpointSite;
 class BindingIter;
-
-namespace mjit {
-    struct JITScript;
-    class CallCompiler;
-}
+class RegExpObject;
+struct SourceCompressionToken;
+class Shape;
+class WatchpointMap;
 
 namespace analyze {
     class ScriptAnalysis;
+}
+
+namespace frontend {
+    class BytecodeEmitter;
 }
 
 }
@@ -180,7 +183,7 @@ class Bindings
      * storage is release, switchToScriptStorage must be called, providing a
      * pointer into the Binding array stored in script->data.
      */
-    static bool initWithTemporaryStorage(JSContext *cx, InternalBindingsHandle self,
+    static bool initWithTemporaryStorage(ExclusiveContext *cx, InternalBindingsHandle self,
                                          unsigned numArgs, unsigned numVars,
                                          Binding *bindingArray);
 
@@ -201,7 +204,7 @@ class Bindings
     Shape *callObjShape() const { return callObjShape_; }
 
     /* Convenience method to get the var index of 'arguments'. */
-    static unsigned argumentsVarIndex(JSContext *cx, InternalBindingsHandle);
+    static unsigned argumentsVarIndex(ExclusiveContext *cx, InternalBindingsHandle);
 
     /* Return whether the binding at bindingIndex is aliased. */
     bool bindingIsAliased(unsigned bindingIndex);
@@ -300,6 +303,7 @@ class ScriptSource
     uint32_t compressedLength_;
     char *filename_;
     jschar *sourceMap_;
+    JSPrincipals *originPrincipals_;
 
     // True if we can call JSRuntime::sourceHook to load the source on
     // demand. If sourceRetrievable_ and hasSourceData() are false, it is not
@@ -309,17 +313,20 @@ class ScriptSource
     bool ready_:1;
 
   public:
-    ScriptSource()
+    ScriptSource(JSPrincipals *originPrincipals)
       : refs(0),
         length_(0),
         compressedLength_(0),
         filename_(NULL),
         sourceMap_(NULL),
+        originPrincipals_(originPrincipals),
         sourceRetrievable_(false),
         argumentsNotIncluded_(false),
         ready_(true)
     {
         data.source = NULL;
+        if (originPrincipals_)
+            JS_HoldPrincipals(originPrincipals_);
     }
     void incref() { refs++; }
     void decref() {
@@ -353,15 +360,17 @@ class ScriptSource
     template <XDRMode mode>
     bool performXDR(XDRState<mode> *xdr);
 
-    bool setFilename(JSContext *cx, const char *filename);
+    bool setFilename(ExclusiveContext *cx, const char *filename);
     const char *filename() const {
         return filename_;
     }
 
     // Source maps
-    bool setSourceMap(JSContext *cx, jschar *sourceMapURL, const char *filename);
+    bool setSourceMap(ExclusiveContext *cx, jschar *sourceMapURL);
     const jschar *sourceMap();
     bool hasSourceMap() const { return sourceMap_ != NULL; }
+
+    JSPrincipals *originPrincipals() const { return originPrincipals_; }
 
   private:
     void destroy();
@@ -393,7 +402,7 @@ class ScriptSourceObject : public JSObject
     static Class class_;
 
     static void finalize(FreeOp *fop, JSObject *obj);
-    static ScriptSourceObject *create(JSContext *cx, ScriptSource *source);
+    static ScriptSourceObject *create(ExclusiveContext *cx, ScriptSource *source);
 
     ScriptSource *source() {
         return static_cast<ScriptSource *>(getReservedSlot(SOURCE_SLOT).toPrivate());
@@ -434,7 +443,6 @@ class JSScript : public js::gc::Cell
     js::HeapPtrAtom *atoms;     /* maps immediate index to literal struct */
 
     JSCompartment   *compartment_;
-    JSPrincipals    *originPrincipals; /* see jsapi.h 'originPrincipals' comment */
 
     /* Persistent type information retained across GCs. */
     js::types::TypeScript *types;
@@ -446,6 +454,20 @@ class JSScript : public js::gc::Cell
     // For callsite clones, which cannot have enclosing scopes, the original
     // function; otherwise the enclosing scope
     js::HeapPtrObject   enclosingScopeOrOriginalFunction_;
+
+    /* Information attached by Baseline/Ion for sequential mode execution. */
+    js::ion::IonScript *ion;
+    js::ion::BaselineScript *baseline;
+
+    /* Information attached by Ion for parallel mode execution */
+    js::ion::IonScript *parallelIon;
+
+    /*
+     * Pointer to either baseline->method()->raw() or ion->method()->raw(), or NULL
+     * if there's no Baseline or Ion script.
+     */
+    uint8_t *baselineOrIonRaw;
+    uint8_t *baselineOrIonSkipArgCheck;
 
     // 32-bit fields.
 
@@ -554,8 +576,8 @@ class JSScript : public js::gc::Cell
        information can be made context sensitive. See discussion in
        bug 826148. */
     bool            shouldCloneAtCallsite:1;
-
     bool            isCallsiteClone:1; /* is a callsite clone; has a link to the original function */
+    bool            shouldInline:1;    /* hint to inline when possible */
 #ifdef JS_ION
     bool            failedBoundsCheck:1; /* script has had hoisted bounds checks fail */
     bool            failedShapeGuard:1; /* script has had hoisted shape guard fail */
@@ -566,8 +588,16 @@ class JSScript : public js::gc::Cell
     bool            hadFrequentBailoutsPad:1;
 #endif
     bool            invalidatedIdempotentCache:1; /* idempotent cache has triggered invalidation */
-    bool            isGenerator:1;    /* is a generator */
-    bool            isGeneratorExp:1; /* is a generator expression */
+
+    // All generators have isGenerator set to true.
+    bool            isGenerator:1;
+    // If the generator was created implicitly via a generator expression,
+    // isGeneratorExp will be true.
+    bool            isGeneratorExp:1;
+    // Generators are either legacy-style (JS 1.7+ starless generators with
+    // StopIteration), or ES6-style (function* with boxed return values).
+    bool            isLegacyGenerator:1;
+
     bool            hasScriptCounts:1;/* script has an entry in
                                          JSCompartment::scriptCountsMap */
     bool            hasDebugScript:1; /* script has an entry in
@@ -586,21 +616,25 @@ class JSScript : public js::gc::Cell
     //
 
   public:
-    static JSScript *Create(JSContext *cx, js::HandleObject enclosingScope, bool savedCallerFun,
+    static JSScript *Create(js::ExclusiveContext *cx,
+                            js::HandleObject enclosingScope, bool savedCallerFun,
                             const JS::CompileOptions &options, unsigned staticLevel,
                             JS::HandleScriptSource sourceObject, uint32_t sourceStart,
                             uint32_t sourceEnd);
+
+    void initCompartment(js::ExclusiveContext *cx);
 
     // Three ways ways to initialize a JSScript. Callers of partiallyInit()
     // and fullyInitTrivial() are responsible for notifying the debugger after
     // successfully creating any kind (function or other) of new JSScript.
     // However, callers of fullyInitFromEmitter() do not need to do this.
-    static bool partiallyInit(JSContext *cx, JS::Handle<JSScript*> script,
+    static bool partiallyInit(js::ExclusiveContext *cx, JS::Handle<JSScript*> script,
                               uint32_t nobjects, uint32_t nregexps,
                               uint32_t ntrynotes, uint32_t nconsts, uint32_t nTypeSets);
-    static bool fullyInitTrivial(JSContext *cx, JS::Handle<JSScript*> script);  // inits a JSOP_STOP-only script
-    static bool fullyInitFromEmitter(JSContext *cx, JS::Handle<JSScript*> script,
+    static bool fullyInitFromEmitter(js::ExclusiveContext *cx, JS::Handle<JSScript*> script,
                                      js::frontend::BytecodeEmitter *bce);
+    // Initialize a no-op script.
+    static bool fullyInitTrivial(js::ExclusiveContext *cx, JS::Handle<JSScript*> script);
 
     inline JSPrincipals *principals();
 
@@ -645,26 +679,6 @@ class JSScript : public js::gc::Cell
         return hasIonScript() || hasParallelIonScript();
     }
 
-  private:
-    /* Information attached by Baseline/Ion for sequential mode execution. */
-    js::ion::IonScript *ion;
-    js::ion::BaselineScript *baseline;
-
-    /* Information attached by Ion for parallel mode execution */
-    js::ion::IonScript *parallelIon;
-
-#if JS_BITS_PER_WORD == 32
-    uint32_t padding0;
-#endif
-
-    /*
-     * Pointer to either baseline->method()->raw() or ion->method()->raw(), or NULL
-     * if there's no Baseline or Ion script.
-     */
-    uint8_t *baselineOrIonRaw;
-    uint8_t *baselineOrIonSkipArgCheck;
-
-  public:
     bool hasIonScript() const {
         return ion && ion != ION_DISABLED_SCRIPT && ion != ION_COMPILING_SCRIPT;
     }
@@ -764,6 +778,7 @@ class JSScript : public js::gc::Cell
     void setSourceObject(js::ScriptSourceObject *object);
     js::ScriptSourceObject *sourceObject() const;
     js::ScriptSource *scriptSource() const { return sourceObject()->source(); }
+    JSPrincipals *originPrincipals() const { return scriptSource()->originPrincipals(); }
     const char *filename() const { return scriptSource()->filename(); }
 
   public:
@@ -802,6 +817,7 @@ class JSScript : public js::gc::Cell
     inline void clearPropertyReadTypes();
 
     inline js::GlobalObject &global() const;
+    js::GlobalObject &uninlinedGlobal() const;
 
     /* See StaticScopeIter comment. */
     JSObject *enclosingStaticScope() const {
@@ -1030,11 +1046,6 @@ class JSScript : public js::gc::Cell
 
     static inline js::ThingRootKind rootKind() { return js::THING_ROOT_SCRIPT; }
 
-    static JSPrincipals *normalizeOriginPrincipals(JSPrincipals *principals,
-                                                   JSPrincipals *originPrincipals) {
-        return originPrincipals ? originPrincipals : principals;
-    }
-
     void markChildren(JSTracer *trc);
 };
 
@@ -1124,6 +1135,9 @@ class LazyScript : public js::gc::Cell
     // pointer to the result.
     HeapPtrScript script_;
 
+    // Original function with which the lazy script is associated.
+    HeapPtrFunction function_;
+
     // Function or block chain in which the script is nested, or NULL.
     HeapPtrObject enclosingScope_;
 
@@ -1139,7 +1153,6 @@ class LazyScript : public js::gc::Cell
 #endif
 
     // Assorted bits that should really be in ScriptSourceObject.
-    JSPrincipals *originPrincipals_;
     uint32_t version_ : 8;
 
     uint32_t numFreeVariables_ : 24;
@@ -1159,12 +1172,19 @@ class LazyScript : public js::gc::Cell
     uint32_t lineno_;
     uint32_t column_;
 
-    LazyScript(void *table, uint32_t numFreeVariables, uint32_t numInnerFunctions, JSVersion version,
+    LazyScript(JSFunction *fun, void *table,
+               uint32_t numFreeVariables, uint32_t numInnerFunctions, JSVersion version,
                uint32_t begin, uint32_t end, uint32_t lineno, uint32_t column);
 
   public:
-    static LazyScript *Create(JSContext *cx, uint32_t numFreeVariables, uint32_t numInnerFunctions,
-                              JSVersion version, uint32_t begin, uint32_t end, uint32_t lineno, uint32_t column);
+    static LazyScript *Create(ExclusiveContext *cx, HandleFunction fun,
+                              uint32_t numFreeVariables, uint32_t numInnerFunctions,
+                              JSVersion version, uint32_t begin, uint32_t end,
+                              uint32_t lineno, uint32_t column);
+
+    JSFunction *function() const {
+        return function_;
+    }
 
     void initScript(JSScript *script);
     JSScript *maybeScript() {
@@ -1175,16 +1195,18 @@ class LazyScript : public js::gc::Cell
         return enclosingScope_;
     }
     ScriptSourceObject *sourceObject() const;
+    ScriptSource *scriptSource() const {
+        return sourceObject()->source();
+    }
     JSPrincipals *originPrincipals() const {
-        return originPrincipals_;
+        return scriptSource()->originPrincipals();
     }
     JSVersion version() const {
         JS_STATIC_ASSERT(JSVERSION_UNKNOWN == -1);
         return (version_ == JS_BIT(8) - 1) ? JSVERSION_UNKNOWN : JSVersion(version_);
     }
 
-    void setParent(JSObject *enclosingScope, ScriptSourceObject *sourceObject,
-                   JSPrincipals *originPrincipals);
+    void setParent(JSObject *enclosingScope, ScriptSourceObject *sourceObject);
 
     uint32_t numFreeVariables() const {
         return numFreeVariables_;
@@ -1274,6 +1296,9 @@ class LazyScript : public js::gc::Cell
 
     static inline void writeBarrierPre(LazyScript *lazy);
 };
+
+/* If this fails, add/remove padding within LazyScript. */
+JS_STATIC_ASSERT(sizeof(LazyScript) % js::gc::CellSize == 0);
 
 #ifdef JS_THREADSAFE
 /*
@@ -1375,8 +1400,8 @@ struct SharedScriptData
     uint32_t length;
     jsbytecode data[1];
 
-    static SharedScriptData *new_(JSContext *cx, uint32_t codeLength,
-                                             uint32_t srcnotesLength, uint32_t natoms);
+    static SharedScriptData *new_(ExclusiveContext *cx, uint32_t codeLength,
+                                  uint32_t srcnotesLength, uint32_t natoms);
 
     HeapPtrAtom *atoms(uint32_t codeLength, uint32_t srcnotesLength) {
         uint32_t length = codeLength + srcnotesLength;
@@ -1388,15 +1413,6 @@ struct SharedScriptData
         return (SharedScriptData *)(bytecode - offsetof(SharedScriptData, data));
     }
 };
-
-/*
- * Takes ownership of its *ssd parameter and either adds it into the runtime's
- * ScriptBytecodeTable or frees it if a matching entry already exists.
- *
- * Sets the |code| and |atoms| fields on the given JSScript.
- */
-extern bool
-SaveSharedScriptData(JSContext *cx, Handle<JSScript *> script, SharedScriptData *ssd);
 
 struct ScriptBytecodeHasher
 {
@@ -1418,9 +1434,6 @@ struct ScriptBytecodeHasher
 typedef HashSet<SharedScriptData*,
                 ScriptBytecodeHasher,
                 SystemAllocPolicy> ScriptDataTable;
-
-inline void
-MarkScriptBytecode(JSRuntime *rt, const jsbytecode *bytecode);
 
 extern void
 SweepScriptData(JSRuntime *rt);
@@ -1489,6 +1502,19 @@ CloneScript(JSContext *cx, HandleObject enclosingScope, HandleFunction fun, Hand
 bool
 CloneFunctionScript(JSContext *cx, HandleFunction original, HandleFunction clone,
                     NewObjectKind newKind = GenericObject);
+
+/*
+ * JSAPI clients are allowed to leave CompileOptions.originPrincipals NULL in
+ * which case the JS engine sets options.originPrincipals = origin.principals.
+ * This normalization step must occur before the originPrincipals get stored in
+ * the JSScript/ScriptSource.
+ */
+
+static inline JSPrincipals *
+NormalizeOriginPrincipals(JSPrincipals *principals, JSPrincipals *originPrincipals)
+{
+    return originPrincipals ? originPrincipals : principals;
+}
 
 /*
  * NB: after a successful XDR_DECODE, XDRScript callers must do any required

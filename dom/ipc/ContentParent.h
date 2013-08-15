@@ -17,6 +17,7 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/HalTypes.h"
 #include "mozilla/LinkedList.h"
+#include "mozilla/StaticPtr.h"
 
 #include "nsFrameMessageManager.h"
 #include "nsIObserver.h"
@@ -102,11 +103,12 @@ public:
      */
     static TabParent*
     CreateBrowserOrApp(const TabContext& aContext,
-                       nsIDOMElement* aFrameElement);
+                       Element* aFrameElement);
 
     static void GetAll(nsTArray<ContentParent*>& aArray);
+    static void GetAllEvenIfDead(nsTArray<ContentParent*>& aArray);
 
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSIOBSERVER
     NS_DECL_NSITHREADOBSERVER
     NS_DECL_NSIDOMGEOPOSITIONCALLBACK
@@ -114,8 +116,10 @@ public:
     /**
      * MessageManagerCallback methods that we override.
      */
-    virtual bool DoSendAsyncMessage(const nsAString& aMessage,
-                                    const mozilla::dom::StructuredCloneData& aData) MOZ_OVERRIDE;
+    virtual bool DoSendAsyncMessage(JSContext* aCx,
+                                    const nsAString& aMessage,
+                                    const mozilla::dom::StructuredCloneData& aData,
+                                    JS::Handle<JSObject *> aCpows) MOZ_OVERRIDE;
     virtual bool CheckPermission(const nsAString& aPermission) MOZ_OVERRIDE;
     virtual bool CheckManifestURL(const nsAString& aManifestURL) MOZ_OVERRIDE;
     virtual bool CheckAppHasPermission(const nsAString& aPermission) MOZ_OVERRIDE;
@@ -139,14 +143,13 @@ public:
     bool IsForApp();
 
     void SetChildMemoryReporters(const InfallibleTArray<MemoryReport>& report);
+    void ClearChildMemoryReporters();
 
     GeckoChildProcessHost* Process() {
         return mSubprocess;
     }
 
-    int32_t Pid() {
-        return base::GetProcId(mSubprocess->GetChildProcessHandle());
-    }
+    int32_t Pid();
 
     bool NeedsPermissionsUpdate() {
         return mSendPermissionUpdates;
@@ -180,7 +183,7 @@ private:
     static nsDataHashtable<nsStringHashKey, ContentParent*> *sAppContentParents;
     static nsTArray<ContentParent*>* sNonAppContentParents;
     static nsTArray<ContentParent*>* sPrivateContent;
-    static LinkedList<ContentParent> sContentParents;
+    static StaticAutoPtr<LinkedList<ContentParent> > sContentParents;
 
     static void JoinProcessesIOThread(const nsTArray<ContentParent*>* aProcesses,
                                       Monitor* aMonitor, bool* aDone);
@@ -193,13 +196,12 @@ private:
                                     ChildPrivileges aPrivs,
                                     hal::ProcessPriority aInitialPriority);
 
-    static hal::ProcessPriority GetInitialProcessPriority(nsIDOMElement* aFrameElement);
+    static hal::ProcessPriority GetInitialProcessPriority(Element* aFrameElement);
 
     // Hide the raw constructor methods since we don't want client code
     // using them.
     using PContentParent::SendPBrowserConstructor;
     using PContentParent::SendPTestShellConstructor;
-    using PContentParent::SendPJavaScriptConstructor;
 
     // No more than one of !!aApp, aIsForBrowser, and aIsForPreallocated may be
     // true.
@@ -217,7 +219,7 @@ private:
     // has a pending system message, this function acquires the CPU wake lock on
     // behalf of the child.  We'll release the lock when the system message is
     // handled or after a timeout, whichever comes first.
-    void MaybeTakeCPUWakeLock(nsIDOMElement* aFrameElement);
+    void MaybeTakeCPUWakeLock(Element* aFrameElement);
 
     // Set the child process's priority and then check whether the child is
     // still alive.  Returns true if the process is still alive, and false
@@ -242,8 +244,13 @@ private:
      * will return false and this ContentParent will not be returned
      * by the Get*() funtions.  However, the shutdown sequence itself
      * may be asynchronous.
+     *
+     * If aCloseWithError is true and this is the first call to
+     * ShutDownProcess, then we'll close our channel using CloseWithError()
+     * rather than vanilla Close().  CloseWithError() indicates to IPC that this
+     * is an abnormal shutdown (e.g. a crash).
      */
-    void ShutDownProcess();
+    void ShutDownProcess(bool aCloseWithError);
 
     PCompositorParent*
     AllocPCompositorParent(mozilla::ipc::Transport* aTransport,
@@ -372,9 +379,11 @@ private:
 
     virtual bool RecvSyncMessage(const nsString& aMsg,
                                  const ClonedMessageData& aData,
+                                 const InfallibleTArray<CpowEntry>& aCpows,
                                  InfallibleTArray<nsString>* aRetvals);
     virtual bool RecvAsyncMessage(const nsString& aMsg,
-                                  const ClonedMessageData& aData);
+                                  const ClonedMessageData& aData,
+                                  const InfallibleTArray<CpowEntry>& aCpows);
 
     virtual bool RecvFilePathUpdateNotify(const nsString& aType,
                                           const nsString& aStorageName,
@@ -422,6 +431,10 @@ private:
 
     virtual void ProcessingError(Result what) MOZ_OVERRIDE;
 
+    // If you add strong pointers to cycle collected objects here, be sure to
+    // release these objects in ShutDownProcess.  See the comment there for more
+    // details.
+
     GeckoChildProcessHost* mSubprocess;
     base::ChildPrivileges mOSPrivileges;
 
@@ -459,12 +472,14 @@ private:
     // false, but some previously scheduled IPC traffic may still pass
     // through.
     bool mIsAlive;
-    // True after the OS-level shutdown sequence has been initiated.
-    // After going true, any use of this at all, including lingering
-    // IPC traffic passing through, will cause assertions to fail.
-    bool mIsDestroyed;
+
     bool mSendPermissionUpdates;
     bool mIsForBrowser;
+
+    // These variables track whether we've called Close() and CloseWithError()
+    // on our channel.
+    bool mCalledClose;
+    bool mCalledCloseWithError;
 
     friend class CrashReporterParent;
 

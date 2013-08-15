@@ -12,6 +12,7 @@
 
 namespace js {
 
+class RegExpGuard;
 class JS_FRIEND_API(Wrapper);
 
 /*
@@ -106,12 +107,13 @@ class JS_FRIEND_API(BaseProxyHandler)
     /* ES5 Harmony fundamental proxy traps. */
     virtual bool preventExtensions(JSContext *cx, HandleObject proxy) = 0;
     virtual bool getPropertyDescriptor(JSContext *cx, HandleObject proxy, HandleId id,
-                                       PropertyDescriptor *desc, unsigned flags) = 0;
+                                       MutableHandle<JSPropertyDescriptor> desc,
+                                       unsigned flags) = 0;
     virtual bool getOwnPropertyDescriptor(JSContext *cx, HandleObject proxy,
-                                          HandleId id, PropertyDescriptor *desc,
+                                          HandleId id, MutableHandle<JSPropertyDescriptor> desc,
                                           unsigned flags) = 0;
     virtual bool defineProperty(JSContext *cx, HandleObject proxy, HandleId id,
-                                PropertyDescriptor *desc) = 0;
+                                MutableHandle<JSPropertyDescriptor> desc) = 0;
     virtual bool getOwnPropertyNames(JSContext *cx, HandleObject proxy,
                                      AutoIdVector &props) = 0;
     virtual bool delete_(JSContext *cx, HandleObject proxy, HandleId id, bool *bp) = 0;
@@ -162,12 +164,12 @@ class JS_PUBLIC_API(DirectProxyHandler) : public BaseProxyHandler
     /* ES5 Harmony fundamental proxy traps. */
     virtual bool preventExtensions(JSContext *cx, HandleObject proxy) MOZ_OVERRIDE;
     virtual bool getPropertyDescriptor(JSContext *cx, HandleObject proxy, HandleId id,
-                                       PropertyDescriptor *desc, unsigned flags) MOZ_OVERRIDE;
+                                       MutableHandle<JSPropertyDescriptor> desc, unsigned flags) MOZ_OVERRIDE;
     virtual bool getOwnPropertyDescriptor(JSContext *cx, HandleObject proxy,
-                                          HandleId id, PropertyDescriptor *desc,
+                                          HandleId id, MutableHandle<JSPropertyDescriptor> desc,
                                           unsigned flags) MOZ_OVERRIDE;
     virtual bool defineProperty(JSContext *cx, HandleObject proxy, HandleId id,
-                                PropertyDescriptor *desc) MOZ_OVERRIDE;
+                                MutableHandle<JSPropertyDescriptor> desc) MOZ_OVERRIDE;
     virtual bool getOwnPropertyNames(JSContext *cx, HandleObject proxy,
                                      AutoIdVector &props) MOZ_OVERRIDE;
     virtual bool delete_(JSContext *cx, HandleObject proxy, HandleId id,
@@ -216,14 +218,15 @@ class Proxy
     /* ES5 Harmony fundamental proxy traps. */
     static bool preventExtensions(JSContext *cx, HandleObject proxy);
     static bool getPropertyDescriptor(JSContext *cx, HandleObject proxy, HandleId id,
-                                      PropertyDescriptor *desc, unsigned flags);
+                                      MutableHandle<JSPropertyDescriptor> desc, unsigned flags);
     static bool getPropertyDescriptor(JSContext *cx, HandleObject proxy, unsigned flags, HandleId id,
                                       MutableHandleValue vp);
     static bool getOwnPropertyDescriptor(JSContext *cx, HandleObject proxy, HandleId id,
-                                         PropertyDescriptor *desc, unsigned flags);
+                                         MutableHandle<JSPropertyDescriptor> desc, unsigned flags);
     static bool getOwnPropertyDescriptor(JSContext *cx, HandleObject proxy, unsigned flags, HandleId id,
                                          MutableHandleValue vp);
-    static bool defineProperty(JSContext *cx, HandleObject proxy, HandleId id, PropertyDescriptor *desc);
+    static bool defineProperty(JSContext *cx, HandleObject proxy, HandleId id,
+                               MutableHandle<JSPropertyDescriptor> desc);
     static bool defineProperty(JSContext *cx, HandleObject proxy, HandleId id, HandleValue v);
     static bool getOwnPropertyNames(JSContext *cx, HandleObject proxy, AutoIdVector &props);
     static bool delete_(JSContext *cx, HandleObject proxy, HandleId id, bool *bp);
@@ -259,12 +262,17 @@ class Proxy
 
 inline bool IsObjectProxyClass(const Class *clasp)
 {
-    return clasp == &js::ObjectProxyClass || clasp == &js::OuterWindowProxyClass;
+    return clasp == js::ObjectProxyClassPtr || clasp == js::OuterWindowProxyClassPtr;
 }
 
 inline bool IsFunctionProxyClass(const Class *clasp)
 {
-    return clasp == &js::FunctionProxyClass;
+    return clasp == js::FunctionProxyClassPtr;
+}
+
+inline bool IsProxyClass(const Class *clasp)
+{
+    return IsObjectProxyClass(clasp) || IsFunctionProxyClass(clasp);
 }
 
 inline bool IsObjectProxy(JSObject *obj)
@@ -279,36 +287,33 @@ inline bool IsFunctionProxy(JSObject *obj)
 
 inline bool IsProxy(JSObject *obj)
 {
-    Class *clasp = GetObjectClass(obj);
-    return IsObjectProxyClass(clasp) || IsFunctionProxyClass(clasp);
+    return IsProxyClass(GetObjectClass(obj));
 }
 
-/* Shared between object and function proxies. */
 /*
- * NOTE: JSSLOT_PROXY_PRIVATE is 0, because that way slot 0 is usable by API
+ * These are part of the API.
+ *
+ * NOTE: PROXY_PRIVATE_SLOT is 0 because that way slot 0 is usable by API
  * clients for both proxy and non-proxy objects.  So an API client that only
  * needs to store one slot's worth of data doesn't need to branch on what sort
  * of object it has.
  */
-const uint32_t JSSLOT_PROXY_PRIVATE = 0;
-const uint32_t JSSLOT_PROXY_HANDLER = 1;
-const uint32_t JSSLOT_PROXY_EXTRA   = 2;
-/* Function proxies only. */
-const uint32_t JSSLOT_PROXY_CALL = 4;
-const uint32_t JSSLOT_PROXY_CONSTRUCT = 5;
+const uint32_t PROXY_PRIVATE_SLOT = 0;
+const uint32_t PROXY_HANDLER_SLOT = 1;
+const uint32_t PROXY_EXTRA_SLOT   = 2;
 
 inline BaseProxyHandler *
 GetProxyHandler(JSObject *obj)
 {
     JS_ASSERT(IsProxy(obj));
-    return (BaseProxyHandler *) GetReservedSlot(obj, JSSLOT_PROXY_HANDLER).toPrivate();
+    return (BaseProxyHandler *) GetReservedSlot(obj, PROXY_HANDLER_SLOT).toPrivate();
 }
 
 inline const Value &
 GetProxyPrivate(JSObject *obj)
 {
     JS_ASSERT(IsProxy(obj));
-    return GetReservedSlot(obj, JSSLOT_PROXY_PRIVATE);
+    return GetReservedSlot(obj, PROXY_PRIVATE_SLOT);
 }
 
 inline JSObject *
@@ -322,14 +327,14 @@ inline const Value &
 GetProxyExtra(JSObject *obj, size_t n)
 {
     JS_ASSERT(IsProxy(obj));
-    return GetReservedSlot(obj, JSSLOT_PROXY_EXTRA + n);
+    return GetReservedSlot(obj, PROXY_EXTRA_SLOT + n);
 }
 
 inline void
 SetProxyHandler(JSObject *obj, BaseProxyHandler *handler)
 {
     JS_ASSERT(IsProxy(obj));
-    SetReservedSlot(obj, JSSLOT_PROXY_HANDLER, PrivateValue(handler));
+    SetReservedSlot(obj, PROXY_HANDLER_SLOT, PrivateValue(handler));
 }
 
 inline void
@@ -337,7 +342,7 @@ SetProxyExtra(JSObject *obj, size_t n, const Value &extra)
 {
     JS_ASSERT(IsProxy(obj));
     JS_ASSERT(n <= 1);
-    SetReservedSlot(obj, JSSLOT_PROXY_EXTRA + n, extra);
+    SetReservedSlot(obj, PROXY_EXTRA_SLOT + n, extra);
 }
 
 enum ProxyCallable {

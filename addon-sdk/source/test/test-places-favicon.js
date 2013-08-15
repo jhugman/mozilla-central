@@ -2,6 +2,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+'use strict';
+
+module.metadata = {
+  'engines': {
+    'Firefox': '*'
+  }
+};
+
 const { Cc, Ci, Cu } = require('chrome');
 const { getFavicon } = require('sdk/places/favicon');
 const tabs = require('sdk/tabs');
@@ -11,7 +19,7 @@ const host = 'http://localhost:' + port;
 const { onFaviconChange, serve, binFavicon } = require('./favicon-helpers');
 const { once } = require('sdk/system/events');
 const { defer } = require('sdk/core/promise');
-const { clearHistory } = require('./places-helper');
+const { resetPlaces } = require('./places-helper');
 const faviconService = Cc["@mozilla.org/browser/favicon-service;1"].
                          getService(Ci.nsIFaviconService);
 
@@ -173,7 +181,7 @@ function waitAndExpire (url) {
 
 function complete(tab, srv, done) {
   tab.close(function () {
-    clearHistory(() => {
+    resetPlaces(() => {
       srv.stop(done);
     });
   });

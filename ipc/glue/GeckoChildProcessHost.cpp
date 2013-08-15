@@ -20,9 +20,6 @@
 #include "prprf.h"
 #include "prenv.h"
 
-#if defined(OS_LINUX)
-#  define XP_LINUX 1
-#endif
 #include "nsExceptionHandler.h"
 
 #include "nsDirectoryServiceDefs.h"
@@ -471,7 +468,7 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
     return false;
   }
 
-  base::ProcessHandle process;
+  base::ProcessHandle process = 0;
 
   // send the child the PID so that it can open a ProcessHandle back to us.
   // probably don't want to do this in the long run

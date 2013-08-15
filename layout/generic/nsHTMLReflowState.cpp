@@ -825,16 +825,26 @@ nsHTMLReflowState::ComputeRelativeOffsets(uint8_t aCBDirection,
     // Computed value for 'bottom' is minus the value of 'top'
     aComputedOffsets.bottom = -aComputedOffsets.top;
   }
+}
 
-  // Store the offset
+/* static */ void
+nsHTMLReflowState::ApplyRelativePositioning(nsIFrame* aFrame,
+                                            const nsMargin& aComputedOffsets,
+                                            nsPoint* aPosition)
+{
+  // Store the normal position
   FrameProperties props = aFrame->Properties();
-  nsPoint* offsets = static_cast<nsPoint*>
-    (props.Get(nsIFrame::ComputedOffsetProperty()));
-  if (offsets) {
-    offsets->MoveTo(aComputedOffsets.left, aComputedOffsets.top);
+  nsPoint* normalPosition = static_cast<nsPoint*>
+    (props.Get(nsIFrame::NormalPositionProperty()));
+  if (normalPosition) {
+    *normalPosition = *aPosition;
   } else {
-    props.Set(nsIFrame::ComputedOffsetProperty(),
-              new nsPoint(aComputedOffsets.left, aComputedOffsets.top));
+    props.Set(nsIFrame::NormalPositionProperty(), new nsPoint(*aPosition));
+  }
+
+  const nsStyleDisplay* display = aFrame->StyleDisplay();
+  if (NS_STYLE_POSITION_RELATIVE == display->mPosition) {
+    *aPosition += nsPoint(aComputedOffsets.left, aComputedOffsets.top);
   }
 }
 

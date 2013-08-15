@@ -91,6 +91,7 @@
 #include "mozilla/dom/XULDocumentBinding.h"
 #include "mozilla/Preferences.h"
 #include "nsTextNode.h"
+#include "nsJSUtils.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -313,6 +314,8 @@ TraverseObservers(nsIURI* aKey, nsIObserver* aData, void* aContext)
 
     return PL_DHASH_NEXT;
 }
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(XULDocument)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(XULDocument, XMLDocument)
     NS_ASSERTION(!nsCCUncollectableMarker::InGeneration(cb, tmp->GetMarkedCCGeneration()),
@@ -1293,16 +1296,15 @@ XULDocument::Persist(const nsAString& aID,
     if (mApplyingPersistedAttrs)
         return NS_OK;
 
-    nsresult rv;
-
-    nsIContent *element = nsDocument::GetElementById(aID);
-    if (! element)
+    Element* element = nsDocument::GetElementById(aID);
+    if (!element)
         return NS_OK;
 
     nsCOMPtr<nsIAtom> tag;
     int32_t nameSpaceID;
 
     nsCOMPtr<nsINodeInfo> ni = element->GetExistingAttrNameFromQName(aAttr);
+    nsresult rv;
     if (ni) {
         tag = ni->NameAtom();
         nameSpaceID = ni->NamespaceID();
@@ -3637,9 +3639,22 @@ XULDocument::ExecuteScript(nsIScriptContext * aContext,
 
     NS_ENSURE_TRUE(mScriptGlobalObject, NS_ERROR_NOT_INITIALIZED);
 
+    if (!aContext->GetScriptsEnabled())
+        return NS_OK;
+
     // Execute the precompiled script with the given version
+    nsAutoMicroTask mt;
+    JSContext *cx = aContext->GetNativeContext();
+    AutoCxPusher pusher(cx);
     JSObject* global = mScriptGlobalObject->GetGlobalJSObject();
-    return aContext->ExecuteScript(aScriptObject, global);
+    xpc_UnmarkGrayObject(global);
+    xpc_UnmarkGrayScript(aScriptObject);
+    JSAutoCompartment ac(cx, global);
+    JS::Rooted<JS::Value> unused(cx);
+    if (!JS_ExecuteScript(cx, global, aScriptObject, unused.address()))
+        nsJSUtils::ReportPendingException(cx);
+    aContext->ScriptEvaluated(true);
+    return NS_OK;
 }
 
 nsresult

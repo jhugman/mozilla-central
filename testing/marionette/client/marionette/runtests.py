@@ -210,8 +210,8 @@ class MarionetteTestRunner(object):
 
     def __init__(self, address=None, emulator=None, emulatorBinary=None,
                  emulatorImg=None, emulator_res='480x800', homedir=None,
-                 app=None, bin=None, profile=None, autolog=False, revision=None,
-                 logger=None, testgroup="marionette", noWindow=False,
+                 app=None, app_args=None, bin=None, profile=None, autolog=False,
+                 revision=None, logger=None, testgroup="marionette", noWindow=False,
                  logcat_dir=None, xml_output=None, repeat=0, gecko_path=None,
                  testvars=None, tree=None, type=None, device_serial=None,
                  symbols_path=None, timeout=None, es_servers=None, **kwargs):
@@ -222,6 +222,7 @@ class MarionetteTestRunner(object):
         self.emulator_res = emulator_res
         self.homedir = homedir
         self.app = app
+        self.app_args = app_args or []
         self.bin = bin
         self.profile = profile
         self.autolog = autolog
@@ -327,6 +328,7 @@ class MarionetteTestRunner(object):
             self.marionette = Marionette(host=host,
                                          port=int(port),
                                          app=self.app,
+                                         app_args=self.app_args,
                                          bin=self.bin,
                                          profile=self.profile,
                                          baseurl=self.baseurl,
@@ -426,6 +428,12 @@ class MarionetteTestRunner(object):
         self.logger.info('passed: %d' % self.passed)
         self.logger.info('failed: %d' % self.failed)
         self.logger.info('todo: %d' % self.todo)
+
+        if self.failed > 0:
+            self.logger.info('\nFAILED TESTS\n-------')
+            for failed_test in self.failures:
+                self.logger.info('%s' % failed_test[0])
+
         try:
             self.marionette.check_for_crash()
         except:
@@ -460,7 +468,7 @@ class MarionetteTestRunner(object):
         if os.path.isdir(filepath):
             for root, dirs, files in os.walk(filepath):
                 for filename in files:
-                    if ((filename.startswith('test_') or filename.startswith('browser_')) and 
+                    if ((filename.startswith('test_') or filename.startswith('browser_')) and
                         (filename.endswith('.py') or filename.endswith('.js'))):
                         filepath = os.path.join(root, filename)
                         self.run_test(filepath)
@@ -690,6 +698,11 @@ class MarionetteTestOptions(OptionParser):
                         dest='app',
                         action='store',
                         help='application to use')
+        self.add_option('--app-arg',
+                        dest='app_args',
+                        action='append',
+                        default=[],
+                        help='specify a command line argument to be passed onto the application')
         self.add_option('--binary',
                         dest='bin',
                         action='store',

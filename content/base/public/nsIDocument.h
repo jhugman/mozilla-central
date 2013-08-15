@@ -53,6 +53,7 @@ class nsIDOMElement;
 class nsIDOMNodeList;
 class nsIDOMXPathExpression;
 class nsIDOMXPathNSResolver;
+class nsIHTMLCollection;
 class nsILayoutHistoryState;
 class nsIObjectLoadingContent;
 class nsIObserver;
@@ -2116,6 +2117,14 @@ public:
     return mStyleSheetChangeEventsEnabled;
   }
 
+  void ObsoleteSheet(nsIURI *aSheetURI, mozilla::ErrorResult& rv);
+
+  void ObsoleteSheet(const nsAString& aSheetURI, mozilla::ErrorResult& rv);
+
+  // ParentNode
+  nsIHTMLCollection* Children();
+  uint32_t ChildElementCount();
+
   virtual nsHTMLDocument* AsHTMLDocument() { return nullptr; }
 
   virtual JSObject* WrapObject(JSContext *aCx,
@@ -2206,6 +2215,9 @@ protected:
   // Table of element properties for this document.
   nsPropertyTable mPropertyTable;
   nsTArray<nsAutoPtr<nsPropertyTable> > mExtraPropertyTables;
+
+  // Our cached .children collection
+  nsCOMPtr<nsIHTMLCollection> mChildrenCollection;
 
   // Compatibility mode
   nsCompatibility mCompatMode;

@@ -14,9 +14,6 @@ EXPORT_LIBRARY  = 1
 LIBXUL_LIBRARY  = 1
 FAIL_ON_WARNINGS := 1
 
-ifdef MOZ_ONLY_TOUCH_EVENTS
-DEFINES += -DMOZ_ONLY_TOUCH_EVENTS
-endif
 ifdef MOZ_WEBSMS_BACKEND
 DEFINES += -DMOZ_WEBSMS_BACKEND
 endif
@@ -33,8 +30,8 @@ NOT_THERE_YET_CPPSRCS = \
 SHARED_LIBRARY_LIBS = ../xpwidgets/libxpwidgets_s.a
 
 include $(topsrcdir)/config/rules.mk
+include $(topsrcdir)/ipc/chromium/chromium-config.mk
 
-DEFINES += -D_IMPL_NS_WIDGET
 #DEFINES += -DDEBUG_WIDGETS
 
 LOCAL_INCLUDES += \
@@ -47,5 +44,3 @@ LOCAL_INCLUDES += \
 	-I$(topsrcdir)/widget/android/android \
 	-I$(srcdir) \
 	$(NULL)
-
-include $(topsrcdir)/ipc/chromium/chromium-config.mk

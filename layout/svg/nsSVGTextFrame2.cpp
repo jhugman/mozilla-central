@@ -17,7 +17,6 @@
 #include "nsCaret.h"
 #include "nsContentUtils.h"
 #include "nsGkAtoms.h"
-#include "nsIDOMSVGAnimatedNumber.h"
 #include "nsIDOMSVGLength.h"
 #include "nsISVGGlyphFragmentNode.h"
 #include "nsISelection.h"
@@ -1510,7 +1509,7 @@ public:
    */
   TextFrameIterator(nsSVGTextFrame2* aRoot, nsIContent* aSubtree)
     : mRootFrame(aRoot),
-      mSubtree(aSubtree && aSubtree != aRoot->GetContent() ?
+      mSubtree(aRoot && aSubtree && aSubtree != aRoot->GetContent() ?
                  aSubtree->GetPrimaryFrame() :
                  nullptr),
       mCurrentFrame(aRoot),
@@ -1605,6 +1604,10 @@ private:
    */
   void Init()
   {
+    if (!mRootFrame) {
+      return;
+    }
+
     mBaselines.AppendElement(mRootFrame->StyleSVGReset()->mDominantBaseline);
     Next();
   }
@@ -2207,6 +2210,15 @@ public:
   }
 
   /**
+   * Returns the number of undisplayed characters between the beginning of
+   * the glyph and the current character.
+   */
+  uint32_t GlyphUndisplayedCharacters() const
+  {
+    return mGlyphUndisplayedCharacters;
+  }
+
+  /**
    * Gets the original character offsets within the nsTextNode for the
    * cluster/ligature group the current character is a part of.
    *
@@ -2236,15 +2248,26 @@ public:
 
   /**
    * Gets the specified partial advance of the glyph the current character is
-   * part of.
+   * part of.  The partial advance is measured from the first character
+   * corresponding to the glyph until the specified part length.
    *
-   * @param aPartOffset The index of the first character, starting from 0, of
-   *   the cluster/ligature group to measure.
+   * The part length value does not include any undisplayed characters in the
+   * middle of the cluster/ligature group.  For example, if you have:
+   *
+   *   <text>f<tspan display="none">x</tspan>i</text>
+   *
+   * and the "f" and "i" are ligaturized, then calling GetGlyphPartialAdvance
+   * with aPartLength values will have the following results:
+   *
+   *   0 => 0
+   *   1 => adv("fi") / 2
+   *   2 => adv("fi")
+   *
    * @param aPartLength The number of characters in the cluster/ligature group
    *   to measure.
    * @param aContext The context to use for unit conversions.
    */
-  gfxFloat GetGlyphPartialAdvance(uint32_t aPartOffset, uint32_t aPartLength,
+  gfxFloat GetGlyphPartialAdvance(uint32_t aPartLength,
                                   nsPresContext* aContext) const;
 
   /**
@@ -2275,6 +2298,7 @@ private:
   void UpdateGlyphStartTextElementCharIndex() {
     if (!IsOriginalCharSkipped() && IsClusterAndLigatureGroupStart()) {
       mGlyphStartTextElementCharIndex = mTextElementCharIndex;
+      mGlyphUndisplayedCharacters = 0;
     }
   }
 
@@ -2314,6 +2338,14 @@ private:
    * current character is a part of.
    */
   uint32_t mGlyphStartTextElementCharIndex;
+
+  /**
+   * If we are iterating in mode eClusterOrLigatureGroupMiddle, then
+   * this tracks how many undisplayed characters were encountered
+   * between the start of this glyph (at mGlyphStartTextElementCharIndex)
+   * and the current character (at mTextElementCharIndex).
+   */
+  uint32_t mGlyphUndisplayedCharacters;
 
   /**
    * The scale factor to apply to glyph advances returned by
@@ -2476,7 +2508,9 @@ CharIterator::GetOriginalGlyphOffsets(uint32_t& aOriginalOffset,
 {
   gfxSkipCharsIterator it = TextFrame()->EnsureTextRun(nsTextFrame::eInflated);
   it.SetOriginalOffset(mSkipCharsIterator.GetOriginalOffset() -
-                         (mTextElementCharIndex - mGlyphStartTextElementCharIndex));
+                         (mTextElementCharIndex -
+                          mGlyphStartTextElementCharIndex -
+                          mGlyphUndisplayedCharacters));
 
   while (it.GetSkippedOffset() > 0 &&
          (!mTextRun->IsClusterStart(it.GetSkippedOffset()) ||
@@ -2527,15 +2561,13 @@ CharIterator::GetAdvance(nsPresContext* aContext) const
 }
 
 gfxFloat
-CharIterator::GetGlyphPartialAdvance(uint32_t aPartOffset, uint32_t aPartLength,
+CharIterator::GetGlyphPartialAdvance(uint32_t aPartLength,
                                      nsPresContext* aContext) const
 {
   uint32_t offset, length;
   GetOriginalGlyphOffsets(offset, length);
 
-  NS_ASSERTION(aPartOffset <= length && aPartOffset + aPartLength <= length,
-               "invalid aPartOffset / aPartLength values");
-  offset += aPartOffset;
+  NS_ASSERTION(aPartLength <= length, "invalid aPartLength value");
   length = aPartLength;
 
   gfxSkipCharsIterator it = TextFrame()->EnsureTextRun(nsTextFrame::eInflated);
@@ -2570,7 +2602,9 @@ CharIterator::NextCharacter()
   mFrameIterator.Next();
 
   // Skip any undisplayed characters.
-  mTextElementCharIndex += mFrameIterator.UndisplayedCharacters();
+  uint32_t undisplayed = mFrameIterator.UndisplayedCharacters();
+  mGlyphUndisplayedCharacters += undisplayed;
+  mTextElementCharIndex += undisplayed;
   if (!TextFrame()) {
     // We're at the end.
     mSkipCharsIterator = gfxSkipCharsIterator();
@@ -3019,8 +3053,7 @@ nsSVGTextFrame2::Init(nsIContent* aContent,
   NS_ASSERTION(aContent->IsSVG(nsGkAtoms::text), "Content is not an SVG text");
 
   nsSVGTextFrame2Base::Init(aContent, aParent, aPrevInFlow);
-  AddStateBits((aParent->GetStateBits() &
-                (NS_STATE_SVG_NONDISPLAY_CHILD | NS_STATE_SVG_CLIPPATH_CHILD)) |
+  AddStateBits((aParent->GetStateBits() & NS_STATE_SVG_CLIPPATH_CHILD) |
                NS_FRAME_SVG_LAYOUT | NS_FRAME_IS_SVG_TEXT);
 
   mMutationObserver.StartObserving(this);
@@ -3079,7 +3112,7 @@ nsSVGTextFrame2::GetType() const
 void
 nsSVGTextFrame2::DidSetStyleContext(nsStyleContext* aOldStyleContext)
 {
-  if (mState & NS_STATE_SVG_NONDISPLAY_CHILD) {
+  if (mState & NS_FRAME_IS_NONDISPLAY) {
     // We need this DidSetStyleContext override to handle cases like this:
     //
     //   <defs>
@@ -3110,9 +3143,9 @@ nsSVGTextFrame2::ReflowSVGNonDisplayText()
   MOZ_ASSERT(nsSVGUtils::AnyOuterSVGIsCallingReflowSVG(this),
              "only call ReflowSVGNonDisplayText when an outer SVG frame is "
              "under ReflowSVG");
-  MOZ_ASSERT(mState & NS_STATE_SVG_NONDISPLAY_CHILD,
+  MOZ_ASSERT(mState & NS_FRAME_IS_NONDISPLAY,
              "only call ReflowSVGNonDisplayText if the frame is "
-             "NS_STATE_SVG_NONDISPLAY_CHILD");
+             "NS_FRAME_IS_NONDISPLAY");
 
   // We had a style change, so we mark this frame as dirty so that the next
   // time it is painted, we reflow the anonymous block frame.
@@ -3137,37 +3170,41 @@ nsSVGTextFrame2::ScheduleReflowSVGNonDisplayText()
   MOZ_ASSERT(!nsSVGUtils::OuterSVGIsCallingReflowSVG(this),
              "do not call ScheduleReflowSVGNonDisplayText when the outer SVG "
              "frame is under ReflowSVG");
+  MOZ_ASSERT(!(mState & NS_STATE_SVG_TEXT_IN_REFLOW),
+             "do not call ScheduleReflowSVGNonDisplayText while reflowing the "
+             "anonymous block child");
 
-  nsSVGOuterSVGFrame* outerSVGFrame = nullptr;
+  // We need to find an ancestor frame that we can call FrameNeedsReflow
+  // on that will cause the document to be marked as needing relayout,
+  // and for that ancestor (or some further ancestor) to be marked as
+  // a root to reflow.  We choose the closest ancestor frame that is not
+  // NS_FRAME_IS_NONDISPLAY and which is either an outer SVG frame or a
+  // non-SVG frame.  (We don't consider displayed SVG frame ancestors toerh
+  // than nsSVGOuterSVGFrame, since calling FrameNeedsReflow on those other
+  // SVG frames would do a bunch of unnecessary work on the SVG frames up to
+  // the nsSVGOuterSVGFrame.)
 
-  nsIFrame* f = GetParent();
+  nsIFrame* f = this;
   while (f) {
-    if (f->GetStateBits() & NS_STATE_IS_OUTER_SVG) {
-      outerSVGFrame = static_cast<nsSVGOuterSVGFrame*>(f);
-      break;
-    }
-    if (!(f->GetStateBits() & NS_STATE_SVG_NONDISPLAY_CHILD)) {
-      // We don't need to set NS_FRAME_HAS_DIRTY_CHILDREN on non-display
-      // children in the path from the dirty nsSVGTextFrame2 up to the
-      // first display container frame, since ReflowSVGNonDisplayText
-      // does not check for it.
+    if (!(f->GetStateBits() & NS_FRAME_IS_NONDISPLAY)) {
       if (NS_SUBTREE_DIRTY(f)) {
+        // This is a displayed frame, so if it is already dirty, we will be reflowed
+        // soon anyway.  No need to call FrameNeedsReflow again, then.
         return;
+      }
+      if (!f->IsFrameOfType(eSVG) ||
+          (f->GetStateBits() & NS_STATE_IS_OUTER_SVG)) {
+        break;
       }
       f->AddStateBits(NS_FRAME_HAS_DIRTY_CHILDREN);
     }
     f = f->GetParent();
   }
 
-  NS_ABORT_IF_FALSE(outerSVGFrame &&
-                    outerSVGFrame->GetType() == nsGkAtoms::svgOuterSVGFrame,
-                    "Did not find nsSVGOuterSVGFrame!");
-  NS_ABORT_IF_FALSE(!(outerSVGFrame->GetStateBits() & NS_FRAME_IN_REFLOW),
-                    "should not call ScheduleReflowSVGNonDisplayText under "
-                    "nsSVGOuterSVGFrame::Reflow");
+  MOZ_ASSERT(f, "should have found an ancestor frame to reflow");
 
   PresContext()->PresShell()->FrameNeedsReflow(
-    outerSVGFrame, nsIPresShell::eResize, NS_FRAME_HAS_DIRTY_CHILDREN);
+    f, nsIPresShell::eResize, NS_FRAME_HAS_DIRTY_CHILDREN);
 }
 
 NS_IMPL_ISUPPORTS1(nsSVGTextFrame2::MutationObserver, nsIMutationObserver)
@@ -3256,7 +3293,7 @@ nsSVGTextFrame2::FindCloserFrameForSelection(
                                  nsPoint aPoint,
                                  nsIFrame::FrameWithDistance* aCurrentBestFrame)
 {
-  if (GetStateBits() & NS_STATE_SVG_NONDISPLAY_CHILD) {
+  if (GetStateBits() & NS_FRAME_IS_NONDISPLAY) {
     return;
   }
 
@@ -3322,9 +3359,12 @@ nsSVGTextFrame2::NotifySVGChanged(uint32_t aFlags)
   // at every tick of a transform animation, but ensures our glyph metrics
   // do not get too far out of sync with the final font size on the screen.
   if (needNewCanvasTM && mLastContextScale != 0.0f) {
-    // Compute the new mCanvasTM now.
     mCanvasTM = nullptr;
-    gfxMatrix newTM = GetCanvasTM(FOR_OUTERSVG_TM);
+    // If we are a non-display frame, then we don't want to call
+    // GetCanvasTM(FOR_OUTERSVG_TM), since the context scale does not use it.
+    gfxMatrix newTM =
+      (mState & NS_FRAME_IS_NONDISPLAY) ? gfxMatrix() :
+                                          GetCanvasTM(FOR_OUTERSVG_TM);
     // Compare the old and new context scales.
     float scale = GetContextScale(newTM);
     float change = scale / mLastContextScale;
@@ -3408,7 +3448,7 @@ nsSVGTextFrame2::PaintSVG(nsRenderingContext* aContext,
   gfxContext *gfx = aContext->ThebesContext();
   gfxMatrix initialMatrix = gfx->CurrentMatrix();
 
-  if (mState & NS_STATE_SVG_NONDISPLAY_CHILD) {
+  if (mState & NS_FRAME_IS_NONDISPLAY) {
     // If we are in a canvas DrawWindow call that used the
     // DRAWWINDOW_DO_NOT_FLUSH flag, then we may still have out
     // of date frames.  Just don't paint anything if they are
@@ -3439,7 +3479,7 @@ nsSVGTextFrame2::PaintSVG(nsRenderingContext* aContext,
   // Check if we need to draw anything.
   if (aDirtyRect) {
     NS_ASSERTION(!NS_SVGDisplayListPaintingEnabled() ||
-                 (mState & NS_STATE_SVG_NONDISPLAY_CHILD),
+                 (mState & NS_FRAME_IS_NONDISPLAY),
                  "Display lists handle dirty rect intersection test");
     nsRect dirtyRect(aDirtyRect->x, aDirtyRect->y,
                      aDirtyRect->width, aDirtyRect->height);
@@ -3529,7 +3569,7 @@ nsSVGTextFrame2::GetFrameForPoint(const nsPoint& aPoint)
 {
   NS_ASSERTION(GetFirstPrincipalChild(), "must have a child frame");
 
-  if (mState & NS_STATE_SVG_NONDISPLAY_CHILD) {
+  if (mState & NS_FRAME_IS_NONDISPLAY) {
     // Text frames inside <clipPath> will never have had ReflowSVG called on
     // them, so call UpdateGlyphPositioning to do this now.  (Text frames
     // inside <mask> and other non-display containers will never need to
@@ -3581,7 +3621,7 @@ nsSVGTextFrame2::ReflowSVG()
   NS_ASSERTION(nsSVGUtils::OuterSVGIsCallingReflowSVG(this),
                "This call is probaby a wasteful mistake");
 
-  NS_ABORT_IF_FALSE(!(GetStateBits() & NS_STATE_SVG_NONDISPLAY_CHILD),
+  NS_ABORT_IF_FALSE(!(GetStateBits() & NS_FRAME_IS_NONDISPLAY),
                     "ReflowSVG mechanism not designed for this");
 
   if (!nsSVGUtils::NeedsReflowSVG(this)) {
@@ -3693,7 +3733,7 @@ nsSVGTextFrame2::GetBBoxContribution(const gfxMatrix &aToBBoxUserspace,
 gfxMatrix
 nsSVGTextFrame2::GetCanvasTM(uint32_t aFor)
 {
-  if (!(GetStateBits() & NS_STATE_SVG_NONDISPLAY_CHILD)) {
+  if (!(GetStateBits() & NS_FRAME_IS_NONDISPLAY)) {
     if ((aFor == FOR_PAINTING && NS_SVGDisplayListPaintingEnabled()) ||
         (aFor == FOR_HIT_TESTING && NS_SVGDisplayListHitTestingEnabled())) {
       return nsSVGIntegrationUtils::GetCSSPxToDevPxMatrix(this);
@@ -3701,6 +3741,10 @@ nsSVGTextFrame2::GetCanvasTM(uint32_t aFor)
   }
   if (!mCanvasTM) {
     NS_ASSERTION(mParent, "null parent");
+    NS_ASSERTION(!(aFor == FOR_OUTERSVG_TM &&
+                   (GetStateBits() & NS_FRAME_IS_NONDISPLAY)),
+                 "should not call GetCanvasTM(FOR_OUTERSVG_TM) when we are "
+                 "non-display");
 
     nsSVGContainerFrame *parent = static_cast<nsSVGContainerFrame*>(mParent);
     dom::SVGTextContentElement *content = static_cast<dom::SVGTextContentElement*>(mContent);
@@ -4508,9 +4552,10 @@ nsSVGTextFrame2::AdjustPositionsForClusters()
 
     // Find out the partial glyph advance for this character and update
     // the character position.
+    uint32_t partLength =
+      charIndex - startIndex - it.GlyphUndisplayedCharacters();
     gfxFloat advance =
-      it.GetGlyphPartialAdvance(0, charIndex - startIndex, presContext) /
-        mFontSizeScaleFactor;
+      it.GetGlyphPartialAdvance(partLength, presContext) / mFontSizeScaleFactor;
     gfxPoint direction = gfxPoint(cos(angle), sin(angle)) *
                          (it.TextRun()->IsRightToLeft() ? -1.0 : 1.0);
     mPositions[charIndex].mPosition = mPositions[startIndex].mPosition +
@@ -4663,7 +4708,7 @@ nsSVGTextFrame2::DoTextPathLayout()
            j < mPositions.Length() && mPositions[j].mClusterOrLigatureGroupMiddle;
            j++) {
         gfxPoint partialAdvance =
-          direction * it.GetGlyphPartialAdvance(0, j - i, context) /
+          direction * it.GetGlyphPartialAdvance(j - i, context) /
                                                          mFontSizeScaleFactor;
         mPositions[j].mPosition = mPositions[i].mPosition + partialAdvance;
         mPositions[j].mAngle = mPositions[i].mAngle;
@@ -4733,6 +4778,12 @@ nsSVGTextFrame2::DoGlyphPositioning()
 {
   mPositions.Clear();
   RemoveStateBits(NS_STATE_SVG_POSITIONING_DIRTY);
+
+  nsIFrame* kid = GetFirstPrincipalChild();
+  if (kid && NS_SUBTREE_DIRTY(kid)) {
+    MOZ_ASSERT(false, "should have already reflowed the kid");
+    return;
+  }
 
   // Determine the positions of each character in app units.
   nsTArray<nsPoint> charPositions;
@@ -4804,7 +4855,9 @@ nsSVGTextFrame2::DoGlyphPositioning()
     switch (lengthAdjust) {
       case SVG_LENGTHADJUST_SPACINGANDGLYPHS:
         // Scale the glyphs and their positions.
-        mLengthAdjustScaleFactor = expectedTextLength / actualTextLength;
+        if (actualTextLength > 0) {
+          mLengthAdjustScaleFactor = expectedTextLength / actualTextLength;
+        }
         break;
 
       default:
@@ -4816,7 +4869,9 @@ nsSVGTextFrame2::DoGlyphPositioning()
             adjustableSpaces++;
           }
         }
-        adjustment = (expectedTextLength - actualTextLength) / adjustableSpaces;
+        if (adjustableSpaces) {
+          adjustment = (expectedTextLength - actualTextLength) / adjustableSpaces;
+        }
         break;
     }
   }
@@ -4901,7 +4956,7 @@ nsSVGTextFrame2::ShouldRenderAsPath(nsRenderingContext* aContext,
 void
 nsSVGTextFrame2::ScheduleReflowSVG()
 {
-  if (mState & NS_STATE_SVG_NONDISPLAY_CHILD) {
+  if (mState & NS_FRAME_IS_NONDISPLAY) {
     ScheduleReflowSVGNonDisplayText();
   } else {
     nsSVGUtils::ScheduleReflowSVG(this);
@@ -4925,7 +4980,6 @@ nsSVGTextFrame2::UpdateGlyphPositioning()
   }
 
   if (mState & NS_STATE_SVG_POSITIONING_DIRTY) {
-    MOZ_ASSERT(!NS_SUBTREE_DIRTY(kid), "should have already reflowed the kid");
     DoGlyphPositioning();
   }
 }
@@ -4962,7 +5016,7 @@ nsSVGTextFrame2::DoReflow()
   // need to update mPositions.
   AddStateBits(NS_STATE_SVG_POSITIONING_DIRTY);
 
-  if (mState & NS_STATE_SVG_NONDISPLAY_CHILD) {
+  if (mState & NS_FRAME_IS_NONDISPLAY) {
     // Normally, these dirty flags would be cleared in ReflowSVG(), but that
     // doesn't get called for non-display frames. We don't want to reflow our
     // descendants every time nsSVGTextFrame2::PaintSVG makes sure that we have
@@ -4993,6 +5047,8 @@ nsSVGTextFrame2::DoReflow()
     kid->MarkIntrinsicWidthsDirty();
   }
 
+  mState |= NS_STATE_SVG_TEXT_IN_REFLOW;
+
   nscoord width = kid->GetPrefWidth(renderingContext);
   nsHTMLReflowState reflowState(presContext, kid,
                                 renderingContext,
@@ -5009,6 +5065,8 @@ nsSVGTextFrame2::DoReflow()
   kid->Reflow(presContext, desiredSize, reflowState, status);
   kid->DidReflow(presContext, &reflowState, nsDidReflowStatus::FINISHED);
   kid->SetSize(nsSize(desiredSize.width, desiredSize.height));
+
+  mState &= ~NS_STATE_SVG_TEXT_IN_REFLOW;
 
   TextNodeCorrespondenceRecorder::RecordCorrespondence(this);
 }
@@ -5068,7 +5126,7 @@ nsSVGTextFrame2::UpdateFontSizeScaleFactor()
   // get stuck with a font size scale factor based on whichever referencing
   // frame happens to reflow first.
   double contextScale = 1.0;
-  if (!(mState & NS_STATE_SVG_NONDISPLAY_CHILD)) {
+  if (!(mState & NS_FRAME_IS_NONDISPLAY)) {
     gfxMatrix m(GetCanvasTM(FOR_OUTERSVG_TM));
     if (!m.IsSingular()) {
       contextScale = GetContextScale(m);
@@ -5423,10 +5481,12 @@ nsSVGTextFrame2::SetupInheritablePaint(gfxContext* aContext,
                                                         aFillOrStroke);
     aTargetPaint.SetColor(color);
 
-    aContext->SetPattern(new gfxPattern(gfxRGBA(NS_GET_R(color) / 255.0,
-                                                NS_GET_G(color) / 255.0,
-                                                NS_GET_B(color) / 255.0,
-                                                NS_GET_A(color) / 255.0 * aOpacity)));
+    nsRefPtr<gfxPattern> pattern =
+      new gfxPattern(gfxRGBA(NS_GET_R(color) / 255.0,
+                             NS_GET_G(color) / 255.0,
+                             NS_GET_B(color) / 255.0,
+                             NS_GET_A(color) / 255.0 * aOpacity));
+    aContext->SetPattern(pattern);
   }
 }
 

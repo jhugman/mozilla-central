@@ -312,7 +312,7 @@ ensure_combo_box_widgets()
     if (gComboBoxButtonWidget) {
         /* Get the widgets inside the Button */
         buttonChild = gtk_bin_get_child(GTK_BIN(gComboBoxButtonWidget));
-        if (GTK_IS_HBOX(buttonChild)) {
+        if (GTK_IS_BOX(buttonChild)) {
             /* appears-as-list = FALSE, cell-view = TRUE; the button
              * contains an hbox. This hbox is there because the ComboBox
              * needs to place a cell renderer, a separator, and an arrow in
@@ -401,7 +401,7 @@ ensure_combo_box_entry_widgets()
 
     /* Create a ComboBoxEntry if needed */
     if (!gComboBoxEntryWidget) {
-        gComboBoxEntryWidget = NULL; /* TODO - gtk_combo_box_entry_new();*/
+        gComboBoxEntryWidget = gtk_combo_box_new_with_entry();
         setup_widget_prototype(gComboBoxEntryWidget);
     }
 
@@ -418,14 +418,11 @@ ensure_combo_box_entry_widgets()
     if (gComboBoxEntryButtonWidget) {
         /* Get the Arrow inside the Button */
         buttonChild = gtk_bin_get_child(GTK_BIN(gComboBoxEntryButtonWidget));
-        if (GTK_IS_HBOX(buttonChild)) {
-            /* appears-as-list = FALSE, cell-view = TRUE; the button
-             * contains an hbox. This hbox is there because ComboBoxEntry
-             * inherits from ComboBox which needs to place a cell renderer,
-             * a separator, and an arrow in the button when appears-as-list
-             * is FALSE. Here the hbox should only contain an arrow, since
-             * a ComboBoxEntry doesn't need all those widgets in the
-             * button. */
+        if (GTK_IS_BOX(buttonChild)) {
+           /* appears-as-list = FALSE, cell-view = TRUE; the button
+             * contains an hbox. This hbox is there because the ComboBox
+             * needs to place a cell renderer, a separator, and an arrow in
+             * the button when appears-as-list is FALSE. */
             gtk_container_forall(GTK_CONTAINER(buttonChild),
                                  moz_gtk_get_combo_box_entry_arrow,
                                  NULL);
@@ -1573,6 +1570,8 @@ moz_gtk_tree_header_sort_arrow_paint(cairo_t *cr, GdkRectangle* rect,
     return MOZ_GTK_SUCCESS;
 }
 
+/* See gtk_expander_paint() for reference. 
+ */
 static gint
 moz_gtk_treeview_expander_paint(cairo_t *cr, GdkRectangle* rect,
                                 GtkWidgetState* state,
@@ -1580,6 +1579,7 @@ moz_gtk_treeview_expander_paint(cairo_t *cr, GdkRectangle* rect,
                                 GtkTextDirection direction)
 {
     GtkStyleContext *style;
+    GtkStateFlags    state_flags;
 
     ensure_tree_view_widget();
     gtk_widget_set_direction(gTreeViewWidget, direction);
@@ -1587,34 +1587,25 @@ moz_gtk_treeview_expander_paint(cairo_t *cr, GdkRectangle* rect,
     style = gtk_widget_get_style_context(gTreeViewWidget);
     gtk_style_context_save(style);
     gtk_style_context_add_class(style, GTK_STYLE_CLASS_EXPANDER);
-    /* Because the frame we get is of the entire treeview, we can't get the precise
-     * event state of one expander, thus rendering hover and active feedback useless. */
-    gtk_style_context_set_state(style, GetStateFlagsFromGtkWidgetState(state));
+
+    state_flags = GetStateFlagsFromGtkWidgetState(state);
+
+    /* GTK_STATE_FLAG_ACTIVE controls expanded/colapsed state rendering
+     * in gtk_render_expander()
+     */
+    if (expander_state == GTK_EXPANDER_EXPANDED) 
+        state_flags |= GTK_STATE_FLAG_ACTIVE;
+    else
+        state_flags &= ~(GTK_STATE_FLAG_ACTIVE);
+
+    gtk_style_context_set_state(style, state_flags);
+
     gtk_render_expander(style, cr,
-                        rect->x + rect->width / 2, rect->y + rect->height / 2,
-                        rect->width, rect->height);
-    gtk_style_context_restore(style);
-    return MOZ_GTK_SUCCESS;
-}
+                        rect->x,
+                        rect->y,
+                        rect->width,
+                        rect->height);
 
-static gint
-moz_gtk_expander_paint(cairo_t *cr, GdkRectangle* rect,
-                       GtkWidgetState* state,
-                       GtkExpanderStyle expander_state,
-                       GtkTextDirection direction)
-{
-    GtkStyleContext *style;
-
-    ensure_expander_widget();
-    gtk_widget_set_direction(gExpanderWidget, direction);
-
-    style = gtk_widget_get_style_context(gExpanderWidget);
-    gtk_style_context_save(style);
-    gtk_style_context_add_class(style, GTK_STYLE_CLASS_EXPANDER);
-    gtk_style_context_set_state(style, GetStateFlagsFromGtkWidgetState(state));
-    gtk_render_expander(style, cr, 
-                        rect->x + rect->width / 2, rect->y + rect->height / 2,
-						rect->width, rect->height);
     gtk_style_context_restore(style);
     return MOZ_GTK_SUCCESS;
 }
@@ -2831,7 +2822,6 @@ moz_gtk_get_widget_border(GtkThemeWidgetType widget, gint* left, gint* top,
     case MOZ_GTK_PROGRESS_CHUNK:
     case MOZ_GTK_PROGRESS_CHUNK_INDETERMINATE:
     case MOZ_GTK_PROGRESS_CHUNK_VERTICAL_INDETERMINATE:
-    case MOZ_GTK_EXPANDER:
     case MOZ_GTK_TREEVIEW_EXPANDER:
     case MOZ_GTK_TOOLBAR_SEPARATOR:
     case MOZ_GTK_MENUSEPARATOR:
@@ -3051,6 +3041,10 @@ moz_gtk_widget_paint(GtkThemeWidgetType widget, cairo_t *cr,
                      GtkWidgetState* state, gint flags,
                      GtkTextDirection direction)
 {
+    /* A workaround for https://bugzilla.gnome.org/show_bug.cgi?id=694086
+     */
+    cairo_new_path(cr);
+
     switch (widget) {
     case MOZ_GTK_BUTTON:
         if (state->depressed) {
@@ -3132,10 +3126,6 @@ moz_gtk_widget_paint(GtkThemeWidgetType widget, cairo_t *cr,
     case MOZ_GTK_TREEVIEW_EXPANDER:
         return moz_gtk_treeview_expander_paint(cr, rect, state,
                                                (GtkExpanderStyle) flags, direction);
-        break;
-    case MOZ_GTK_EXPANDER:
-        return moz_gtk_expander_paint(cr, rect, state,
-                                      (GtkExpanderStyle) flags, direction);
         break;
     case MOZ_GTK_ENTRY:
         ensure_entry_widget();

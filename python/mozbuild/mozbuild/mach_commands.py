@@ -17,7 +17,12 @@ from mach.decorators import (
 
 from mach.mixin.logging import LoggingMixin
 
-from mozbuild.base import MachCommandBase
+from mozbuild.base import (
+    MachCommandBase,
+    MozbuildObject,
+    MozconfigFindException,
+    MozconfigLoadException,
+)
 
 
 BUILD_WHAT_HELP = '''
@@ -129,14 +134,12 @@ class BuildProgressFooter(object):
             else:
                 parts.extend([tier, ' '])
 
-        current_encountered = False
         parts.extend([('bold', 'SUBTIER'), ':', ' '])
         for subtier in self._monitor.subtiers:
-            if subtier == self._monitor.current_subtier:
-                parts.extend([('underline_yellow', subtier), ' '])
-                current_encountered = True
-            elif not current_encountered:
+            if subtier in self._monitor.current_subtier_finished:
                 parts.extend([('green', subtier), ' '])
+            elif subtier in self._monitor.current_subtier_started:
+                parts.extend([('underline_yellow', subtier), ' '])
             else:
                 parts.extend([subtier, ' '])
 
@@ -174,7 +177,7 @@ class BuildProgressFooter(object):
                 written += len(arg)
             else:
                 if written + len(part) > max_width:
-                    write_pieces.append(arg[0:max_width - written])
+                    write_pieces.append(part[0:max_width - written])
                     written += len(part)
                     break
 
@@ -292,6 +295,17 @@ class Build(MachCommandBase):
                         path_arg.relpath())
 
                     if make_dir is None and make_target is None:
+                        return 1
+
+                    # See bug 886162 - we don't want to "accidentally" build
+                    # the entire tree (if that's really the intent, it's
+                    # unlikely they would have specified a directory.)
+                    if not make_dir and not make_target:
+                        print("The specified directory doesn't contain a "
+                              "Makefile and the first parent with one is the "
+                              "root of the tree. Please specify a directory "
+                              "with a Makefile or run |mach build| if you "
+                              "want to build the entire tree.")
                         return 1
 
                     target_pairs.append((make_dir, make_target))
@@ -638,7 +652,9 @@ class DebugProgram(MachCommandBase):
         help='Do not pass the -no-remote argument by default')
     @CommandArgument('+background', '+b', action='store_true',
         help='Do not pass the -foreground argument by default on Mac')
-    def debug(self, params, remote, background):
+    @CommandArgument('+gdbparams', default=None, metavar='params', type=str,
+        help='Command-line arguments to pass to GDB itself; split as the Bourne shell would.')
+    def debug(self, params, remote, background, gdbparams):
         import which
         try:
             debugger = which.which('gdb')
@@ -646,8 +662,17 @@ class DebugProgram(MachCommandBase):
             print("You don't have gdb in your PATH")
             print(e)
             return 1
+        args = [debugger]
+        if gdbparams:
+            import pymake.process
+            (argv, badchar) = pymake.process.clinetoargv(gdbparams, os.getcwd())
+            if badchar:
+                print("The +gdbparams you passed require a real shell to parse them.")
+                print("(We can't handle the %r character.)" % (badchar,))
+                return 1
+            args.extend(argv)
         try:
-            args = [debugger, '--args', self.get_binary_path('app')]
+            args.extend(['--args', self.get_binary_path('app')])
         except Exception as e:
             print("It looks like your program isn't built.",
                 "You can run |mach build| to build it.")
@@ -723,3 +748,81 @@ class Makefiles(MachCommandBase):
                 if f == 'Makefile.in':
                     yield os.path.join(root, f)
 
+@CommandProvider
+class MachDebug(object):
+    def __init__(self, context):
+        self.context = context
+
+    @Command('environment', category='build-dev',
+        description='Show info about the mach and build environment.')
+    @CommandArgument('--verbose', '-v', action='store_true',
+        help='Print verbose output.')
+    def environment(self, verbose=False):
+        import platform
+        print('platform:\n\t%s' % platform.platform())
+        print('python version:\n\t%s' % sys.version)
+        print('python prefix:\n\t%s' % sys.prefix)
+        print('mach cwd:\n\t%s' % self.context.cwd)
+        print('os cwd:\n\t%s' % os.getcwd())
+        print('mach directory:\n\t%s' % self.context.topdir)
+        print('state directory:\n\t%s' % self.context.state_dir)
+
+        mb = MozbuildObject(self.context.topdir, self.context.settings,
+            self.context.log_manager)
+
+        mozconfig = None
+
+        try:
+            mozconfig = mb.mozconfig
+            print('mozconfig path:\n\t%s' % mozconfig['path'])
+        except MozconfigFindException as e:
+            print('Unable to find mozconfig: %s' % e.message)
+            return 1
+
+        except MozconfigLoadException as e:
+            print('Error loading mozconfig: %s' % e.path)
+            print(e.message)
+
+            if e.output:
+                print('mozconfig evaluation output:')
+                for line in e.output:
+                    print(line)
+
+            return 1
+
+        print('object directory:\n\t%s' % mb.topobjdir)
+
+        if mozconfig:
+            print('mozconfig objdir:\n\t%s' % mozconfig['topobjdir'])
+            print('mozconfig configure args:')
+            for arg in mozconfig['configure_args']:
+                print('\t%s' % arg)
+
+            print('mozconfig extra make args:')
+            for arg in mozconfig['make_extra']:
+                print('\t%s' % arg)
+
+            print('mozconfig make flags:')
+            for arg in mozconfig['make_flags']:
+                print('\t%s' % arg)
+
+        config = None
+
+        try:
+            config = mb.config_environment
+
+        except Exception:
+            pass
+
+        if config:
+            print('config topsrcdir:\n\t%s' % config.topsrcdir)
+            print('config topobjdir:\n\t%s' % config.topobjdir)
+
+            if verbose:
+                print('config substitutions:')
+                for k in sorted(config.substs):
+                    print('\t%s: %s' % (k, config.substs[k]))
+
+                print('config defines:')
+                for k in sorted(config.defines):
+                    print('\t%s' % k)

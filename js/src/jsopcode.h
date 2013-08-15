@@ -10,10 +10,9 @@
 /*
  * JS bytecode definitions.
  */
-#include <stddef.h>
-#include "jsprvtd.h"
-#include "jspubtd.h"
-#include "jsutil.h"
+
+#include "jsapi.h"
+#include "jsbytecode.h"
 
 #include "frontend/SourceNotes.h"
 
@@ -80,7 +79,8 @@ typedef enum JSOp {
 /* (1U<<18) is unused */
 /* (1U<<19) is unused*/
 /* (1U<<20) is unused*/
-#define JOF_INVOKE       (1U<<21) /* JSOP_CALL, JSOP_NEW, JSOP_EVAL */
+#define JOF_INVOKE       (1U<<21) /* JSOP_CALL, JSOP_FUNCALL, JSOP_FUNAPPLY,
+                                     JSOP_NEW, JSOP_EVAL */
 #define JOF_TMPSLOT      (1U<<22) /* interpreter uses extra temporary slot
                                      to root intermediate objects besides
                                      the slots opcode uses */
@@ -168,7 +168,7 @@ SET_UINT32_INDEX(jsbytecode *pc, uint32_t index)
 #define UINT24_HI(i)            ((jsbytecode)((i) >> 16))
 #define UINT24_MID(i)           ((jsbytecode)((i) >> 8))
 #define UINT24_LO(i)            ((jsbytecode)(i))
-#define GET_UINT24(pc)          ((jsatomid)(((pc)[1] << 16) |                 \
+#define GET_UINT24(pc)          ((unsigned)(((pc)[1] << 16) |                 \
                                             ((pc)[2] << 8) |                  \
                                             (pc)[3]))
 #define SET_UINT24(pc,i)        ((pc)[1] = UINT24_HI(i),                      \
@@ -614,6 +614,12 @@ IsSetterPC(jsbytecode *pc)
     return op == JSOP_SETPROP || op == JSOP_SETNAME || op == JSOP_SETGNAME;
 }
 
+inline bool
+IsCallPC(jsbytecode *pc)
+{
+    return js_CodeSpec[*pc].format & JOF_INVOKE;
+}
+
 static inline int32_t
 GetBytecodeInteger(jsbytecode *pc)
 {
@@ -775,12 +781,12 @@ GetNextPc(jsbytecode *pc)
 /*
  * Disassemblers, for debugging only.
  */
-JSBool
-js_Disassemble(JSContext *cx, JS::Handle<JSScript*> script, JSBool lines, js::Sprinter *sp);
+bool
+js_Disassemble(JSContext *cx, JS::Handle<JSScript*> script, bool lines, js::Sprinter *sp);
 
 unsigned
 js_Disassemble1(JSContext *cx, JS::Handle<JSScript*> script, jsbytecode *pc, unsigned loc,
-                JSBool lines, js::Sprinter *sp);
+                bool lines, js::Sprinter *sp);
 
 #endif
 

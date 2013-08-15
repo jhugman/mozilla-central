@@ -68,7 +68,7 @@
 #include "nsStringEnumerator.h"
 #include "mozilla/FileUtils.h"
 
-#include NEW_H     // for placement new
+#include <new>     // for placement new
 
 #include "mozilla/Omnijar.h"
 
@@ -834,12 +834,12 @@ nsComponentManagerImpl::~nsComponentManagerImpl()
     PR_LOG(nsComponentManagerLog, PR_LOG_DEBUG, ("nsComponentManager: Destroyed."));
 }
 
-NS_IMPL_THREADSAFE_ISUPPORTS5(nsComponentManagerImpl,
-                              nsIComponentManager,
-                              nsIServiceManager,
-                              nsIComponentRegistrar,
-                              nsISupportsWeakReference,
-                              nsIInterfaceRequestor)
+NS_IMPL_ISUPPORTS5(nsComponentManagerImpl,
+                   nsIComponentManager,
+                   nsIServiceManager,
+                   nsIComponentRegistrar,
+                   nsISupportsWeakReference,
+                   nsIInterfaceRequestor)
 
 
 nsresult

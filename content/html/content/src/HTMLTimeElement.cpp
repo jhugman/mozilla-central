@@ -18,19 +18,11 @@ namespace dom {
 HTMLTimeElement::HTMLTimeElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : nsGenericHTMLElement(aNodeInfo)
 {
-  SetIsDOMBinding();
 }
 
 HTMLTimeElement::~HTMLTimeElement()
 {
 }
-
-NS_IMPL_ADDREF_INHERITED(HTMLTimeElement, Element)
-NS_IMPL_RELEASE_INHERITED(HTMLTimeElement, Element)
-
-NS_INTERFACE_MAP_BEGIN(HTMLTimeElement)
-  NS_HTML_CONTENT_INTERFACES(nsGenericHTMLElement)
-NS_ELEMENT_INTERFACE_MAP_END
 
 NS_IMPL_ELEMENT_CLONE(HTMLTimeElement)
 

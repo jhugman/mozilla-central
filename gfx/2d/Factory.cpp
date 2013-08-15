@@ -34,8 +34,12 @@
 
 #ifdef WIN32
 #include "DrawTargetD2D.h"
+#ifdef USE_D2D1_1
+#include "DrawTargetD2D1.h"
+#endif
 #include "ScaledFontDWrite.h"
 #include <d3d10_1.h>
+#include "HelpersD2D.h"
 #endif
 
 #include "DrawTargetDual.h"
@@ -151,6 +155,10 @@ int sGfxLogLevel = LOG_DEBUG;
 
 #ifdef WIN32
 ID3D10Device1 *Factory::mD3D10Device;
+#ifdef USE_D2D1_1
+ID3D11Device *Factory::mD3D11Device;
+ID2D1Device *Factory::mD2D1Device;
+#endif
 #endif
 
 DrawEventRecorder *Factory::mRecorder;
@@ -185,6 +193,17 @@ Factory::CreateDrawTarget(BackendType aBackend, const IntSize &aSize, SurfaceFor
       }
       break;
     }
+#ifdef USE_D2D1_1
+  case BACKEND_DIRECT2D1_1:
+    {
+      RefPtr<DrawTargetD2D1> newTarget;
+      newTarget = new DrawTargetD2D1();
+      if (newTarget->Init(aSize, aFormat)) {
+        retVal = newTarget;
+      }
+      break;
+    }
+#endif
 #elif defined XP_MACOSX
   case BACKEND_COREGRAPHICS:
   case BACKEND_COREGRAPHICS_ACCELERATED:
@@ -344,6 +363,22 @@ Factory::CreateScaledFontWithCairo(const NativeFont& aNativeFont, Float aSize, c
 #endif
 }
 
+TemporaryRef<DrawTarget>
+Factory::CreateDualDrawTarget(DrawTarget *targetA, DrawTarget *targetB)
+{
+  RefPtr<DrawTarget> newTarget =
+    new DrawTargetDual(targetA, targetB);
+
+  RefPtr<DrawTarget> retVal = newTarget;
+
+  if (mRecorder) {
+    retVal = new DrawTargetRecording(mRecorder, retVal);
+  }
+
+  return retVal;
+}
+
+
 #ifdef WIN32
 TemporaryRef<DrawTarget>
 Factory::CreateDrawTargetForD3D10Texture(ID3D10Texture2D *aTexture, SurfaceFormat aFormat)
@@ -410,6 +445,32 @@ Factory::GetDirect3D10Device()
 {
   return mD3D10Device;
 }
+
+#ifdef USE_D2D1_1
+void
+Factory::SetDirect3D11Device(ID3D11Device *aDevice)
+{
+  mD3D11Device = aDevice;
+
+  RefPtr<ID2D1Factory1> factory = D2DFactory1();
+
+  RefPtr<IDXGIDevice> device;
+  aDevice->QueryInterface((IDXGIDevice**)byRef(device));
+  factory->CreateDevice(device, &mD2D1Device);
+}
+
+ID3D11Device*
+Factory::GetDirect3D11Device()
+{
+  return mD3D11Device;
+}
+
+ID2D1Device*
+Factory::GetD2D1Device()
+{
+  return mD2D1Device;
+}
+#endif
 
 TemporaryRef<GlyphRenderingOptions>
 Factory::CreateDWriteGlyphRenderingOptions(IDWriteRenderingParams *aParams)
@@ -487,14 +548,50 @@ Factory::CreateDrawTargetForCairoSurface(cairo_surface_t* aSurface, const IntSiz
   return retVal;
 }
 
+#ifdef XP_MACOSX
+TemporaryRef<DrawTarget>
+Factory::CreateDrawTargetForCairoCGContext(CGContextRef cg, const IntSize& aSize)
+{
+  RefPtr<DrawTarget> retVal;
+
+  RefPtr<DrawTargetCG> newTarget = new DrawTargetCG();
+
+  if (newTarget->Init(cg, aSize)) {
+    retVal = newTarget;
+  }
+
+  if (mRecorder && retVal) {
+    RefPtr<DrawTarget> recordDT = new DrawTargetRecording(mRecorder, retVal);
+    return recordDT;
+  }
+  return retVal;
+}
+#endif
+
 TemporaryRef<DataSourceSurface>
 Factory::CreateWrappingDataSourceSurface(uint8_t *aData, int32_t aStride,
                                          const IntSize &aSize,
                                          SurfaceFormat aFormat)
 {
+  if (aSize.width <= 0 || aSize.height <= 0) {
+    return nullptr;
+  }
+
   RefPtr<SourceSurfaceRawData> newSurf = new SourceSurfaceRawData();
 
   if (newSurf->InitWrappingData(aData, aSize, aStride, aFormat, false)) {
+    return newSurf;
+  }
+
+  return nullptr;
+}
+
+TemporaryRef<DataSourceSurface>
+Factory::CreateDataSourceSurface(const IntSize &aSize,
+                                 SurfaceFormat aFormat)
+{
+  RefPtr<SourceSurfaceAlignedRawData> newSurf = new SourceSurfaceAlignedRawData();
+  if (newSurf->Init(aSize, aFormat)) {
     return newSurf;
   }
 

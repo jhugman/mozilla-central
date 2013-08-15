@@ -14,11 +14,9 @@ MSVC_ENABLE_PGO := 1
 LIBXUL_LIBRARY = 1
 FAIL_ON_WARNINGS := 1
 
-FORCE_STATIC_LIB = 1
-
 include $(topsrcdir)/config/config.mk
-include $(topsrcdir)/ipc/chromium/chromium-config.mk
 include $(topsrcdir)/config/rules.mk
+include $(topsrcdir)/ipc/chromium/chromium-config.mk
 
 INCLUDES  += \
   -I$(topsrcdir)/content/base/src \
@@ -26,6 +24,5 @@ INCLUDES  += \
   -I$(topsrcdir)/layout/xul/base/src \
   $(NULL)
 
-DEFINES  += -D_IMPL_NS_LAYOUT
 CFLAGS   += $(GSTREAMER_CFLAGS)
 CXXFLAGS += $(GSTREAMER_CFLAGS)

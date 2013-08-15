@@ -206,6 +206,10 @@ ChromeActions.prototype = {
     // The data may not be downloaded so we need just retry getting the pdf with
     // the original url.
     var originalUri = NetUtil.newURI(data.originalUrl);
+    var filename = data.filename;
+    if (typeof filename !== 'string' || !/\.pdf$/i.test(filename)) {
+      filename = 'document.pdf';
+    }
     var blobUri = data.blobUrl ? NetUtil.newURI(data.blobUrl) : originalUri;
     var extHelperAppSvc =
           Cc['@mozilla.org/uriloader/external-helper-app-service;1'].
@@ -234,7 +238,9 @@ ChromeActions.prototype = {
         // contentDisposition/contentDispositionFilename is readonly before FF18
         channel.contentDisposition = Ci.nsIChannel.DISPOSITION_ATTACHMENT;
         if (self.contentDispositionFilename) {
-           channel.contentDispositionFilename = self.contentDispositionFilename;
+          channel.contentDispositionFilename = self.contentDispositionFilename;
+        } else {
+          channel.contentDispositionFilename = filename;
         }
       } catch (e) {}
       channel.setURI(originalUri);
@@ -353,7 +359,7 @@ ChromeActions.prototype = {
       }
     }];
     notificationBox.appendNotification(message, 'pdfjs-fallback', null,
-                                       notificationBox.PRIORITY_WARNING_LOW,
+                                       notificationBox.PRIORITY_INFO_LOW,
                                        buttons,
                                        function eventsCallback(eventType) {
       // Currently there is only one event "removed" but if there are any other
@@ -714,6 +720,15 @@ PdfStreamConverter.prototype = {
     // Change the content type so we don't get stuck in a loop.
     aRequest.setProperty('contentType', aRequest.contentType);
     aRequest.contentType = 'text/html';
+    if (isHttpRequest) {
+      // We trust PDF viewer, using no CSP
+      aRequest.setResponseHeader('Content-Security-Policy', '', false);
+      aRequest.setResponseHeader('Content-Security-Policy-Report-Only', '',
+                                 false);
+      aRequest.setResponseHeader('X-Content-Security-Policy', '', false);
+      aRequest.setResponseHeader('X-Content-Security-Policy-Report-Only', '',
+                                 false);
+    }
 
     if (!rangeRequest) {
       // Creating storage for PDF data

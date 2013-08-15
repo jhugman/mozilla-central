@@ -7,30 +7,34 @@
 #ifndef frontend_ParseMaps_inl_h
 #define frontend_ParseMaps_inl_h
 
-#include "jscntxt.h"
-
 #include "frontend/ParseMaps.h"
+
+#include "jscntxtinlines.h"
 
 namespace js {
 namespace frontend {
 
 template <class Map>
 inline bool
-AtomThingMapPtr<Map>::ensureMap(JSContext *cx)
+AtomThingMapPtr<Map>::ensureMap(ExclusiveContext *cx)
 {
     if (map_)
         return true;
-    map_ = cx->runtime()->parseMapPool.acquire<Map>();
+
+    AutoLockForExclusiveAccess lock(cx);
+    map_ = cx->parseMapPool().acquire<Map>();
     return !!map_;
 }
 
 template <class Map>
 inline void
-AtomThingMapPtr<Map>::releaseMap(JSContext *cx)
+AtomThingMapPtr<Map>::releaseMap(ExclusiveContext *cx)
 {
     if (!map_)
         return;
-    cx->runtime()->parseMapPool.release(map_);
+
+    AutoLockForExclusiveAccess lock(cx);
+    cx->parseMapPool().release(map_);
     map_ = NULL;
 }
 
@@ -38,7 +42,8 @@ template <typename ParseHandler>
 inline bool
 AtomDecls<ParseHandler>::init()
 {
-    map = cx->runtime()->parseMapPool.acquire<AtomDefnListMap>();
+    AutoLockForExclusiveAccess lock(cx);
+    map = cx->parseMapPool().acquire<AtomDefnListMap>();
     return map;
 }
 
@@ -46,8 +51,10 @@ template <typename ParseHandler>
 inline
 AtomDecls<ParseHandler>::~AtomDecls()
 {
-    if (map)
-        cx->runtime()->parseMapPool.release(map);
+    if (map) {
+        AutoLockForExclusiveAccess lock(cx);
+        cx->parseMapPool().release(map);
+    }
 }
 
 } /* namespace frontend */

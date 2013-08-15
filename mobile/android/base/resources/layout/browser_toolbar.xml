@@ -101,8 +101,9 @@
                      android:layout_width="@dimen/browser_toolbar_favicon_size"
                      android:layout_height="fill_parent"
                      android:scaleType="fitCenter"
-                     android:paddingLeft="12dip"
-                     android:layout_marginRight="4dip"
+                     android:layout_marginLeft="8dip"
+                     android:paddingLeft="4dip"
+                     android:paddingRight="4dip"
                      android:layout_gravity="center_vertical"
                      android:src="@drawable/favicon"/>
 
@@ -129,11 +130,12 @@
                                          android:layout_gravity="center_vertical"
                                          gecko:autoUpdateTheme="false"/>
 
-        <ImageButton android:id="@+id/reader"
-                     style="@style/AddressBar.ImageButton.Icon"
-                     android:src="@drawable/reader"
-                     android:contentDescription="@string/reader"
-                     android:visibility="gone"/>
+        <org.mozilla.gecko.PageActionLayout android:id="@+id/page_action_layout"
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="match_parent"
+                                            android:layout_marginRight="12dp"
+                                            android:visibility="gone"
+                                            android:orientation="horizontal"/>
 
         <ImageButton android:id="@+id/stop"
                      style="@style/AddressBar.ImageButton.Icon"

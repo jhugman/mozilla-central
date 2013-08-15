@@ -25,6 +25,31 @@
 
 namespace mozilla {
 
+NS_IMPL_CYCLE_COLLECTION_CLASS(WebAudioDecodeJob)
+
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(WebAudioDecodeJob)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mContext)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mOutput)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mSuccessCallback)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mFailureCallback)
+  tmp->mArrayBuffer = nullptr;
+NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(WebAudioDecodeJob)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mContext)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mOutput)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSuccessCallback)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mFailureCallback)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+
+NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(WebAudioDecodeJob)
+  NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mArrayBuffer)
+NS_IMPL_CYCLE_COLLECTION_TRACE_END
+
+NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(WebAudioDecodeJob, AddRef)
+NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(WebAudioDecodeJob, Release)
+
 using namespace dom;
 
 #ifdef PR_LOGGING
@@ -43,7 +68,7 @@ public:
   explicit BufferDecoder(MediaResource* aResource);
   virtual ~BufferDecoder();
 
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
 
   // This has to be called before decoding begins
   void BeginDecoding(nsIThread* aDecodeThread)
@@ -71,6 +96,8 @@ public:
   virtual int64_t GetMediaDuration() MOZ_FINAL MOZ_OVERRIDE;
 
   virtual void SetMediaDuration(int64_t aDuration) MOZ_FINAL MOZ_OVERRIDE;
+
+  virtual void UpdateMediaDuration(int64_t aDuration) MOZ_FINAL MOZ_OVERRIDE;
 
   virtual void SetMediaSeekable(bool aMediaSeekable) MOZ_OVERRIDE;
 
@@ -103,7 +130,7 @@ private:
   nsRefPtr<MediaResource> mResource;
 };
 
-NS_IMPL_THREADSAFE_ISUPPORTS0(BufferDecoder)
+NS_IMPL_ISUPPORTS0(BufferDecoder)
 
 BufferDecoder::BufferDecoder(MediaResource* aResource)
   : mReentrantMonitor("BufferDecoder")
@@ -185,6 +212,12 @@ BufferDecoder::GetMediaDuration()
 
 void
 BufferDecoder::SetMediaDuration(int64_t aDuration)
+{
+  // ignore
+}
+
+void
+BufferDecoder::UpdateMediaDuration(int64_t aDuration)
 {
   // ignore
 }
@@ -793,6 +826,7 @@ MediaBufferDecoder::Shutdown() {
 
 WebAudioDecodeJob::WebAudioDecodeJob(const nsACString& aContentType,
                                      AudioContext* aContext,
+                                     const ArrayBuffer& aBuffer,
                                      DecodeSuccessCallback* aSuccessCallback,
                                      DecodeErrorCallback* aFailureCallback)
   : mContentType(aContentType)
@@ -805,15 +839,21 @@ WebAudioDecodeJob::WebAudioDecodeJob(const nsACString& aContentType,
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_COUNT_CTOR(WebAudioDecodeJob);
 
+  mArrayBuffer = aBuffer.Obj();
+
   MOZ_ASSERT(aSuccessCallback ||
              (!aSuccessCallback && !aFailureCallback),
              "If a success callback is not passed, no failure callback should be passed either");
+
+  nsContentUtils::HoldJSObjects(this, NS_CYCLE_COLLECTION_PARTICIPANT(WebAudioDecodeJob));
 }
 
 WebAudioDecodeJob::~WebAudioDecodeJob()
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_COUNT_DTOR(WebAudioDecodeJob);
+  mArrayBuffer = nullptr;
+  nsContentUtils::DropJSObjects(this);
 }
 
 void

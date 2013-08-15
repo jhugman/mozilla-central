@@ -9,15 +9,15 @@
 #ifndef jsarray_h
 #define jsarray_h
 
-#include "jspubtd.h"
 #include "jsobj.h"
+#include "jspubtd.h"
 
 namespace js {
 /* 2^32-2, inclusive */
 const uint32_t MAX_ARRAY_INDEX = 4294967294u;
 }
 
-inline JSBool
+inline bool
 js_IdIsIndex(jsid id, uint32_t *indexp)
 {
     if (JSID_IS_INT(id)) {
@@ -50,7 +50,7 @@ NewDenseEmptyArray(JSContext *cx, JSObject *proto = NULL,
 
 /* Create a dense array with length and capacity == 'length', initialized length set to 0. */
 extern ArrayObject * JS_FASTCALL
-NewDenseAllocatedArray(JSContext *cx, uint32_t length, JSObject *proto = NULL,
+NewDenseAllocatedArray(ExclusiveContext *cx, uint32_t length, JSObject *proto = NULL,
                        NewObjectKind newKind = GenericObject);
 
 /*
@@ -58,7 +58,7 @@ NewDenseAllocatedArray(JSContext *cx, uint32_t length, JSObject *proto = NULL,
  * contents. This is useful, e.g., when accepting length from the user.
  */
 extern ArrayObject * JS_FASTCALL
-NewDenseUnallocatedArray(JSContext *cx, uint32_t length, JSObject *proto = NULL,
+NewDenseUnallocatedArray(ExclusiveContext *cx, uint32_t length, JSObject *proto = NULL,
                          NewObjectKind newKind = GenericObject);
 
 /* Create a dense array with a copy of the dense array elements in src. */
@@ -76,7 +76,8 @@ NewDenseCopiedArray(JSContext *cx, uint32_t length, const Value *values, JSObjec
  * increase the length of the array.
  */
 extern bool
-WouldDefinePastNonwritableLength(JSContext *cx, HandleObject obj, uint32_t index, bool strict,
+WouldDefinePastNonwritableLength(ExclusiveContext *cx,
+                                 HandleObject obj, uint32_t index, bool strict,
                                  bool *definesPast);
 
 /*
@@ -86,13 +87,13 @@ WouldDefinePastNonwritableLength(JSContext *cx, HandleObject obj, uint32_t index
 extern bool
 CanonicalizeArrayLengthValue(JSContext *cx, HandleValue v, uint32_t *canonicalized);
 
-extern JSBool
+extern bool
 GetLengthProperty(JSContext *cx, HandleObject obj, uint32_t *lengthp);
 
-extern JSBool
+extern bool
 SetLengthProperty(JSContext *cx, HandleObject obj, double length);
 
-extern JSBool
+extern bool
 ObjectMayHaveExtraIndexedProperties(JSObject *obj);
 
 /*
@@ -106,16 +107,16 @@ GetElements(JSContext *cx, HandleObject aobj, uint32_t length, js::Value *vp);
 
 /* Natives exposed for optimization by the interpreter and JITs. */
 
-extern JSBool
+extern bool
 array_sort(JSContext *cx, unsigned argc, js::Value *vp);
 
-extern JSBool
+extern bool
 array_push(JSContext *cx, unsigned argc, js::Value *vp);
 
-extern JSBool
+extern bool
 array_pop(JSContext *cx, unsigned argc, js::Value *vp);
 
-extern JSBool
+extern bool
 array_concat(JSContext *cx, unsigned argc, js::Value *vp);
 
 extern bool
@@ -125,13 +126,13 @@ array_concat_dense(JSContext *cx, Handle<ArrayObject*> arr1, Handle<ArrayObject*
 extern void
 ArrayShiftMoveElements(JSObject *obj);
 
-extern JSBool
+extern bool
 array_shift(JSContext *cx, unsigned argc, js::Value *vp);
 
 } /* namespace js */
 
 #ifdef DEBUG
-extern JSBool
+extern bool
 js_ArrayInfo(JSContext *cx, unsigned argc, js::Value *vp);
 #endif
 
@@ -142,11 +143,11 @@ js_ArrayInfo(JSContext *cx, unsigned argc, js::Value *vp);
  * extending the array to accommodate the element will never make the array
  * sparse, which requires that the array be completely filled.)
  */
-extern JSBool
+extern bool
 js_NewbornArrayPush(JSContext *cx, js::HandleObject obj, const js::Value &v);
 
 /* Array constructor native. Exposed only so the JIT can know its address. */
-JSBool
+bool
 js_Array(JSContext *cx, unsigned argc, js::Value *vp);
 
 #endif /* jsarray_h */

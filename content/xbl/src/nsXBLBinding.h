@@ -73,9 +73,6 @@ public:
     mJSClass = aClass;
   }
 
-  bool IsStyleBinding() const { return mIsStyleBinding; }
-  void SetIsStyleBinding(bool aIsStyle) { mIsStyleBinding = aIsStyle; }
-
   /*
    * Does a lookup for a method or attribute provided by one of the bindings'
    * prototype implementation. If found, |desc| will be set up appropriately,
@@ -84,7 +81,7 @@ public:
    * May only be called when XBL code is being run in a separate scope, because
    * otherwise we don't have untainted data with which to do a proper lookup.
    */
-  bool LookupMember(JSContext* aCx, JS::HandleId aId, JSPropertyDescriptor* aDesc);
+  bool LookupMember(JSContext* aCx, JS::HandleId aId, JS::MutableHandle<JSPropertyDescriptor> aDesc);
 
   /*
    * Determines whether the binding has a field with the given name.
@@ -97,7 +94,8 @@ protected:
    * Internal version. Requires that aCx is in appropriate xbl scope.
    */
   bool LookupMemberInternal(JSContext* aCx, nsString& aName, JS::HandleId aNameAsId,
-                            JSPropertyDescriptor* aDesc, JS::Handle<JSObject*> aXBLScope);
+                            JS::MutableHandle<JSPropertyDescriptor> aDesc,
+                            JS::Handle<JSObject*> aXBLScope);
 
 public:
 
@@ -122,7 +120,6 @@ public:
 
   nsIAtom* GetBaseTag(int32_t* aNameSpaceID);
   nsXBLBinding* RootBinding();
-  nsXBLBinding* GetFirstStyleBinding();
 
   // Resolve all the fields for this binding and all ancestor bindings on the
   // object |obj|.  False return means a JS exception was set.
@@ -166,7 +163,6 @@ public:
 // MEMBER VARIABLES
 protected:
 
-  bool mIsStyleBinding;
   bool mMarkedForDeath;
 
   nsXBLPrototypeBinding* mPrototypeBinding; // Weak, but we're holding a ref to the docinfo

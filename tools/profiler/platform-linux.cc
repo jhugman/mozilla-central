@@ -30,6 +30,7 @@
 # vim: sw=2
 */
 #include <stdio.h>
+#include <math.h>
 
 #include <pthread.h>
 #include <semaphore.h>
@@ -53,6 +54,7 @@
 #include <sys/stat.h>   // open
 #include <fcntl.h>      // open
 #include <unistd.h>     // sysconf
+#include <semaphore.h>
 #ifdef __GLIBC__
 #include <execinfo.h>   // backtrace, backtrace_symbols
 #endif  // def __GLIBC__
@@ -62,6 +64,7 @@
 #include "platform.h"
 #include "GeckoProfilerImpl.h"
 #include "mozilla/Mutex.h"
+#include "mozilla/Atomics.h"
 #include "ProfileEntry.h"
 #include "nsThreadUtils.h"
 #include "TableTicker.h"
@@ -140,7 +143,8 @@ struct SamplerRegistry {
 
 Sampler *SamplerRegistry::sampler = NULL;
 
-static ThreadProfile* sCurrentThreadProfile = NULL;
+static mozilla::Atomic<ThreadProfile*> sCurrentThreadProfile;
+static sem_t sSignalHandlingDone;
 
 static void ProfilerSaveSignalHandler(int signal, siginfo_t* info, void* context) {
   Sampler::GetActiveSampler()->RequestSave();
@@ -204,6 +208,7 @@ static void ProfilerSignalHandler(int signal, siginfo_t* info, void* context) {
   Sampler::GetActiveSampler()->Tick(sample);
 
   sCurrentThreadProfile = NULL;
+  sem_post(&sSignalHandlingDone);
 }
 
 int tgkill(pid_t tgid, pid_t tid, int signalno) {
@@ -270,23 +275,23 @@ static void* SignalSender(void* arg) {
         }
 
         // Wait for the signal handler to run before moving on to the next one
-        while (sCurrentThreadProfile)
-          sched_yield();
+        sem_wait(&sSignalHandlingDone);
       }
     }
 
     // Convert ms to us and subtract 100 us to compensate delays
     // occuring during signal delivery.
     // TODO measure and confirm this.
-    const useconds_t interval =
-      SamplerRegistry::sampler->interval() * 1000 - 100;
-    //int result = usleep(interval);
-    usleep(interval);
+    int interval = floor(SamplerRegistry::sampler->interval() * 1000 + 0.5) - 100;
+    if (interval <= 0) {
+      interval = 1;
+    }
+    OS::SleepMicro(interval);
   }
   return initialize_atfork; // which is guaranteed to be NULL
 }
 
-Sampler::Sampler(int interval, bool profiling, int entrySize)
+Sampler::Sampler(double interval, bool profiling, int entrySize)
     : interval_(interval),
       profiling_(profiling),
       paused_(false),
@@ -303,6 +308,13 @@ void Sampler::Start() {
   LOG("Sampler started");
 
   SamplerRegistry::AddActiveSampler(this);
+
+  // Initialize signal handler communication
+  sCurrentThreadProfile = NULL;
+  if (sem_init(&sSignalHandlingDone, /* pshared: */ 0, /* value: */ 0) != 0) {
+    LOG("Error initializing semaphore");
+    return;
+  }
 
   // Request profiling signals.
   LOG("Request signal");
@@ -424,4 +436,9 @@ void OS::RegisterStartHandler()
   }
 }
 #endif
+
+void OS::SleepMicro(int microseconds)
+{
+  usleep(microseconds);
+}
 

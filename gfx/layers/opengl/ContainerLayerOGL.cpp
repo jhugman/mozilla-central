@@ -222,12 +222,12 @@ ContainerRender(Container* aContainer,
       // not safe.
       if (HasOpaqueAncestorLayer(aContainer) &&
           transform3D.Is2D(&transform) && !transform.HasNonIntegerTranslation()) {
-        mode = gfxPlatform::GetPlatform()->UsesSubpixelAATextRendering() ?
+        mode = gfxPlatform::ComponentAlphaEnabled() ?
           LayerManagerOGL::InitModeCopy :
           LayerManagerOGL::InitModeClear;
         framebufferRect.x += transform.x0;
         framebufferRect.y += transform.y0;
-        aContainer->mSupportsComponentAlphaChildren = gfxPlatform::GetPlatform()->UsesSubpixelAATextRendering();
+        aContainer->mSupportsComponentAlphaChildren = gfxPlatform::ComponentAlphaEnabled();
       }
     }
 
@@ -322,6 +322,7 @@ ContainerRender(Container* aContainer,
       rgb->Activate();
       rgb->SetLayerQuadRect(visibleRect);
       rgb->SetLayerTransform(transform);
+      rgb->SetTextureTransform(gfx3DMatrix());
       rgb->SetLayerOpacity(opacity);
       rgb->SetRenderOffset(aOffset);
       rgb->SetTextureUnit(0);
@@ -346,7 +347,7 @@ ContainerRender(Container* aContainer,
 }
 
 ContainerLayerOGL::ContainerLayerOGL(LayerManagerOGL *aManager)
-  : ContainerLayer(aManager, NULL)
+  : ContainerLayer(aManager, nullptr)
   , LayerOGL(aManager)
 {
   mImplData = static_cast<LayerOGL*>(this);

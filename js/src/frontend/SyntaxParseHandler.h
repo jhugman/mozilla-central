@@ -13,6 +13,9 @@
 namespace js {
 namespace frontend {
 
+template <typename ParseHandler>
+class Parser;
+
 // Parse handler used when processing the syntax in a block of code, to generate
 // the minimal information which is required to detect syntax errors and allow
 // bytecode to be emitted for outer functions.
@@ -42,7 +45,8 @@ class SyntaxParseHandler
     };
     typedef Definition::Kind DefinitionNode;
 
-    SyntaxParseHandler(JSContext *cx, TokenStream &tokenStream, bool foldConstants,
+    SyntaxParseHandler(ExclusiveContext *cx, LifoAlloc &alloc,
+                       TokenStream &tokenStream, bool foldConstants,
                        Parser<SyntaxParseHandler> *syntaxParser, LazyScript *lazyOuterFunction)
       : lastAtom(NULL),
         tokenStream(tokenStream)
@@ -52,14 +56,12 @@ class SyntaxParseHandler
 
     void trace(JSTracer *trc) {}
 
-    Node newName(PropertyName *name, InBlockBool inBlock, uint32_t blockid, const TokenPos &pos) {
+    Node newName(PropertyName *name, uint32_t blockid, const TokenPos &pos) {
         lastAtom = name;
         return NodeName;
     }
 
-    DefinitionNode newPlaceholder(JSAtom *atom, InBlockBool inBlock, uint32_t blockid,
-                                  const TokenPos &pos)
-    {
+    DefinitionNode newPlaceholder(JSAtom *atom, uint32_t blockid, const TokenPos &pos) {
         return Definition::PLACEHOLDER;
     }
 
@@ -173,6 +175,7 @@ class SyntaxParseHandler
         return NodeGeneric;
     }
     void addList(Node pn, Node kid) {}
+    bool isUnparenthesizedYield(Node pn) { return false; }
 
     void setOp(Node pn, JSOp op) {}
     void setBlockId(Node pn, unsigned blockid) {}

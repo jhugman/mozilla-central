@@ -72,8 +72,6 @@ HTMLTrackElement::HTMLTrackElement(already_AddRefed<nsINodeInfo> aNodeInfo)
     gTrackElementLog = PR_NewLogModule("nsTrackElement");
   }
 #endif
-
-  SetIsDOMBinding();
 }
 
 HTMLTrackElement::~HTMLTrackElement()
@@ -90,8 +88,7 @@ NS_IMPL_CYCLE_COLLECTION_INHERITED_4(HTMLTrackElement, nsGenericHTMLElement,
                                      mLoadListener)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(HTMLTrackElement)
-  NS_HTML_CONTENT_INTERFACES(nsGenericHTMLElement)
-NS_ELEMENT_INTERFACE_MAP_END
+NS_INTERFACE_MAP_END_INHERITING(nsGenericHTMLElement)
 
 void
 HTMLTrackElement::OnChannelRedirect(nsIChannel* aChannel,
@@ -223,7 +220,7 @@ HTMLTrackElement::LoadResource()
   rv = NS_CheckContentLoadPolicy(nsIContentPolicy::TYPE_MEDIA,
                                  uri,
                                  NodePrincipal(),
-                                 static_cast<nsGenericHTMLElement*>(this),
+                                 static_cast<Element*>(this),
                                  NS_LITERAL_CSTRING("text/vtt"), // mime type
                                  nullptr, // extra
                                  &shouldLoad,

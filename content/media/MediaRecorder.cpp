@@ -23,9 +23,8 @@ namespace mozilla {
 
 namespace dom {
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_2(MediaRecorder, nsDOMEventTargetHelper,
-                                     mStream,
-                                     mReadThread)
+NS_IMPL_CYCLE_COLLECTION_INHERITED_1(MediaRecorder, nsDOMEventTargetHelper,
+                                     mStream)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(MediaRecorder)
 NS_INTERFACE_MAP_END_INHERITING(nsDOMEventTargetHelper)
@@ -90,6 +89,7 @@ public:
     NS_IMETHODIMP Run()
     {
       MOZ_ASSERT(NS_IsMainThread());
+      mRecorder->mState = RecordingState::Inactive;
       mRecorder->DispatchSimpleEvent(NS_LITERAL_STRING("stop"));
       mRecorder->mReadThread->Shutdown();
       mRecorder->mReadThread = nullptr;
@@ -115,6 +115,12 @@ private:
 
 MediaRecorder::~MediaRecorder()
 {
+  if (mStreamPort) {
+    mStreamPort->Destroy();
+  }
+  if (mTrackUnionStream) {
+    mTrackUnionStream->Destroy();
+  }
 }
 
 void
@@ -144,7 +150,7 @@ MediaRecorder::ExtractEncodedData()
       mEncodedBufferCache->AppendBuffer(outputBufs[i]);
     }
 
-    if ((TimeStamp::Now() - lastBlobTimeStamp).ToMilliseconds() > mTimeSlice) {
+    if (mTimeSlice > 0 && (TimeStamp::Now() - lastBlobTimeStamp).ToMilliseconds() > mTimeSlice) {
       NS_DispatchToMainThread(new PushBlobTask(this));
       lastBlobTimeStamp = TimeStamp::Now();
     }
@@ -161,8 +167,8 @@ MediaRecorder::Start(const Optional<int32_t>& aTimeSlice, ErrorResult& aResult)
     return;
   }
 
-  if (!CheckPrincipal()) {
-    aResult.Throw(NS_ERROR_DOM_SECURITY_ERR);
+  if (mStream->GetStream()->IsFinished() || mStream->GetStream()->IsDestroyed()) {
+    aResult.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
     return;
   }
 
@@ -175,17 +181,29 @@ MediaRecorder::Start(const Optional<int32_t>& aTimeSlice, ErrorResult& aResult)
   } else {
     mTimeSlice = 0;
   }
+
+  // Create a TrackUnionStream to support Pause/Resume by using ChangeExplicitBlockerCount
+  MediaStreamGraph* gm = mStream->GetStream()->Graph();
+  mTrackUnionStream = gm->CreateTrackUnionStream(nullptr);
+  MOZ_ASSERT(mTrackUnionStream, "CreateTrackUnionStream failed");
+
+  if (!CheckPrincipal()) {
+    aResult.Throw(NS_ERROR_DOM_SECURITY_ERR);
+    return;
+  }
+
   if (mEncodedBufferCache == nullptr) {
     mEncodedBufferCache = new EncodedBufferCache(MAX_ALLOW_MEMORY_BUFFER);
   }
 
-  if (mEncoder == nullptr) {
-    mEncoder = MediaEncoder::CreateEncoder(NS_LITERAL_STRING(""));
-  }
+  mEncoder = MediaEncoder::CreateEncoder(NS_LITERAL_STRING(""));
   MOZ_ASSERT(mEncoder, "CreateEncoder failed");
 
+  mTrackUnionStream->SetAutofinish(true);
+  mStreamPort = mTrackUnionStream->AllocateInputPort(mStream->GetStream(), MediaInputPort::FLAG_BLOCK_OUTPUT);
+
   if (mEncoder) {
-    mStream.get()->GetStream()->AddListener(mEncoder);
+    mTrackUnionStream->AddListener(mEncoder);
   } else {
     aResult.Throw(NS_ERROR_DOM_ABORT_ERR);
   }
@@ -210,9 +228,31 @@ MediaRecorder::Stop(ErrorResult& aResult)
     aResult.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
     return;
   }
-
-  mStream.get()->GetStream()->RemoveListener(mEncoder);
   mState = RecordingState::Inactive;
+  mTrackUnionStream->RemoveListener(mEncoder);
+}
+
+void
+MediaRecorder::Pause(ErrorResult& aResult)
+{
+  if (mState != RecordingState::Recording) {
+    aResult.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+    return;
+  }
+  mTrackUnionStream->ChangeExplicitBlockerCount(-1);
+
+  mState = RecordingState::Paused;
+}
+
+void
+MediaRecorder::Resume(ErrorResult& aResult)
+{
+  if (mState != RecordingState::Paused) {
+    aResult.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+    return;
+  }
+  mTrackUnionStream->ChangeExplicitBlockerCount(1);
+  mState = RecordingState::Recording;
 }
 
 void
@@ -222,12 +262,8 @@ MediaRecorder::RequestData(ErrorResult& aResult)
     aResult.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
     return;
   }
-
-  nsresult rv = CreateAndDispatchBlobEvent();
-  if (NS_FAILED(rv)) {
-    aResult.Throw(rv);
-    return;
-  }
+  NS_DispatchToMainThread(NS_NewRunnableMethod(this, &MediaRecorder::CreateAndDispatchBlobEvent),
+                                               NS_DISPATCH_NORMAL);
 }
 
 JSObject*
@@ -355,6 +391,8 @@ MediaRecorder::NotifyError(nsresult aRv)
 bool MediaRecorder::CheckPrincipal()
 {
   nsCOMPtr<nsIPrincipal> principal = mStream->GetPrincipal();
+  if (!GetOwner())
+    return false;
   nsCOMPtr<nsIDocument> doc = GetOwner()->GetExtantDoc();
   if (!doc || !principal)
     return false;

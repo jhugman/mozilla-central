@@ -66,6 +66,9 @@
 #include "nsAccessibilityService.h"
 #include "mozilla/a11y/Platform.h"
 #endif
+#ifdef MOZ_CRASHREPORTER
+#include "nsExceptionHandler.h"
+#endif
 
 #include "mozilla/Preferences.h"
 
@@ -327,8 +330,8 @@ public:
   virtual GLContext* gl() const MOZ_OVERRIDE { return mGLContext; }
   virtual ShaderProgramOGL* GetProgram(ShaderProgramType aType) MOZ_OVERRIDE
   {
-    MOZ_ASSERT(aType == BGRARectLayerProgramType, "unexpected program type");
-    return mBGRARectProgram;
+    MOZ_ASSERT(aType == RGBARectLayerProgramType, "unexpected program type");
+    return mRGBARectProgram;
   }
   virtual void BindAndDrawQuad(ShaderProgramOGL *aProg) MOZ_OVERRIDE;
 
@@ -343,7 +346,7 @@ public:
 
 protected:
   nsRefPtr<mozilla::gl::GLContext> mGLContext;
-  nsAutoPtr<mozilla::layers::ShaderProgramOGL> mBGRARectProgram;
+  nsAutoPtr<mozilla::layers::ShaderProgramOGL> mRGBARectProgram;
   GLuint mQuadVBO;
 };
 
@@ -961,6 +964,15 @@ nsChildView::BackingScaleFactorChanged()
   }
 }
 
+int32_t
+nsChildView::RoundsWidgetCoordinatesTo()
+{
+  if (BackingScaleFactor() == 2.0) {
+    return 2;
+  }
+  return 1;
+}
+
 NS_IMETHODIMP nsChildView::ConstrainPosition(bool aAllowSlop,
                                              int32_t *aX, int32_t *aY)
 {
@@ -1522,13 +1534,6 @@ nsChildView::ComputeShouldAccelerate(bool aDefault)
 bool
 nsChildView::ShouldUseOffMainThreadCompositing()
 {
-  // When acceleration is off, default to false, but allow force-enabling
-  // using the layers.offmainthreadcomposition.prefer-basic pref.
-  if (!ComputeShouldAccelerate(mUseLayersAcceleration) &&
-      !Preferences::GetBool("layers.offmainthreadcomposition.prefer-basic", false)) {
-    return false;
-  }
-
   // Don't use OMTC (which requires OpenGL) for transparent windows or for
   // popup windows.
   if (!mView || ![[mView window] isOpaque] ||
@@ -1585,6 +1590,12 @@ NS_IMETHODIMP nsChildView::DispatchEvent(nsGUIEvent* event, nsEventStatus& aStat
   NS_ASSERTION(!(mTextInputHandler && mTextInputHandler->IsIMEComposing() &&
                  NS_IS_KEY_EVENT(event)),
     "Any key events should not be fired during IME composing");
+
+  if (event->mFlags.mIsSynthesizedForTests && NS_IS_KEY_EVENT(event)) {
+    nsKeyEvent* keyEvent = reinterpret_cast<nsKeyEvent*>(event);
+    nsresult rv = mTextInputHandler->AttachNativeKeyEvent(*keyEvent);
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
 
   aStatus = nsEventStatus_eIgnore;
 
@@ -1811,6 +1822,9 @@ nsChildView::NotifyIME(NotificationToIME aNotification)
       NS_ENSURE_TRUE(mTextInputHandler, NS_ERROR_NOT_AVAILABLE);
       mTextInputHandler->OnFocusChangeInGecko(false);
       return NS_OK;
+    case NOTIFY_IME_OF_SELECTION_CHANGE:
+      NS_ENSURE_TRUE(mTextInputHandler, NS_ERROR_NOT_AVAILABLE);
+      mTextInputHandler->OnSelectionChange();
     default:
       return NS_ERROR_NOT_IMPLEMENTED;
   }
@@ -1820,16 +1834,16 @@ NS_IMETHODIMP_(void)
 nsChildView::SetInputContext(const InputContext& aContext,
                              const InputContextAction& aAction)
 {
-  // XXX Ideally, we should check if this instance has focus or not.
-  //     However, this is called only when this widget has focus, so,
-  //     it's not problem at least for now.
-  if (aContext.IsPasswordEditor()) {
-    TextInputHandler::EnableSecureEventInput();
-  } else {
-    TextInputHandler::EnsureSecureEventInputDisabled();
+  NS_ENSURE_TRUE_VOID(mTextInputHandler);
+
+  if (mTextInputHandler->IsFocused()) {
+    if (aContext.IsPasswordEditor()) {
+      TextInputHandler::EnableSecureEventInput();
+    } else {
+      TextInputHandler::EnsureSecureEventInputDisabled();
+    }
   }
 
-  NS_ENSURE_TRUE_VOID(mTextInputHandler);
   mInputContext = aContext;
   switch (aContext.mIMEState.mEnabled) {
     case IMEState::ENABLED:
@@ -1878,6 +1892,13 @@ nsChildView::GetInputContext()
     mInputContext.mNativeIMEContext = this;
   }
   return mInputContext;
+}
+
+nsIMEUpdatePreference
+nsChildView::GetIMEUpdatePreference()
+{
+  return nsIMEUpdatePreference(nsIMEUpdatePreference::NOTIFY_SELECTION_CHANGE,
+                               false);
 }
 
 NS_IMETHODIMP nsChildView::GetToggledKeyState(uint32_t aKeyCode,
@@ -1934,8 +1955,8 @@ nsChildView::CreateCompositor()
       compositor::GetLayerManager(mCompositorParent);
     Compositor *compositor = manager->GetCompositor();
 
-    LayersBackend backend = compositor->GetBackend();
-    if (backend == LAYERS_OPENGL) {
+    ClientLayerManager *clientManager = static_cast<ClientLayerManager*>(GetLayerManager());
+    if (clientManager->GetCompositorBackendType() == LAYERS_OPENGL) {
       CompositorOGL *compositorOGL = static_cast<CompositorOGL*>(compositor);
 
       NSOpenGLContext *glContext = (NSOpenGLContext *)compositorOGL->gl()->GetNativeData(GLContext::NativeGLContext);
@@ -2089,7 +2110,9 @@ nsChildView::MaybeDrawResizeIndicator(GLManager* aManager, const nsIntRect& aRec
   nsIntSize size = mResizeIndicatorRect.Size();
   mResizerImage->UpdateIfNeeded(size, nsIntRegion(), ^(gfx::DrawTarget* drawTarget, const nsIntRegion& updateRegion) {
     ClearRegion(drawTarget, updateRegion);
-    DrawResizer(static_cast<CGContextRef>(drawTarget->GetNativeSurface(gfx::NATIVE_SURFACE_CGCONTEXT)));
+    gfx::BorrowedCGContext borrow(drawTarget);
+    DrawResizer(borrow.cg);
+    borrow.Finish();
   });
 
   mResizerImage->Draw(aManager, mResizeIndicatorRect.TopLeft());
@@ -2149,9 +2172,8 @@ nsChildView::UpdateTitlebarImageBuffer()
 
   ClearRegion(mTitlebarImageBuffer, dirtyTitlebarRegion);
 
-  CGContextRef ctx =
-    static_cast<CGContextRef>(mTitlebarImageBuffer->GetNativeSurface(gfx::NATIVE_SURFACE_CGCONTEXT));
-  CGContextSaveGState(ctx);
+  gfx::BorrowedCGContext borrow(mTitlebarImageBuffer);
+  CGContextRef ctx = borrow.cg;
 
   double scale = BackingScaleFactor();
   CGContextScaleCTM(ctx, scale, scale);
@@ -2217,7 +2239,7 @@ nsChildView::UpdateTitlebarImageBuffer()
                         DevPixelsToCocoaPoints(1));
 
   [NSGraphicsContext setCurrentContext:oldContext];
-  CGContextRestoreGState(ctx);
+  borrow.Finish();
 
   mUpdatedTitlebarRegion.Or(mUpdatedTitlebarRegion, dirtyTitlebarRegion);
 }
@@ -2274,8 +2296,9 @@ nsChildView::MaybeDrawRoundedCorners(GLManager* aManager, const nsIntRect& aRect
   nsIntSize size(mDevPixelCornerRadius, mDevPixelCornerRadius);
   mCornerMaskImage->UpdateIfNeeded(size, nsIntRegion(), ^(gfx::DrawTarget* drawTarget, const nsIntRegion& updateRegion) {
     ClearRegion(drawTarget, updateRegion);
-    DrawTopLeftCornerMask(static_cast<CGContextRef>(drawTarget->GetNativeSurface(gfx::NATIVE_SURFACE_CGCONTEXT)),
-                          mDevPixelCornerRadius);
+    gfx::BorrowedCGContext borrow(drawTarget);
+    DrawTopLeftCornerMask(borrow.cg, mDevPixelCornerRadius);
+    borrow.Finish();
   });
 
   // Use operator destination in: multiply all 4 channels with source alpha.
@@ -2561,13 +2584,14 @@ RectTextureImage::Draw(GLManager* aManager,
                        const nsIntPoint& aLocation,
                        const gfx3DMatrix& aTransform)
 {
-  ShaderProgramOGL* program = aManager->GetProgram(BGRARectLayerProgramType);
+  ShaderProgramOGL* program = aManager->GetProgram(RGBARectLayerProgramType);
 
   aManager->gl()->fBindTexture(LOCAL_GL_TEXTURE_RECTANGLE_ARB, mTexture);
 
   program->Activate();
   program->SetLayerQuadRect(nsIntRect(nsIntPoint(0, 0), mUsedSize));
   program->SetLayerTransform(aTransform * gfx3DMatrix::Translation(aLocation.x, aLocation.y, 0));
+  program->SetTextureTransform(gfx3DMatrix());
   program->SetLayerOpacity(1.0);
   program->SetRenderOffset(nsIntPoint(0, 0));
   program->SetTexCoordMultiplier(mUsedSize.width, mUsedSize.height);
@@ -2585,8 +2609,8 @@ GLPresenter::GLPresenter(GLContext* aContext)
 {
   mGLContext->SetFlipped(true);
   mGLContext->MakeCurrent();
-  mBGRARectProgram = new ShaderProgramOGL(mGLContext,
-    ProgramProfileOGL::GetProfileFor(BGRARectLayerProgramType, MaskNone));
+  mRGBARectProgram = new ShaderProgramOGL(mGLContext,
+    ProgramProfileOGL::GetProfileFor(RGBARectLayerProgramType, MaskNone));
 
   // Create mQuadVBO.
   mGLContext->fGenBuffers(1, &mQuadVBO);
@@ -2650,7 +2674,7 @@ GLPresenter::BeginFrame(nsIntSize aRenderSize)
   gfx3DMatrix matrix3d = gfx3DMatrix::From2D(viewMatrix);
   matrix3d._33 = 0.0f;
 
-  mBGRARectProgram->CheckAndSetProjectionMatrix(matrix3d);
+  mRGBARectProgram->CheckAndSetProjectionMatrix(matrix3d);
 
   // Default blend function implements "OVER"
   mGLContext->fBlendFuncSeparate(LOCAL_GL_ONE, LOCAL_GL_ONE_MINUS_SRC_ALPHA,
@@ -2790,7 +2814,7 @@ NSEvent* gLastDragMouseDownEvent = nil;
                                              object:nil];
   // TODO: replace the string with the constant once we build with the 10.7 SDK
   [[NSNotificationCenter defaultCenter] addObserver:self
-                                           selector:@selector(systemMetricsChanged)
+                                           selector:@selector(scrollbarSystemMetricChanged)
                                                name:@"NSPreferredScrollerStyleDidChangeNotification"
                                              object:nil];
   [[NSDistributedNotificationCenter defaultCenter] addObserver:self
@@ -2941,6 +2965,18 @@ NSEvent* gLastDragMouseDownEvent = nil;
 {
   if (mGeckoChild)
     mGeckoChild->NotifyThemeChanged();
+}
+
+- (void)scrollbarSystemMetricChanged
+{
+  [self systemMetricsChanged];
+
+  if (mGeckoChild) {
+    nsIWidgetListener* listener = mGeckoChild->GetWidgetListener();
+    if (listener) {
+      listener->GetPresShell()->ReconstructFrames();
+    }
+  }
 }
 
 - (void)setNeedsPendingDisplay
@@ -4454,7 +4490,8 @@ NSEvent* gLastDragMouseDownEvent = nil;
 
   uint32_t msg = aEnter ? NS_MOUSE_ENTER : NS_MOUSE_EXIT;
   nsMouseEvent event(true, msg, mGeckoChild, nsMouseEvent::eReal);
-  event.refPoint = mGeckoChild->CocoaPointsToDevPixels(localEventLocation);
+  event.refPoint = LayoutDeviceIntPoint::FromUntyped(
+    mGeckoChild->CocoaPointsToDevPixels(localEventLocation));
 
   // Create event for use by plugins.
   // This is going to our child view so we don't need to look up the destination
@@ -4896,7 +4933,8 @@ static int32_t RoundUp(double aDouble)
   NSPoint locationInWindow = nsCocoaUtils::EventLocationForWindow(aMouseEvent, [self window]);
   NSPoint localPoint = [self convertPoint:locationInWindow fromView:nil];
 
-  outGeckoEvent->refPoint = mGeckoChild->CocoaPointsToDevPixels(localPoint);
+  outGeckoEvent->refPoint = LayoutDeviceIntPoint::FromUntyped(
+    mGeckoChild->CocoaPointsToDevPixels(localPoint));
 
   nsMouseEvent_base* mouseEvent =
     static_cast<nsMouseEvent_base*>(outGeckoEvent);
@@ -4946,7 +4984,7 @@ static int32_t RoundUp(double aDouble)
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
 
-  NS_ENSURE_TRUE(mGeckoChild, );
+  NS_ENSURE_TRUE_VOID(mGeckoChild);
 
   nsAutoRetainCocoaObject kungFuDeathGrip(self);
 
@@ -4988,7 +5026,7 @@ static int32_t RoundUp(double aDouble)
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
 
-  NS_ENSURE_TRUE(mTextInputHandler, );
+  NS_ENSURE_TRUE_VOID(mTextInputHandler);
 
   nsAutoRetainCocoaObject kungFuDeathGrip(self);
 
@@ -5083,6 +5121,75 @@ static int32_t RoundUp(double aDouble)
 }
 
 #pragma mark -
+// NSTextInputClient implementation
+
+- (void)insertText:(id)aString replacementRange:(NSRange)replacementRange
+{
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
+
+  NS_ENSURE_TRUE_VOID(mGeckoChild);
+
+  nsAutoRetainCocoaObject kungFuDeathGrip(self);
+
+  NSAttributedString* attrStr;
+  if ([aString isKindOfClass:[NSAttributedString class]]) {
+    attrStr = static_cast<NSAttributedString*>(aString);
+  } else {
+    attrStr = [[[NSAttributedString alloc] initWithString:aString] autorelease];
+  }
+
+  mTextInputHandler->InsertText(attrStr, &replacementRange);
+
+  NS_OBJC_END_TRY_ABORT_BLOCK;
+}
+
+- (void)setMarkedText:(id)aString selectedRange:(NSRange)selectedRange
+                               replacementRange:(NSRange)replacementRange
+{
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
+
+  NS_ENSURE_TRUE_VOID(mTextInputHandler);
+
+  nsAutoRetainCocoaObject kungFuDeathGrip(self);
+
+  NSAttributedString* attrStr;
+  if ([aString isKindOfClass:[NSAttributedString class]]) {
+    attrStr = static_cast<NSAttributedString*>(aString);
+  } else {
+    attrStr = [[[NSAttributedString alloc] initWithString:aString] autorelease];
+  }
+
+  mTextInputHandler->SetMarkedText(attrStr, selectedRange, &replacementRange);
+
+  NS_OBJC_END_TRY_ABORT_BLOCK;
+}
+
+- (NSAttributedString*)attributedSubstringForProposedRange:(NSRange)aRange
+                                        actualRange:(NSRangePointer)actualRange
+{
+  NS_ENSURE_TRUE(mTextInputHandler, nil);
+  return mTextInputHandler->GetAttributedSubstringFromRange(aRange,
+                                                            actualRange);
+}
+
+- (NSRect)firstRectForCharacterRange:(NSRange)aRange
+                         actualRange:(NSRangePointer)actualRange
+{
+  NS_ENSURE_TRUE(mTextInputHandler, NSMakeRect(0.0, 0.0, 0.0, 0.0));
+  return mTextInputHandler->FirstRectForCharacterRange(aRange, actualRange);
+}
+
+- (NSInteger)windowLevel
+{
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_RETURN;
+
+  NS_ENSURE_TRUE(mTextInputHandler, [[self window] level]);
+  return mTextInputHandler->GetWindowLevel();
+
+  NS_OBJC_END_TRY_ABORT_BLOCK_RETURN(NSNormalWindowLevel);
+}
+
+#pragma mark -
 
 #ifdef __LP64__
 - (NSTextInputContext *)inputContext
@@ -5108,10 +5215,46 @@ static int32_t RoundUp(double aDouble)
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
 
 #if !defined(RELEASE_BUILD) || defined(DEBUG)
-  if (mGeckoChild &&
-      mGeckoChild->GetInputContext().IsPasswordEditor() !=
-        TextInputHandler::IsSecureEventInputEnabled()) {
-    MOZ_CRASH("in wrong secure input mode");
+  if (mGeckoChild && mTextInputHandler && mTextInputHandler->IsFocused()) {
+#ifdef MOZ_CRASHREPORTER
+    NSWindow* window = [self window];
+    NSString* info = [NSString stringWithFormat:@"\nview [%@], window [%@], key event [%@], window is key %i, is fullscreen %i, app is active %i",
+                      self, window, theEvent, [window isKeyWindow], ([window styleMask] & (1 << 14)) != 0,
+                      [NSApp isActive]];
+    nsAutoCString additionalInfo([info UTF8String]);
+#endif
+    if (mIsPluginView) {
+      if (TextInputHandler::IsSecureEventInputEnabled()) {
+        #define CRASH_MESSAGE "While a plugin has focus, we must not be in secure mode"
+#ifdef MOZ_CRASHREPORTER
+        CrashReporter::AppendAppNotesToCrashReport(NS_LITERAL_CSTRING("\nBug 893973: ") +
+                                                   NS_LITERAL_CSTRING(CRASH_MESSAGE));
+        CrashReporter::AppendAppNotesToCrashReport(additionalInfo);
+#endif
+        MOZ_CRASH(CRASH_MESSAGE);
+        #undef CRASH_MESSAGE
+      }
+    } else if (mGeckoChild->GetInputContext().IsPasswordEditor() &&
+               !TextInputHandler::IsSecureEventInputEnabled()) {
+      #define CRASH_MESSAGE "A password editor has focus, but not in secure input mode"
+#ifdef MOZ_CRASHREPORTER
+      CrashReporter::AppendAppNotesToCrashReport(NS_LITERAL_CSTRING("\nBug 893973: ") +
+                                                 NS_LITERAL_CSTRING(CRASH_MESSAGE));
+      CrashReporter::AppendAppNotesToCrashReport(additionalInfo);
+#endif
+      MOZ_CRASH(CRASH_MESSAGE);
+      #undef CRASH_MESSAGE
+    } else if (!mGeckoChild->GetInputContext().IsPasswordEditor() &&
+               TextInputHandler::IsSecureEventInputEnabled()) {
+      #define CRASH_MESSAGE "A non-password editor has focus, but in secure input mode"
+#ifdef MOZ_CRASHREPORTER
+      CrashReporter::AppendAppNotesToCrashReport(NS_LITERAL_CSTRING("\nBug 893973: ") +
+                                                 NS_LITERAL_CSTRING(CRASH_MESSAGE));
+      CrashReporter::AppendAppNotesToCrashReport(additionalInfo);
+#endif
+      MOZ_CRASH(CRASH_MESSAGE);
+      #undef CRASH_MESSAGE
+    }
   }
 #endif // #if !defined(RELEASE_BUILD) || defined(DEBUG)
 
@@ -5214,8 +5357,9 @@ static int32_t RoundUp(double aDouble)
   // hitTest needs coordinates in device pixels
   NSPoint eventLoc = nsCocoaUtils::ScreenLocationForEvent(currentEvent);
   eventLoc.y = nsCocoaUtils::FlippedScreenY(eventLoc.y);
-  nsIntPoint widgetLoc = mGeckoChild->CocoaPointsToDevPixels(eventLoc) -
-    mGeckoChild->WidgetToScreenOffset();
+  LayoutDeviceIntPoint widgetLoc = LayoutDeviceIntPoint::FromUntyped(
+    mGeckoChild->CocoaPointsToDevPixels(eventLoc) -
+    mGeckoChild->WidgetToScreenOffset());
 
   nsQueryContentEvent hitTest(true, NS_QUERY_DOM_WIDGET_HITTEST, mGeckoChild);
   hitTest.InitForQueryDOMWidgetHittest(widgetLoc);
@@ -5447,7 +5591,8 @@ static int32_t RoundUp(double aDouble)
   NSPoint draggingLoc = [aSender draggingLocation];
   NSPoint localPoint = [self convertPoint:draggingLoc fromView:nil];
 
-  geckoEvent.refPoint = mGeckoChild->CocoaPointsToDevPixels(localPoint);
+  geckoEvent.refPoint = LayoutDeviceIntPoint::FromUntyped(
+    mGeckoChild->CocoaPointsToDevPixels(localPoint));
 
   nsAutoRetainCocoaObject kungFuDeathGrip(self);
   mGeckoChild->DispatchWindowEvent(geckoEvent);

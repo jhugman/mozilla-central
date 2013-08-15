@@ -10,6 +10,7 @@
 #define __gl_h_
 
 #include <stddef.h>
+#include <stdint.h>
 
 typedef unsigned int GLenum;
 typedef unsigned int GLbitfield;
@@ -31,13 +32,13 @@ typedef void GLvoid;
 
 typedef char GLchar;
 #ifndef __gl2_h_
-typedef ptrdiff_t GLsizeiptr;
-typedef ptrdiff_t GLintptr;
+typedef intptr_t GLsizeiptr;
+typedef intptr_t GLintptr;
 #endif
 
 #endif /* #if !defined(__gltypes_h_) && !defined(__gl_h_) */
 
-#include "mozilla/StandardInteger.h"
+#include <stdint.h>
 
 // ARB_sync
 typedef struct __GLsync* GLsync;
@@ -853,6 +854,7 @@ typedef uint64_t EGLTime;
 #define LOCAL_GL_VERTEX_ATTRIB_ARRAY_SIZE 0x8623
 #define LOCAL_GL_VERTEX_ATTRIB_ARRAY_STRIDE 0x8624
 #define LOCAL_GL_VERTEX_ATTRIB_ARRAY_TYPE 0x8625
+#define LOCAL_GL_VERTEX_ATTRIB_ARRAY_DIVISOR 0x88FE
 #define LOCAL_GL_CURRENT_VERTEX_ATTRIB 0x8626
 #define LOCAL_GL_VERTEX_PROGRAM_POINT_SIZE 0x8642
 #define LOCAL_GL_VERTEX_PROGRAM_TWO_SIDE 0x8643
@@ -3048,6 +3050,12 @@ typedef uint64_t EGLTime;
 #define LOCAL_GL_TIMEOUT_EXPIRED                  0x911B
 #define LOCAL_GL_CONDITION_SATISFIED              0x911C
 #define LOCAL_GL_WAIT_FAILED                      0x911D
+
+// ARB_occlusion_query2
+#define LOCAL_GL_ANY_SAMPLES_PASSED               0x8C2F
+
+// EXT_occlusion_query_boolean
+#define LOCAL_GL_ANY_SAMPLES_PASSED_CONSERVATIVE  0x8D6A
 
 // OES_EGL_image_external
 #define LOCAL_GL_TEXTURE_EXTERNAL                 0x8D65

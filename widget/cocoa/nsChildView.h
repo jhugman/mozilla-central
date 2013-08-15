@@ -215,7 +215,7 @@ typedef NSInteger NSEventGestureAxis;
 #ifdef ACCESSIBILITY
                               mozAccessible,
 #endif
-                              mozView, NSTextInput>
+                              mozView, NSTextInput, NSTextInputClient>
 {
 @private
   // the nsChildView that created the view. It retains this NSView, so
@@ -449,6 +449,8 @@ public:
 
   virtual double          GetDefaultScaleInternal();
 
+  virtual int32_t         RoundsWidgetCoordinatesTo() MOZ_OVERRIDE;
+
   NS_IMETHOD              Invalidate(const nsIntRect &aRect);
 
   virtual void*           GetNativeData(uint32_t aDataType);
@@ -480,6 +482,7 @@ public:
   NS_IMETHOD_(void) SetInputContext(const InputContext& aContext,
                                     const InputContextAction& aAction);
   NS_IMETHOD_(InputContext) GetInputContext();
+  virtual nsIMEUpdatePreference GetIMEUpdatePreference() MOZ_OVERRIDE;
   NS_IMETHOD        GetToggledKeyState(uint32_t aKeyCode,
                                        bool* aLEDState);
 

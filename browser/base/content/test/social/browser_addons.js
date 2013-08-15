@@ -20,7 +20,8 @@ let manifest2 = { // used for testing install
   origin: "https://test1.example.com",
   sidebarURL: "https://test1.example.com/browser/browser/base/content/test/social/social_sidebar.html",
   workerURL: "https://test1.example.com/browser/browser/base/content/test/social/social_worker.js",
-  iconURL: "https://test1.example.com/browser/browser/base/content/test/moz.png"
+  iconURL: "https://test1.example.com/browser/browser/base/content/test/moz.png",
+  version: 1
 };
 
 function test() {
@@ -276,6 +277,48 @@ var tests = {
         SocialService.addBuiltinProvider(addonManifest.origin, function(provider) {
           Social.uninstallProvider(addonManifest.origin);
           gBrowser.removeTab(tab);
+        });
+      });
+    });
+  },
+  testUpgradeProviderFromWorker: function(next) {
+    // add the provider, change the pref, add it again. The provider at that
+    // point should be upgraded
+    let activationURL = manifest2.origin + "/browser/browser/base/content/test/social/social_activate.html"
+    addTab(activationURL, function(tab) {
+      let doc = tab.linkedBrowser.contentDocument;
+      let installFrom = doc.nodePrincipal.origin;
+      Services.prefs.setCharPref("social.whitelist", installFrom);
+      Social.installProvider(doc, manifest2, function(addonManifest) {
+        SocialService.addBuiltinProvider(addonManifest.origin, function(provider) {
+          is(provider.manifest.version, 1, "manifest version is 1");
+          Social.enabled = true;
+
+          // watch for the provider-update and test the new version
+          SocialService.registerProviderListener(function providerListener(topic, data) {
+            if (topic != "provider-update")
+              return;
+            SocialService.unregisterProviderListener(providerListener);
+            Services.prefs.clearUserPref("social.whitelist");
+            let provider = Social._getProviderFromOrigin(addonManifest.origin);
+            is(provider.manifest.version, 2, "manifest version is 2");
+            Social.uninstallProvider(addonManifest.origin);
+            gBrowser.removeTab(tab);
+            next();
+          });
+
+          let port = provider.getWorkerPort();
+          port.onmessage = function (e) {
+            let topic = e.data.topic;
+            switch (topic) {
+              case "got-sidebar-message":
+                ok(true, "got the sidebar message from provider 1");
+                port.postMessage({topic: "worker.update", data: true});
+                break;
+            }
+          };
+          port.postMessage({topic: "test-init"});
+
         });
       });
     });
