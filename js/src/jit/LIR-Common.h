@@ -7,6 +7,7 @@
 #ifndef jit_LIR_Common_h
 #define jit_LIR_Common_h
 
+#include "jit/RangeAnalysis.h"
 #include "jit/shared/Assembler-shared.h"
 
 // This file declares LIR instructions that are common to every platform.
@@ -217,23 +218,6 @@ class LCallee : public LInstructionHelper<1, 0, 0>
 {
   public:
     LIR_HEADER(Callee)
-};
-
-class LForceUseV : public LInstructionHelper<0, BOX_PIECES, 0>
-{
-  public:
-    LIR_HEADER(ForceUseV)
-};
-
-class LForceUseT : public LInstructionHelper<0, 1, 0>
-{
-  public:
-    LIR_HEADER(ForceUseT)
-
-    LForceUseT(const LAllocation &value)
-    {
-        setOperand(0, value);
-    }
 };
 
 // Base class for control instructions (goto, branch, etc.)
@@ -641,6 +625,29 @@ class LCheckOverRecursedPar : public LInstructionHelper<0, 1, 1>
 
     const LDefinition *getTempReg() {
         return getTemp(0);
+    }
+};
+
+// Alternative to LInterruptCheck which does not emit an explicit check of the
+// interrupt flag but relies on the loop backedge being patched via a signal
+// handler.
+class LInterruptCheckImplicit : public LInstructionHelper<0, 0, 0>
+{
+    Label *oolEntry_;
+
+  public:
+    LIR_HEADER(InterruptCheckImplicit)
+
+    LInterruptCheckImplicit()
+      : oolEntry_(NULL)
+    {}
+
+    Label *oolEntry() {
+        return oolEntry_;
+    }
+
+    void setOolEntry(Label *oolEntry) {
+        oolEntry_ = oolEntry;
     }
 };
 
@@ -1342,11 +1349,11 @@ class LTestOAndBranch : public LControlInstructionHelper<2, 1, 1>
         return getTemp(0);
     }
 
-    Label *ifTruthy() {
-        return getSuccessor(0)->lir()->label();
+    MBasicBlock *ifTruthy() {
+        return getSuccessor(0);
     }
-    Label *ifFalsy() {
-        return getSuccessor(1)->lir()->label();
+    MBasicBlock *ifFalsy() {
+        return getSuccessor(1);
     }
 
     MTest *mir() {
@@ -1388,11 +1395,11 @@ class LTestVAndBranch : public LControlInstructionHelper<2, BOX_PIECES, 3>
         return getTemp(2);
     }
 
-    Label *ifTruthy() {
-        return getSuccessor(0)->lir()->label();
+    MBasicBlock *ifTruthy() {
+        return getSuccessor(0);
     }
-    Label *ifFalsy() {
-        return getSuccessor(1)->lir()->label();
+    MBasicBlock *ifFalsy() {
+        return getSuccessor(1);
     }
 
     MTest *mir() const {
@@ -4933,6 +4940,55 @@ class LAsmJSCheckOverRecursed : public LInstructionHelper<0, 0, 0>
 
     MAsmJSCheckOverRecursed *mir() const {
         return mir_->toAsmJSCheckOverRecursed();
+    }
+};
+
+class LRangeAssert : public LInstructionHelper<0, 1, 0>
+{
+    Range range_;
+
+  public:
+    LIR_HEADER(RangeAssert)
+
+    LRangeAssert(const LAllocation &input, Range r)
+      : range_(r)
+    {
+        setOperand(0, input);
+    }
+
+    const LAllocation *input() {
+        return getOperand(0);
+    }
+
+    Range *range() {
+        return &range_;
+    }
+};
+
+class LDoubleRangeAssert : public LInstructionHelper<0, 1, 1>
+{
+    Range range_;
+
+  public:
+    LIR_HEADER(DoubleRangeAssert)
+
+    LDoubleRangeAssert(const LAllocation &input, const LDefinition &temp, Range r)
+      : range_(r)
+    {
+        setOperand(0, input);
+        setTemp(0, temp);
+    }
+
+    const LAllocation *input() {
+        return getOperand(0);
+    }
+
+    const LDefinition *temp() {
+        return getTemp(0);
+    }
+
+    Range *range() {
+        return &range_;
     }
 };
 

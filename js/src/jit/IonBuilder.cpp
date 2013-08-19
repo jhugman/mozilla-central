@@ -3716,11 +3716,6 @@ IonBuilder::inlineScriptedCall(CallInfo &callInfo, JSFunction *target)
     returnBlock->inheritSlots(current);
     returnBlock->pop();
 
-    // If callee is not a constant, add an MForceUse with the callee to make sure that
-    // it gets kept alive across the inlined body.
-    if (!callInfo.fun()->isConstant())
-        returnBlock->add(MForceUse::New(callInfo.fun()));
-
     // Accumulate return values.
     MIRGraphExits &exits = *inlineBuilder.graph().exitAccumulator();
     if (exits.length() == 0) {
@@ -8440,8 +8435,11 @@ IonBuilder::setPropTryCommonSetter(bool *emitted, MDefinition *obj,
     RootedFunction setter(cx, commonSetter);
 
     // Try emitting dom call.
-    if (!setPropTryCommonDOMSetter(emitted, obj, value, setter, isDOM) || emitted)
-        return emitted;
+    if (!setPropTryCommonDOMSetter(emitted, obj, value, setter, isDOM))
+        return false;
+
+    if (*emitted)
+        return true;
 
     // Don't call the setter with a primitive value.
     if (objTypes->getKnownTypeTag() != JSVAL_TYPE_OBJECT) {

@@ -89,6 +89,7 @@ class WorkerThreadState
 
     bool canStartAsmJSCompile();
     bool canStartIonCompile();
+    bool canStartParseTask();
 
     uint32_t harvestFailedAsmJSJobs() {
         JS_ASSERT(isLocked());
@@ -113,6 +114,8 @@ class WorkerThreadState
     void *maybeAsmJSFailedFunction() const {
         return asmJSFailedFunction;
     }
+
+    void finishParseTaskForScript(JSRuntime *rt, JSScript *script);
 
   private:
 
@@ -198,11 +201,11 @@ OffThreadCompilationEnabled(JSContext *cx)
 
 /* Initialize worker threads unless already initialized. */
 bool
-EnsureWorkerThreadsInitialized(JSRuntime *rt);
+EnsureWorkerThreadsInitialized(ExclusiveContext *cx);
 
 /* Perform MIR optimization and LIR generation on a single function. */
 bool
-StartOffThreadAsmJSCompile(JSContext *cx, AsmJSParallelTask *asmData);
+StartOffThreadAsmJSCompile(ExclusiveContext *cx, AsmJSParallelTask *asmData);
 
 /*
  * Schedule an Ion compilation for a script, given a builder which has been
@@ -224,7 +227,8 @@ CancelOffThreadIonCompile(JSCompartment *compartment, JSScript *script);
  */
 bool
 StartOffThreadParseScript(JSContext *cx, const CompileOptions &options,
-                          const jschar *chars, size_t length);
+                          const jschar *chars, size_t length, HandleObject scopeChain,
+                          JS::OffThreadCompileCallback callback, void *callbackData);
 
 /* Block until in progress and pending off thread parse jobs have finished. */
 void
@@ -232,28 +236,25 @@ WaitForOffThreadParsingToFinish(JSRuntime *rt);
 
 class AutoLockWorkerThreadState
 {
-    JSRuntime *rt;
+    WorkerThreadState &state;
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 
   public:
-
-    AutoLockWorkerThreadState(JSRuntime *rt
+    AutoLockWorkerThreadState(WorkerThreadState &state
                               MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
-      : rt(rt)
+      : state(state)
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
 #ifdef JS_WORKER_THREADS
-        JS_ASSERT(rt->workerThreadState);
-        rt->workerThreadState->lock();
+        state.lock();
 #else
-        (void)this->rt;
+        (void)state;
 #endif
     }
 
-    ~AutoLockWorkerThreadState()
-    {
+    ~AutoLockWorkerThreadState() {
 #ifdef JS_WORKER_THREADS
-        rt->workerThreadState->unlock();
+        state.unlock();
 #endif
     }
 };
@@ -332,17 +333,31 @@ struct AsmJSParallelTask
 
 struct ParseTask
 {
-    JSRuntime *runtime;
+    Zone *zone;
     ExclusiveContext *cx;
     CompileOptions options;
     const jschar *chars;
     size_t length;
     LifoAlloc alloc;
 
+    // Rooted pointer to the scope in the target compartment which the
+    // resulting script will be merged into. This is not safe to use off the
+    // main thread.
+    JSObject *scopeChain;
+
+    // Callback invoked off the main thread when the parse finishes.
+    JS::OffThreadCompileCallback callback;
+    void *callbackData;
+
+    // Holds the final script between the invocation of the callback and the
+    // point where FinishOffThreadScript is called, which will destroy the
+    // ParseTask.
     JSScript *script;
 
-    ParseTask(JSRuntime *rt, ExclusiveContext *cx, const CompileOptions &options,
-              const jschar *chars, size_t length);
+    ParseTask(Zone *zone, ExclusiveContext *cx, const CompileOptions &options,
+              const jschar *chars, size_t length, JSObject *scopeChain,
+              JS::OffThreadCompileCallback callback, void *callbackData);
+
     ~ParseTask();
 };
 
