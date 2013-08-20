@@ -911,8 +911,7 @@ CutPrefix(const char *aName) {
 nsresult
 nsDOMClassInfo::RegisterClassProtos(int32_t aClassInfoID)
 {
-  nsScriptNameSpaceManager *nameSpaceManager =
-    nsJSRuntime::GetNameSpaceManager();
+  nsScriptNameSpaceManager *nameSpaceManager = GetNameSpaceManager();
   NS_ENSURE_TRUE(nameSpaceManager, NS_ERROR_NOT_INITIALIZED);
   bool found_old;
 
@@ -964,8 +963,7 @@ nsDOMClassInfo::RegisterClassProtos(int32_t aClassInfoID)
 nsresult
 nsDOMClassInfo::RegisterExternalClasses()
 {
-  nsScriptNameSpaceManager *nameSpaceManager =
-    nsJSRuntime::GetNameSpaceManager();
+  nsScriptNameSpaceManager *nameSpaceManager = GetNameSpaceManager();
   NS_ENSURE_TRUE(nameSpaceManager, NS_ERROR_NOT_INITIALIZED);
 
   nsCOMPtr<nsIComponentRegistrar> registrar;
@@ -1097,7 +1095,7 @@ nsDOMClassInfo::Init()
 
   NS_ENSURE_TRUE(!sIsInitialized, NS_ERROR_ALREADY_INITIALIZED);
 
-  nsScriptNameSpaceManager *nameSpaceManager = nsJSRuntime::GetNameSpaceManager();
+  nsScriptNameSpaceManager *nameSpaceManager = GetNameSpaceManager();
   NS_ENSURE_TRUE(nameSpaceManager, NS_ERROR_NOT_INITIALIZED);
 
   nsresult rv = CallGetService(nsIXPConnect::GetCID(), &sXPConnect);
@@ -2072,8 +2070,7 @@ nsDOMClassInfo::PostCreatePrototype(JSContext * cx, JSObject * aProto)
     return NS_ERROR_FAILURE;
   }
 
-  nsScriptNameSpaceManager *nameSpaceManager =
-    nsJSRuntime::GetNameSpaceManager();
+  nsScriptNameSpaceManager *nameSpaceManager = GetNameSpaceManager();
   NS_ENSURE_TRUE(nameSpaceManager, NS_OK);
 
   bool unused;
@@ -2271,8 +2268,7 @@ nsWindowSH::Enumerate(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
     }
 
     // Now resolve everything from the namespace manager
-    nsScriptNameSpaceManager *nameSpaceManager =
-      nsJSRuntime::GetNameSpaceManager();
+    nsScriptNameSpaceManager *nameSpaceManager = GetNameSpaceManager();
     if (!nameSpaceManager) {
       NS_ERROR("Can't get namespace manager.");
       return NS_ERROR_UNEXPECTED;
@@ -2556,8 +2552,7 @@ private:
   {
     *aNameStruct = nullptr;
 
-    nsScriptNameSpaceManager *nameSpaceManager =
-      nsJSRuntime::GetNameSpaceManager();
+    nsScriptNameSpaceManager *nameSpaceManager = GetNameSpaceManager();
     if (!nameSpaceManager) {
       NS_ERROR("Can't get namespace manager.");
       return NS_ERROR_UNEXPECTED;
@@ -2764,8 +2759,7 @@ nsDOMConstructor::HasInstance(nsIXPConnectWrappedNative *wrapper,
     return NS_OK;
   }
 
-  nsScriptNameSpaceManager *nameSpaceManager =
-    nsJSRuntime::GetNameSpaceManager();
+  nsScriptNameSpaceManager *nameSpaceManager = GetNameSpaceManager();
   NS_ASSERTION(nameSpaceManager, "Can't get namespace manager?");
 
   const nsIID *class_iid;
@@ -3158,8 +3152,7 @@ nsWindowSH::GlobalResolve(nsGlobalWindow *aWin, JSContext *cx,
 {
   *did_resolve = false;
 
-  nsScriptNameSpaceManager *nameSpaceManager =
-    nsJSRuntime::GetNameSpaceManager();
+  nsScriptNameSpaceManager *nameSpaceManager = GetNameSpaceManager();
   NS_ENSURE_TRUE(nameSpaceManager, NS_ERROR_NOT_INITIALIZED);
 
   nsDependentJSString name(id);
@@ -3577,10 +3570,16 @@ const InterfaceShimEntry kInterfaceShimMap[] =
   { "nsIDOMXPathResult", "XPathResult" } };
 
 static nsresult
-DefineComponentsShim(JSContext *cx, JS::HandleObject global)
+DefineComponentsShim(JSContext *cx, JS::HandleObject global, nsPIDOMWindow *win)
 {
   // Keep track of how often this happens.
   Telemetry::Accumulate(Telemetry::COMPONENTS_SHIM_ACCESSED_BY_CONTENT, true);
+
+  // Warn once.
+  nsCOMPtr<nsIDocument> doc = win->GetExtantDoc();
+  if (doc) {
+    doc->WarnOnceAbout(nsIDocument::eComponents, /* asError = */ true);
+  }
 
   // Create a fake Components object.
   JS::Rooted<JSObject*> components(cx, JS_NewObject(cx, nullptr, nullptr, global));
@@ -3637,13 +3636,14 @@ nsWindowSH::NewResolve(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
   }
 
   MOZ_ASSERT(*_retval == true); // guaranteed by XPC_WN_Helper_NewResolve
-  if (id == XPCJSRuntime::Get()->GetStringID(XPCJSRuntime::IDX_COMPONENTS)) {
-    *objp = obj;
-    return DefineComponentsShim(cx, obj);
-  }
 
   nsGlobalWindow *win = nsGlobalWindow::FromWrapper(wrapper);
   MOZ_ASSERT(win->IsInnerWindow());
+
+  if (id == XPCJSRuntime::Get()->GetStringID(XPCJSRuntime::IDX_COMPONENTS)) {
+    *objp = obj;
+    return DefineComponentsShim(cx, obj, win);
+  }
 
   nsIScriptContext *my_context = win->GetContextInternal();
 
