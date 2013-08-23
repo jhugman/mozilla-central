@@ -30,7 +30,11 @@ XPCOMUtils.defineLazyGetter(this, "libcutils", function() {
 #endif
 
 function debug(aMsg) {
-  //dump("-*-*- Webapps.jsm : " + aMsg + "\n");
+#ifdef MOZ_DEBUG
+  dump("-*- Webapps.jsm : " + aMsg + "\n");
+#endif
+  let console = (Cu.import("resource://gre/modules/devtools/Console.jsm", {})).console;
+  console.log("-*- Webapps.jsm : " + aMsg + "\n");
 }
 
 function supportUseCurrentProfile() {
@@ -1201,7 +1205,7 @@ this.DOMApplicationRegistry = {
     }
 
     // We need to get the old manifest to unregister web activities.
-    this.getManifestFor(aManifestURL, (function(aOldManifest) {
+    this.getManifestFor(app.origin, (function(aOldManifest) {
       debug("Old manifest: " + JSON.stringify(aOldManifest));
       // Move the application.zip and manifest.webapp files out of TmpD
       let tmpDir = FileUtils.getDir("TmpD", ["webapps", id], true, true);
@@ -1240,7 +1244,7 @@ this.DOMApplicationRegistry = {
       Services.obs.notifyObservers(zipFile, "flush-cache-entry", null);
 
       // Get the manifest, and set properties.
-      this.getManifestFor(aManifestURL, (function(aData) {
+      this.getManifestFor(app.origin, (function(aData) {
         debug("New manifest: " + JSON.stringify(aData));
         app.downloading = false;
         app.downloadAvailable = false;
@@ -1327,6 +1331,7 @@ this.DOMApplicationRegistry = {
 
   // Returns the MD5 hash of a file, doing async IO off the main thread.
   computeFileHash: function computeFileHash(aFile, aCallback) {
+     debug("computeFileHash");
     Cu.import("resource://gre/modules/osfile.jsm");
     const CHUNK_SIZE = 16384;
 
@@ -1836,6 +1841,7 @@ this.DOMApplicationRegistry = {
     let app = aData.app;
 
     let sendError = function sendError(aError) {
+      debug("ERROR : " + aError);
       aData.error = aError;
       aMm.sendAsyncMessage("Webapps:Install:Return:KO", aData);
       Cu.reportError("Error installing packaged app from: " +
@@ -1844,14 +1850,19 @@ this.DOMApplicationRegistry = {
 
     let xhr = Cc["@mozilla.org/xmlextras/xmlhttprequest;1"]
                 .createInstance(Ci.nsIXMLHttpRequest);
+    debug("doInstallPackage getting: " + app.manifestURL);
     xhr.open("GET", app.manifestURL, true);
     xhr.channel.loadFlags |= Ci.nsIRequest.INHIBIT_CACHING;
-    xhr.channel.notificationCallbacks = this.createLoadContext(aData.appId,
+    xhr.channel.notificationCallbacks = this.createLoadContext(aData.appId, 
                                                                aData.isBrowser);
     xhr.responseType = "json";
 
     xhr.addEventListener("load", (function() {
+      debug("xhr status:" + xhr.status);
       if (xhr.status == 200) {
+        debug("app.installOrigin:" + app.installOrigin);
+        debug("app.origin:" + app.origin);
+        debug("xhr.getResponseHeader(content-type):" +  xhr.getResponseHeader("content-type"));
         if (!AppsUtils.checkManifestContentType(app.installOrigin, app.origin,
                                                 xhr.getResponseHeader("content-type"))) {
           sendError("INVALID_MANIFEST");
@@ -1943,9 +1954,10 @@ this.DOMApplicationRegistry = {
 
       delete this.queuedPackageDownload[aManifestURL];
 
-      this.downloadPackage(manifest, appObject, false, (function(aId, aManifest) {
-        this._downloadPackageCallback(aId, aManifest, appObject, installSuccessCallback);
-      }).bind(this));
+      this.downloadPackage(manifest, appObject, false,
+        this._onDownloadPackage.bind(this, appObject, installSuccessCallback)
+      );
+
     }
   },
 
@@ -1996,7 +2008,8 @@ this.DOMApplicationRegistry = {
     }
 
     appObject.localId = aLocalId;
-    appObject.basePath = FileUtils.getDir(DIRECTORY_NAME, ["webapps"], true, true).path;
+    appObject.basePath = FileUtils.getDir(DIRECTORY_NAME, ["webapps"], true, 
+                                          true).path;
     appObject.name = aManifest.name;
     appObject.csp = aManifest.csp || "";
     appObject.installerAppId = aData.appId;
@@ -2009,13 +2022,14 @@ this.DOMApplicationRegistry = {
   },
 
   _copyStates: function(aData, aAppObject) {
-    ["installState", "downloadAvailable", "downloading", "downloadSize", "readyToApplyDownload"].forEach(function(aProp) {
+    ["installState", "downloadAvailable", "downloading", "downloadSize",
+     "readyToApplyDownload"].forEach(function(aProp) {
       aData.app[aProp] = aAppObject[aProp];
      });
   },
 
   _writeManifestFile: function(aId, aIsPackage, aJsonManifest) {
-    let dir = FileUtils.getDir(DIRECTORY_NAME, ["webapps", aId], true, true);
+    let dir = this._getAppDir(aId);
     let manFile = dir.clone();
 
     // For packaged apps, keep the update manifest distinct from the app manifest.
@@ -2024,7 +2038,8 @@ this.DOMApplicationRegistry = {
     this._writeFile(manFile, JSON.stringify(aJsonManifest), function() { });
   },
 
-  confirmInstall: function(aData, aFromSync, aProfileDir, aOfflineCacheObserver, aInstallSuccessCallback) {
+  confirmInstall: function(aData, aFromSync, aProfileDir, aOfflineCacheObserver, 
+                           aInstallSuccessCallback) {
     debug("confirmInstall");
 
     let origin = Services.io.newURI(aData.app.origin, null, null);
@@ -2081,11 +2096,13 @@ this.DOMApplicationRegistry = {
 
     this._copyStates(aData, appObject);
 
-    this.queuedDownload[app.manifestURL] = {
-      manifest: manifest,
-      app: appObject,
-      profileDir: aProfileDir,
-      offlineCacheObserver: aOfflineCacheObserver
+    if (manifest.appcache_path) {
+      this.queuedDownload[app.manifestURL] = {
+        manifest: manifest,
+        app: appObject,
+        profileDir: aProfileDir,
+        offlineCacheObserver: aOfflineCacheObserver
+      }
     }
 
     // We notify about the successful installation via mgmt.oninstall and the
@@ -2116,12 +2133,13 @@ this.DOMApplicationRegistry = {
       }).bind(this));
     }
   },
-  _downloadPackageCallback: function(aId, aManifest, aGeneratedApp, aAppObject, aInstallSuccessCallback) {
-    debug("_downloadPackageCallback");
+  _onDownloadPackage: function(aAppObject, aInstallSuccessCallback, 
+                                     aId, aManifest) {
+    debug("_onDownloadPackage");
     // Success! Move the zip out of TmpD.
     let app = DOMApplicationRegistry.webapps[aId];
     let zipFile = FileUtils.getFile("TmpD", ["webapps", aId, "application.zip"], true);
-    let dir = FileUtils.getDir(DIRECTORY_NAME, ["webapps", aId], true, true);
+    let dir = this._getAppDir(aId);
     zipFile.moveTo(dir, "application.zip");
     let tmpDir = FileUtils.getDir("TmpD", ["webapps", aId], true, true);
     try {
@@ -2138,6 +2156,8 @@ this.DOMApplicationRegistry = {
     aGeneratedApp.downloadAvailable = false;
     this._saveApps((function() {
       this.updateAppHandlers(null, aManifest, aAppObject);
+      this.broadcastMessage("Webapps:AddApp", { id: aId, app: aAppObject });
+
       if (supportUseCurrentProfile()) {
         // Update the permissions for this app.
         PermissionsInstaller.installPermissions({ manifest: aManifest,
@@ -2180,15 +2200,17 @@ this.DOMApplicationRegistry = {
   },
 
   makeAppId: function() {
-    let uuidGenerator = Cc["@mozilla.org/uuid-generator;1"].getService(Ci.nsIUUIDGenerator);
+    let uuidGenerator = Cc["@mozilla.org/uuid-generator;1"]
+                          .getService(Ci.nsIUUIDGenerator);
     return uuidGenerator.generateUUID().toString();
   },
 
   _saveApps: function(aCallback) {
-    this._writeFile(this.appsFile, JSON.stringify(this.webapps, null, 2), function() {
-      if (aCallback)
-        aCallback();
-    });
+    this._writeFile(this.appsFile, JSON.stringify(this.webapps, null, 2), 
+      function() {
+        if (aCallback)
+          aCallback();
+      });
   },
 
   /**
@@ -2219,7 +2241,8 @@ this.DOMApplicationRegistry = {
     // the manifest file used to be named manifest.json, so fallback on this.
     let baseDir = this.webapps[id].basePath == this.getCoreAppsBasePath()
                     ? "coreAppsDir" : DIRECTORY_NAME;
-    let file = FileUtils.getFile(baseDir, ["webapps", id, "manifest.webapp"], true);
+    let file = FileUtils.getFile(baseDir, ["webapps", id, "manifest.webapp"], 
+                                 true);
     if (!file.exists()) {
       file = FileUtils.getFile(baseDir, ["webapps", id, "update.webapp"], true);
     }
@@ -2246,35 +2269,26 @@ this.DOMApplicationRegistry = {
     // - add the new app to the registry.
     // If we fail at any step, we backout the previous ones and return an error.
 
-    debug("downloadPackage " + JSON.stringify(aApp));
+    debug("downloadPackage");
+    debug("aManifest: " + JSON.stringify(aManifest));
+    debug("aApp: " + JSON.stringify(aApp));
+    debug("aIsUpdate: " + aIsUpdate);
+    debug("aOnSuccess: " + aOnSuccess);
+
 
     let id = this._appIdForManifestURL(aApp.manifestURL);
     let app = this.webapps[id];
 
     let self = this;
 
-    function cleanupWrapper(aError) {
-      debug("cleanupWrapper" );
-      (function() {
-        this._cleanup(aError, id, app, aApp, aIsUpdate);
-      }).bind(self)();
-    }
+    let cleanupWrapper = self._cleanup.bind(self, id, app, aApp, aIsUpdate);
+    
+    let downloadWrapper = self._download.bind(self, aManifest, app, aApp, id, 
+                            aIsUpdate, cleanupWrapper, aOnSuccess);
+    
 
-    function downloadWrapper() {
-      debug("downloadWrapper" );
-
-      (function() {
-        this._download(aManifest, app, aApp, id, aIsUpdate, cleanupWrapper, aOnSuccess);
-      }).bind(self)();
-    }
-
-    function checkDownloadSizeWrapper(aFreeBytes) {
-      debug("checkDownloadSizeWrapper " +aFreeBytes);
-     
-      (function() {
-        this._checkDownloadSize(aFreeBytes, aApp, cleanupWrapper, downloadWrapper);
-      }).bind(self)();
-    }
+    let checkDownloadSizeWrapper = self._checkDownloadSize.bind(self, aApp, 
+                                    cleanupWrapper, downloadWrapper);
 
     let deviceStorage = Services.wm.getMostRecentWindow("navigator:browser").navigator.getDeviceStorage("apps");
     if (deviceStorage) {
@@ -2292,15 +2306,17 @@ this.DOMApplicationRegistry = {
       }
     } else {
       debug("No deviceStorage");
-      // deviceStorage isn't available, so use FileUtils to find the size of available storage.
+      // deviceStorage isn't available, so use FileUtils to find the size of 
+      // available storage.
       let dir = FileUtils.getDir(DIRECTORY_NAME, ["webapps"], true, true);
       try {
         checkDownloadSizeWrapper(dir.diskSpaceAvailable);
       } catch(ex) {
         debug("Error thrown Will try and download: " + ex);
         // If disk space information isn't available, we'll end up here.
-        // We should either proceed anyway, otherwise devices that support neither
-        // deviceStorage nor diskSpaceAvailable will never be able to install packaged apps.
+        // We should either proceed anyway, otherwise devices that support 
+        // neither deviceStorage nor diskSpaceAvailable will never be able to 
+        // install packaged apps.
         downloadWrapper();
       }
 
@@ -2308,7 +2324,7 @@ this.DOMApplicationRegistry = {
   },
  
   // Removes the directory we created, and sends an error to the DOM side.
-  _cleanup: function(aError, aId, aGeneratedApp, aApp, aIsUpdate) {
+  _cleanup: function(aId, aGeneratedApp, aApp, aIsUpdate, aError) {
     debug("Cleanup: " + aError);
     let dir = FileUtils.getDir("TmpD", ["webapps", aId], true, true);
     try {
@@ -2347,17 +2363,20 @@ this.DOMApplicationRegistry = {
     AppDownloadManager.remove(aApp.manifestURL);
   },
 
-  _download: function(aManifest, aGeneratedApp, aApp, aId, aIsUpdate, aCleanup, aOnSuccess) {
+  _download: function(aManifest, aGeneratedApp, aApp, aId, aIsUpdate, aCleanup, 
+                      aOnSuccess) {
     debug("_download");
     debug("About to download " + aManifest.fullPackagePath());
 
     let self = this;
 
-    let requestChannel = NetUtil.newChannel(aManifest.fullPackagePath()).QueryInterface(Ci.nsIHttpChannel);
+    let requestChannel = NetUtil.newChannel(aManifest.fullPackagePath())
+                                .QueryInterface(Ci.nsIHttpChannel);
     requestChannel.loadFlags |= Ci.nsIRequest.INHIBIT_CACHING;
     if (aGeneratedApp.packageEtag) {
       debug("Add If-None-Match header: " + aGeneratedApp.packageEtag);
-      requestChannel.setRequestHeader("If-None-Match", aGeneratedApp.packageEtag, false);
+      requestChannel.setRequestHeader("If-None-Match", aGeneratedApp.packageEtag, 
+                                      false);
     }
 
     AppDownloadManager.add(aApp.manifestURL,
@@ -2368,7 +2387,8 @@ this.DOMApplicationRegistry = {
       }
     );
 
-    this._setupRequestChannelNotificationCallbacks(requestChannel, aApp, aGeneratedApp);
+    this._setupRequestChannelNotificationCallbacks(requestChannel, aApp, 
+                                                   aGeneratedApp);
      
  
     // We set the 'downloading' flag to true right before starting the fetch.
@@ -2382,17 +2402,21 @@ this.DOMApplicationRegistry = {
     aGeneratedApp.progress = 0;
 
     // Staging the zip in TmpD until all the checks are done.
-    let zipFile = FileUtils.getFile("TmpD", ["webapps", aId, "application.zip"], true);
+    let zipFile = FileUtils.getFile("TmpD", ["webapps", aId, "application.zip"], 
+                                    true);
 
     // We need an output stream to write the channel content to the zip file.
-    let outputStream = Cc["@mozilla.org/network/file-output-stream;1"].createInstance(Ci.nsIFileOutputStream);
+    let outputStream = Cc["@mozilla.org/network/file-output-stream;1"]
+                       .createInstance(Ci.nsIFileOutputStream);
     // write, create, truncate
     outputStream.init(zipFile, 0x02 | 0x08 | 0x20, parseInt("0664", 8), 0);
-    let bufferedOutputStream = Cc['@mozilla.org/network/buffered-output-stream;1'].createInstance(Ci.nsIBufferedOutputStream);
+    let bufferedOutputStream = Cc['@mozilla.org/network/buffered-output-stream;1']
+                               .createInstance(Ci.nsIBufferedOutputStream);
     bufferedOutputStream.init(outputStream, 1024);
 
     // Create a listener that will give data to the file output stream.
-    let listener = Cc["@mozilla.org/network/simple-stream-listener;1"].createInstance(Ci.nsISimpleStreamListener);
+    let listener = Cc["@mozilla.org/network/simple-stream-listener;1"]
+                   .createInstance(Ci.nsISimpleStreamListener);
     listener.init(bufferedOutputStream, {
       onStartRequest: function(aRequest, aContext) {
         // Nothing to do there anymore.
@@ -2417,9 +2441,17 @@ this.DOMApplicationRegistry = {
           aCleanup("NETWORK_ERROR");
           return;
         }
-        (function() {
-          this._callComputeFileHash(zipFile, aApp, aGeneratedApp, aIsUpdate, aManifest, requestChannel, aId, aOnSuccess, aCleanup, responseStatus);
-        }).bind(self)();
+        try {
+          self.computeFileHash.bind(self, zipFile, 
+              self._onFileHashComputed.bind(self, zipFile, aApp, aGeneratedApp,
+                            aIsUpdate, aManifest, requestChannel, aId, aOnSuccess, 
+                            aCleanup, responseStatus)
+              )();
+        
+        } catch (e) {
+          debug("on stop request error:" + e);
+        }
+
       }
     });
 
@@ -2429,38 +2461,38 @@ this.DOMApplicationRegistry = {
     this._sendDownloadProgressEvent(this, aApp, aGeneratedApp);
   },
 
-  _callComputeFileHash: function(zipFile, aApp, aGeneratedApp, aIsUpdate, aManifest, requestChannel, aId, aOnSuccess, aCleanup, aResponseStatus) {
-    debug("_callComputeFileHash");
-    this.computeFileHash(zipFile, (function(aHash) {
-      debug("computeFileHash CALLBACK success");
-      let openJarSuccess = (function(aRv, aZipReader){
-        debug("openJarSuccess");
-        this._openSignedJarFileAsyncCallback(aRv, aZipReader, aApp, aGeneratedApp, aIsUpdate, aManifest, requestChannel, aHash, aId, aOnSuccess, aCleanup);
-      }).bind(this);
+  _onFileHashComputed: function(zipFile, aApp, aGeneratedApp, aIsUpdate, 
+                            aManifest, requestChannel, aId, aOnSuccess, aCleanup, 
+                            aResponseStatus, aHash) {
+    debug("_onFileHashComputed");
 
-      let openJar = function() {
+    let openJar = (function() {
+      debug("openJar");
 
-        debug("openJar");
-        let certdb;
-        try {
-          certdb = Cc["@mozilla.org/security/x509certdb;1"].getService(Ci.nsIX509CertDB);
-        } catch (e) {
-          debug("_onHashComputed error: " + e);
-          // unrecoverable error, don't bug the user
-          aGeneratedApp.downloadAvailable = false;
-          aCleanup("CERTDB_ERROR");
-          return;
-        }
-        certdb.openSignedJARFileAsync(zipFile, openJarSuccess);
-      };
+      let openJarSuccess = this._openSignedJarFileAsyncCallback.bind(this, zipFile, aApp, 
+          aGeneratedApp, aIsUpdate, aManifest, requestChannel, aHash, aId, 
+          aOnSuccess, aCleanup);
 
-      this._onHashComputed(aHash, aResponseStatus != 304, aGeneratedApp, aApp, aId, aCleanup, openJar);
+      let certdb;
+      try {
+        certdb = Cc["@mozilla.org/security/x509certdb;1"]
+                 .getService(Ci.nsIX509CertDB);
+      } catch (e) {
+        debug("_onComputeFileHash error: " + e);
+        // unrecoverable error, don't bug the user
+        aGeneratedApp.downloadAvailable = false;
+        aCleanup("CERTDB_ERROR");
+        return;
+      }
+      certdb.openSignedJARFileAsync(zipFile, openJarSuccess);
+    }).bind(this);
 
-    }).bind(this));
+    this._onComputeFileHash(aHash, aResponseStatus != 304, aGeneratedApp, aApp, 
+                          aId, aCleanup, openJar);
   },
 
-  _checkDownloadSize: function (aFreeBytes, aApp, aCleanup, aDownLoad) {
-    debug("_checkDownloadSize");
+   _checkDownloadSize: function (aApp, aCleanup, aDownLoad, aFreeBytes) {
+    debug("_checkDownloadSize " + aFreeBytes);
    if (aFreeBytes) {
      debug("Free storage: " + aFreeBytes + ". Download size: " + aApp.downloadSize);
      if (aFreeBytes <= aApp.downloadSize + AppDownloadManager.MIN_REMAINING_FREESPACE) {
@@ -2480,7 +2512,8 @@ this.DOMApplicationRegistry = {
                            app: aGeneratedApp });
   },
 
-  _setupRequestChannelNotificationCallbacks: function(aRequestChannel, aApp, aGeneratedApp) {
+  _setupRequestChannelNotificationCallbacks: function(aRequestChannel, aApp,
+                                                      aGeneratedApp) {
     debug("_setupRequestChannelNotificationCallbacks");
       let lastProgressTime = 0;
       let self = this;
@@ -2496,7 +2529,8 @@ this.DOMApplicationRegistry = {
         getInterface: function notifGI(aIID) {
           return this.QueryInterface(aIID);
         },
-        onProgress: function notifProgress(aRequest, aContext, aProgress, aProgressMax) {
+        onProgress: function notifProgress(aRequest, aContext, aProgress, 
+                                           aProgressMax) {
           aGeneratedApp.progress = aProgress;
           let now = Date.now();
           if (now - lastProgressTime > MIN_PROGRESS_EVENT_DELAY) {
@@ -2528,8 +2562,8 @@ this.DOMApplicationRegistry = {
     debug("_checkForStoreIdMatch");
     // Things to check:
     // 1. if it's a update:
-    //   a. We should already have this storeId, or the original storeId must start
-    //      with STORE_ID_PENDING_PREFIX
+    //   a. We should already have this storeId, or the original storeId must 
+    //      start with STORE_ID_PENDING_PREFIX
     //   b. The manifestURL for the stored app should be the same one we're
     //      updating
     //   c. And finally the version of the update should be higher than the one
@@ -2559,8 +2593,9 @@ this.DOMApplicationRegistry = {
     }
   },
 
-  _onHashComputed: function(aHash, aNotModified, aGeneratedApp, aApp, aId, aCleanup, aOpenJarFunction) {
-    debug("_onHashComputed packageHash=" + aHash);
+  _onComputeFileHash: function(aHash, aNotModified, aGeneratedApp, aApp, aId, 
+                            aCleanup, aOpenJarFunction) {
+    debug("_onComputeFileHash packageHash=" + aHash);
     
     let newPackage = (aNotModified) &&
                      (aHash != aGeneratedApp.packageHash);
@@ -2593,7 +2628,10 @@ this.DOMApplicationRegistry = {
 
   },
 
-  _openSignedJarFileAsyncCallback: function(aRv, aZipReader, aApp, aGeneratedApp, aIsUpdate, aManifest, aRequestChannel, aHash, aId, aOnSuccess, aCleanup) {
+  _openSignedJarFileAsyncCallback: function(aZipFile, aApp, aGeneratedApp, 
+                                            aIsUpdate, aManifest, aRequestChannel,
+                                            aHash, aId, aOnSuccess, aCleanup, aRv, 
+                                            aZipReader) {
 
     debug("_openSignedJarFileAsyncCallback");
     let zipReader;
@@ -2608,19 +2646,26 @@ this.DOMApplicationRegistry = {
         throw "INVALID_SIGNATURE";
       } else {
         isSigned = false;
-        zipReader = Cc["@mozilla.org/libjar/zip-reader;1"].createInstance(Ci.nsIZipReader);
+        zipReader = Cc["@mozilla.org/libjar/zip-reader;1"]
+                    .createInstance(Ci.nsIZipReader);
         zipReader.open(aZipFile);
       }
 
       this._checkSignature(aApp, isSigned);
 
+      if (!zipReader.hasEntry("manifest.webapp")) {
+        throw "MISSING_MANIFEST";
+      }
+
       let istream = zipReader.getInputStream("manifest.webapp");
 
       // Obtain a converter to read from a UTF-8 encoded input stream.
-      let converter = Cc["@mozilla.org/intl/scriptableunicodeconverter"].createInstance(Ci.nsIScriptableUnicodeConverter);
+      let converter = Cc["@mozilla.org/intl/scriptableunicodeconverter"]
+                      .createInstance(Ci.nsIScriptableUnicodeConverter);
       converter.charset = "UTF-8";
 
-      let manifest = JSON.parse(converter.ConvertToUnicode(NetUtil.readInputStreamToString(istream, istream.available()) || ""));
+      let manifest = JSON.parse(converter.ConvertToUnicode(
+            NetUtil.readInputStreamToString(istream, istream.available()) || ""));
 
       if (!AppsUtils.checkManifest(manifest, aGeneratedApp)) {
         throw "INVALID_MANIFEST";
@@ -2722,7 +2767,8 @@ this.DOMApplicationRegistry = {
     debug("_checkOrigin");
 
       // Check if the app declares which origin it will use.
-      if (aIsSigned && aGeneratedApp.appStatus >= Ci.nsIPrincipal.APP_STATUS_PRIVILEGED && aManifest.origin !== undefined) {
+      if (aIsSigned && aGeneratedApp.appStatus >= 
+          Ci.nsIPrincipal.APP_STATUS_PRIVILEGED && aManifest.origin !== undefined) {
 
         let uri;
         try {
@@ -2799,7 +2845,8 @@ this.DOMApplicationRegistry = {
       } catch (e) {
         throw aZipReader.hasEntry("META-INF/ids.json") ? e : "MISSING_IDS_JSON";
       }
-      let ids = JSON.parse(aConverter.ConvertToUnicode(NetUtil.readInputStreamToString( idsStream, idsStream.available()) || ""));
+      let ids = JSON.parse(aConverter.ConvertToUnicode(NetUtil.
+             readInputStreamToString( idsStream, idsStream.available()) || ""));
       if ((!ids.id) || !Number.isInteger(ids.version) ||
           (ids.version <= 0)) {
          throw "INVALID_IDS_JSON";
