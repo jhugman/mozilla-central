@@ -62,6 +62,7 @@
 #include "frontend/BytecodeEmitter.h"
 #include "frontend/Parser.h"
 #include "jit/Ion.h"
+#include "js/StructuredClone.h"
 #include "perf/jsperf.h"
 #include "shell/jsheaptools.h"
 #include "shell/jsoptparse.h"
@@ -2519,7 +2520,7 @@ NewSandbox(JSContext *cx, bool lazy)
 
     JS_FireOnNewGlobalObject(cx, obj);
 
-    if (!cx->compartment()->wrap(cx, obj.address()))
+    if (!cx->compartment()->wrap(cx, &obj))
         return NULL;
     return obj;
 }
@@ -3371,6 +3372,52 @@ ReadRelativeToScript(JSContext *cx, unsigned argc, jsval *vp)
 }
 
 static bool
+redirect(JSContext *cx, FILE* fp, HandleString relFilename)
+{
+    RootedString filename(cx, ResolvePath(cx, relFilename, false));
+    if (!filename)
+        return false;
+    JSAutoByteString filenameABS(cx, filename);
+    if (!filenameABS)
+        return false;
+    if (freopen(filenameABS.ptr(), "wb", fp) == NULL) {
+        JS_ReportError(cx, "cannot redirect to %s: %s", filenameABS.ptr(), strerror(errno));
+        return false;
+    }
+    return true;
+}
+
+static bool
+RedirectOutput(JSContext *cx, unsigned argc, jsval *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+
+    if (args.length() < 1 || args.length() > 2) {
+        JS_ReportErrorNumber(cx, my_GetErrorMessage, NULL, JSSMSG_INVALID_ARGS, "redirect");
+        return false;
+    }
+
+    if (args[0].isString()) {
+        RootedString stdoutPath(cx, args[0].toString());
+        if (!stdoutPath)
+            return false;
+        if (!redirect(cx, stdout, stdoutPath))
+            return false;
+    }
+
+    if (args.length() > 1 && args[1].isString()) {
+        RootedString stderrPath(cx, args[1].toString());
+        if (!stderrPath)
+            return false;
+        if (!redirect(cx, stderr, stderrPath))
+            return false;
+    }
+
+    args.rval().setUndefined();
+    return true;
+}
+
+static bool
 System(JSContext *cx, unsigned argc, jsval *vp)
 {
     JSString *str;
@@ -3860,7 +3907,7 @@ static const JSFunctionSpecWithHelp shell_functions[] = {
     JS_FN_HELP("readRelativeToScript", ReadRelativeToScript, 1, 0,
 "readRelativeToScript(filename, [\"binary\"])",
 "  Read filename into returned string. Filename is relative to the directory\n"
-               "  containing the current script."),
+"  containing the current script."),
 
     JS_FN_HELP("compile", Compile, 1, 0,
 "compile(code)",
@@ -3965,6 +4012,11 @@ static const JSFunctionSpecWithHelp fuzzing_unsafe_functions[] = {
     JS_FN_HELP("pc2line", PCToLine, 0, 0,
 "pc2line(fun[, pc])",
 "  Map PC to line number."),
+
+    JS_FN_HELP("redirect", RedirectOutput, 2, 0,
+"redirect(stdoutFilename[, stderrFilename])",
+"  Redirect stdout and/or stderr to the named file. Pass undefined to avoid\n"
+"   redirecting. Filenames are relative to the current working directory."),
 
     JS_FN_HELP("setThrowHook", SetThrowHook, 1, 0,
 "setThrowHook(f)",
@@ -5151,19 +5203,23 @@ ProcessArgs(JSContext *cx, JSObject *obj_, OptionParser *op)
         ion::js_IonOptions.compileTryCatch = true;
 
 #ifdef JS_THREADSAFE
+    bool parallelCompilation = false;
     if (const char *str = op->getStringOption("ion-parallel-compile")) {
         if (strcmp(str, "on") == 0) {
             if (cx->runtime()->helperThreadCount() == 0) {
                 fprintf(stderr, "Parallel compilation not available without helper threads");
                 return EXIT_FAILURE;
             }
-            ion::js_IonOptions.parallelCompilation = true;
-        } else if (strcmp(str, "off") == 0) {
-            ion::js_IonOptions.parallelCompilation = false;
-        } else {
+            parallelCompilation = true;
+        } else if (strcmp(str, "off") != 0) {
             return OptionFailure("ion-parallel-compile", str);
         }
     }
+    /*
+     * Note: In shell builds, parallel compilation is only enabled with an
+     * explicit option.
+     */
+    cx->runtime()->setCanUseHelperThreadsForIonCompilation(parallelCompilation);
 #endif /* JS_THREADSAFE */
 
 #endif /* JS_ION */

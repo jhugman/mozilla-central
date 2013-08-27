@@ -38,9 +38,9 @@ public class BrowserDB {
 
         public Cursor filter(ContentResolver cr, CharSequence constraint, int limit);
 
-        // This should onlyl return frecent sites, BrowserDB.getTopSites will do the
+        // This should only return frecent bookmarks, BrowserDB.getTopBookmarks will do the
         // work to combine that list with the pinned sites list
-        public Cursor getTopSites(ContentResolver cr, int limit);
+        public Cursor getTopBookmarks(ContentResolver cr, int limit);
 
         public void updateVisitedHistory(ContentResolver cr, String uri);
 
@@ -86,6 +86,8 @@ public class BrowserDB {
         public void removeReadingListItemWithURL(ContentResolver cr, String uri);
 
         public Bitmap getFaviconForUrl(ContentResolver cr, String uri);
+
+        public byte[] getFaviconBytesForUrl(ContentResolver cr, String uri);
 
         public Cursor getFaviconsForUrls(ContentResolver cr, List<String> urls);
 
@@ -135,12 +137,12 @@ public class BrowserDB {
         return sDb.filter(cr, constraint, limit);
     }
 
-    public static Cursor getTopSites(ContentResolver cr, int limit) {
-        // Note this is not a single query anymore, but actually returns a mixture of two queries, one for topSites
-        // and one for pinned sites
-        Cursor topSites = sDb.getTopSites(cr, limit);
+    public static Cursor getTopBookmarks(ContentResolver cr, int limit) {
+        // Note this is not a single query anymore, but actually returns a mixture of two queries,
+        // one for top bookmarks, and one for pinned sites (which are actually bookmarks as well).
+        Cursor topBookmarks = sDb.getTopBookmarks(cr, limit);
         Cursor pinnedSites = sDb.getPinnedSites(cr, limit);
-        return new TopSitesCursorWrapper(pinnedSites, topSites, limit);
+        return new TopSitesCursorWrapper(pinnedSites, topBookmarks, limit);
     }
 
     public static void updateVisitedHistory(ContentResolver cr, String uri) {
@@ -235,6 +237,10 @@ public class BrowserDB {
 
     public static Bitmap getFaviconForUrl(ContentResolver cr, String uri) {
         return sDb.getFaviconForUrl(cr, uri);
+    }
+
+    public static byte[] getFaviconBytesForUrl(ContentResolver cr, String uri) {
+        return sDb.getFaviconBytesForUrl(cr, uri);
     }
 
     public static Cursor getFaviconsForUrls(ContentResolver cr, List<String> urls) {
@@ -401,11 +407,16 @@ public class BrowserDB {
         public boolean moveToPosition(int position) {
             mIndex = position;
 
-            // move the real cursor as  if we were stepping through it to this position
-            // be careful not to move it to far, and to account for any pinned sites
+            // Move the real cursor as if we were stepping through it to this position.
+            // Account for pinned sites, and be careful to update its position to the
+            // minimum or maximum position, even if we're moving beyond its bounds.
             int before = getPinnedBefore(position);
             int p2 = position - before;
-            if (p2 >= -1 && p2 <= mCursor.getCount()) {
+            if (p2 <= -1) {
+                super.moveToPosition(-1);
+            } else if (p2 >= mCursor.getCount()) {
+                super.moveToPosition(mCursor.getCount());
+            } else {
                 super.moveToPosition(p2);
             }
 

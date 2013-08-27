@@ -397,12 +397,14 @@ StringFromCharCode(JSContext *cx, int32_t code)
 
 bool
 SetProperty(JSContext *cx, HandleObject obj, HandlePropertyName name, HandleValue value,
-            bool strict, int jsop)
+            bool strict, jsbytecode *pc)
 {
     RootedValue v(cx, value);
     RootedId id(cx, NameToId(name));
 
-    if (jsop == JSOP_SETALIASEDVAR) {
+    JSOp op = JSOp(*pc);
+
+    if (op == JSOP_SETALIASEDVAR) {
         // Aliased var assigns ignore readonly attributes on the property, as
         // required for initializing 'const' closure variables.
         Shape *shape = obj->nativeLookup(cx, name);
@@ -412,7 +414,7 @@ SetProperty(JSContext *cx, HandleObject obj, HandlePropertyName name, HandleValu
     }
 
     if (JS_LIKELY(!obj->getOps()->setProperty)) {
-        unsigned defineHow = (jsop == JSOP_SETNAME || jsop == JSOP_SETGNAME) ? DNP_UNQUALIFIED : 0;
+        unsigned defineHow = (op == JSOP_SETNAME || op == JSOP_SETGNAME) ? DNP_UNQUALIFIED : 0;
         return baseops::SetPropertyHelper(cx, obj, obj, id, defineHow, &v, strict);
     }
 
@@ -456,7 +458,17 @@ JSObject *
 NewCallObject(JSContext *cx, HandleScript script,
               HandleShape shape, HandleTypeObject type, HeapSlot *slots)
 {
-    return CallObject::create(cx, script, shape, type, slots);
+    JSObject *obj = CallObject::create(cx, script, shape, type, slots);
+
+#ifdef JSGC_GENERATIONAL
+    // The JIT creates call objects in the nursery, so elides barriers for
+    // the initializing writes. The interpreter, however, may have allocated
+    // the call object tenured, so barrier as needed before re-entering.
+    if (!IsInsideNursery(cx->runtime(), obj))
+        cx->runtime()->gcStoreBuffer.putWholeCell(obj);
+#endif
+
+    return obj;
 }
 
 JSObject *

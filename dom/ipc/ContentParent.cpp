@@ -939,6 +939,10 @@ ContentParent::OnChannelConnected(int32_t pid)
         }
 #endif
     }
+
+    // Set a reply timeout. The only time the parent process will actually
+    // timeout is through urgent messages (which are used by CPOWs).
+    SetReplyTimeoutMs(Preferences::GetInt("dom.ipc.cpow.timeout", 3000));
 }
 
 void
@@ -1676,14 +1680,19 @@ ContentParent::Observe(nsISupports* aSubject,
         nsString mountPoint;
         int32_t  state;
         int32_t  mountGeneration;
+        bool     isMediaPresent;
+        bool     isSharing;
 
         vol->GetName(volName);
         vol->GetMountPoint(mountPoint);
         vol->GetState(&state);
         vol->GetMountGeneration(&mountGeneration);
+        vol->GetIsMediaPresent(&isMediaPresent);
+        vol->GetIsSharing(&isSharing);
 
         unused << SendFileSystemUpdate(volName, mountPoint, state,
-                                       mountGeneration);
+                                       mountGeneration, isMediaPresent,
+                                       isSharing);
     }
 #endif
 #ifdef ACCESSIBILITY
@@ -2531,7 +2540,7 @@ bool
 ContentParent::RecvAddGeolocationListener(const IPC::Principal& aPrincipal,
                                           const bool& aHighAccuracy)
 {
-#ifdef MOZ_PERMISSIONS
+#ifdef MOZ_CHILD_PERMISSIONS
   if (Preferences::GetBool("geo.testing.ignore_ipc_principal", false) == false) {
     nsIPrincipal* principal = aPrincipal;
     if (principal == nullptr) {
@@ -2790,6 +2799,15 @@ ContentParent::RecvKeywordToURI(const nsCString& aKeyword, OptionalInputStreamPa
   SerializeInputStream(postData, *aPostData);
   SerializeURI(uri, *aURI);
   return true;
+}
+
+bool
+ContentParent::ShouldContinueFromReplyTimeout()
+{
+  // The only time ContentParent sends blocking messages is for CPOWs, so
+  // timeouts should only ever occur in electrolysis-enabled sessions.
+  MOZ_ASSERT(Preferences::GetBool("browser.tabs.remote", false));
+  return false;
 }
 
 } // namespace dom

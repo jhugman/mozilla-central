@@ -319,7 +319,7 @@ pref("gfx.font_rendering.opentype_svg.enabled", false);
 // comma separated list of backends to use in order of preference
 // e.g., pref("gfx.canvas.azure.backends", "direct2d,skia,cairo");
 pref("gfx.canvas.azure.backends", "direct2d,skia,cairo");
-pref("gfx.content.azure.backends", "direct2d");
+pref("gfx.content.azure.backends", "direct2d,cairo");
 pref("gfx.content.azure.enabled", true);
 #else
 pref("gfx.content.azure.enabled", false);
@@ -474,9 +474,6 @@ pref("view_source.editor.args", "");
 
 // When true this will word-wrap plain text documents.
 pref("plain_text.wrap_long_lines", false);
-
-// dispatch left clicks only to content in browser (still allows clicks to chrome/xul)
-pref("nglayout.events.dispatchLeftClickOnly", true);
 
 // whether or not to draw images while dragging
 pref("nglayout.enable_drag_images", true);
@@ -822,10 +819,13 @@ pref("javascript.options.strict.debug",     true);
 pref("javascript.options.baselinejit.content", true);
 pref("javascript.options.baselinejit.chrome",  true);
 pref("javascript.options.ion.content",      true);
+pref("javascript.options.ion.chrome",       false);
 pref("javascript.options.asmjs",            true);
+pref("javascript.options.parallel_parsing", true);
 pref("javascript.options.ion.parallel_compilation", true);
 pref("javascript.options.jit_hardening", true);
-pref("javascript.options.typeinference", true);
+pref("javascript.options.typeinference.content", true);
+pref("javascript.options.typeinference.chrome", false);
 // This preference limits the memory usage of javascript.
 // If you want to change these values for your device,
 // please find Bug 417052 comment 17 and Bug 456721
@@ -3909,6 +3909,7 @@ pref("signon.SignonFileName3",              "signons3.txt"); // obsolete
 pref("signon.autofillForms",                true);
 pref("signon.autologin.proxy",              false);
 pref("signon.debug",                        false);
+pref("signon.useDOMFormHasPassword",        true);
 
 // Satchel (Form Manager) prefs
 pref("browser.formfill.debug",            false);
@@ -4321,6 +4322,11 @@ pref("dom.placeholder.show_on_focus", true);
 // UAProfile settings
 pref("wap.UAProf.url", "");
 pref("wap.UAProf.tagname", "x-wap-profile");
+
+// MMS version 1.1 = 0x11 (or decimal 17)
+// MMS version 1.3 = 0x13 (or decimal 19)
+// @see OMA-TS-MMS_ENC-V1_3-20110913-A clause 7.3.34
+pref("dom.mms.version", 19);
 
 // Retrieval mode for MMS
 // manual: Manual retrieval mode.

@@ -223,19 +223,6 @@ bool WebGLContext::ValidateFaceEnum(WebGLenum face, const char *info)
     }
 }
 
-bool WebGLContext::ValidateBufferUsageEnum(WebGLenum target, const char *info)
-{
-    switch (target) {
-        case LOCAL_GL_STREAM_DRAW:
-        case LOCAL_GL_STATIC_DRAW:
-        case LOCAL_GL_DYNAMIC_DRAW:
-            return true;
-        default:
-            ErrorInvalidEnumInfo(info, target);
-            return false;
-    }
-}
-
 bool WebGLContext::ValidateDrawModeEnum(WebGLenum mode, const char *info)
 {
     switch (mode) {
@@ -820,6 +807,7 @@ WebGLContext::InitAndValidateGL()
     mBoundCubeMapTextures.Clear();
 
     mBoundArrayBuffer = nullptr;
+    mBoundTransformFeedbackBuffer = nullptr;
     mCurrentProgram = nullptr;
 
     mBoundFramebuffer = nullptr;
@@ -880,7 +868,7 @@ WebGLContext::InitAndValidateGL()
         mGLMaxVertexUniformVectors = MINVALUE_GL_MAX_VERTEX_UNIFORM_VECTORS;
         mGLMaxVaryingVectors = MINVALUE_GL_MAX_VARYING_VECTORS;
     } else {
-        if (gl->IsExtensionSupported(gl::GLContext::XXX_ES2_compatibility)) {
+        if (gl->IsSupported(gl::GLFeature::ES2_compatibility)) {
             gl->fGetIntegerv(LOCAL_GL_MAX_FRAGMENT_UNIFORM_VECTORS, &mGLMaxFragmentUniformVectors);
             gl->fGetIntegerv(LOCAL_GL_MAX_VERTEX_UNIFORM_VECTORS, &mGLMaxVertexUniformVectors);
             gl->fGetIntegerv(LOCAL_GL_MAX_VARYING_VECTORS, &mGLMaxVaryingVectors);
@@ -919,7 +907,7 @@ WebGLContext::InitAndValidateGL()
                 default:
                     GenerateWarning("GL error 0x%x occurred during WebGL context initialization!", error);
                     return false;
-            }   
+            }
         }
     }
 
@@ -974,14 +962,7 @@ WebGLContext::InitAndValidateGL()
     }
 
     if (IsWebGL2() &&
-        (!IsExtensionSupported(OES_vertex_array_object) ||
-         !IsExtensionSupported(WEBGL_draw_buffers) ||
-         !IsExtensionSupported(ANGLE_instanced_arrays) ||
-         !gl->IsExtensionSupported(gl::GLContext::EXT_gpu_shader4) ||
-         !gl->IsExtensionSupported(gl::GLContext::EXT_blend_minmax) ||
-         (!gl->IsExtensionSupported(gl::GLContext::XXX_occlusion_query) &&
-          !gl->IsExtensionSupported(gl::GLContext::XXX_occlusion_query_boolean))
-        ))
+        !InitWebGL2())
     {
         // Todo: Bug 898404: Only allow WebGL2 on GL>=3.0 on desktop GL.
         return false;
@@ -1000,16 +981,6 @@ WebGLContext::InitAndValidateGL()
     mDefaultVertexArray = new WebGLVertexArray(this);
     mDefaultVertexArray->mAttribBuffers.SetLength(mGLMaxVertexAttribs);
     mBoundVertexArray = mDefaultVertexArray;
-
-    if (IsWebGL2()) {
-        EnableExtension(OES_vertex_array_object);
-        EnableExtension(WEBGL_draw_buffers);
-        EnableExtension(ANGLE_instanced_arrays);
-
-        MOZ_ASSERT(IsExtensionEnabled(OES_vertex_array_object));
-        MOZ_ASSERT(IsExtensionEnabled(WEBGL_draw_buffers));
-        MOZ_ASSERT(IsExtensionEnabled(ANGLE_instanced_arrays));
-    }
 
     return true;
 }

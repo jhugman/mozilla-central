@@ -80,7 +80,6 @@
 #include "nsIDOMDOMException.h"
 #include "nsIDOMDOMStringList.h"
 #include "nsIDOMUserDataHandler.h"
-#include "nsIDOMGeoPositionError.h"
 #include "nsIDOMLoadStatus.h"
 #include "nsIDOMXPathNamespace.h"
 #include "nsIDOMXULButtonElement.h"
@@ -148,6 +147,7 @@
 #include "mozilla/dom/workers/Workers.h"
 
 #include "nsIDOMFile.h"
+#include "nsDOMBlobBuilder.h" // nsDOMMultipartFile
 
 #include "nsIEventListenerService.h"
 #include "nsIMessageManager.h"
@@ -172,7 +172,6 @@
 #ifdef MOZ_B2G_RIL
 #include "nsIDOMMozVoicemail.h"
 #include "nsIDOMIccManager.h"
-#include "nsIDOMMozCellBroadcast.h"
 #include "nsIDOMMobileConnection.h"
 #endif // MOZ_B2G_RIL
 
@@ -185,8 +184,6 @@
 #endif
 
 #include "nsIDOMCameraManager.h"
-#include "nsIOpenWindowEventDetail.h"
-#include "nsIAsyncScrollEventDetail.h"
 #include "nsIDOMGlobalObjectConstructor.h"
 #include "nsIDOMLockedFile.h"
 #include "nsDebug.h"
@@ -502,9 +499,6 @@ static nsDOMClassInfoData sClassInfoData[] = {
 #ifdef MOZ_B2G_RIL
   NS_DEFINE_CLASSINFO_DATA(MozMobileConnection, nsDOMGenericSH,
                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
-
-  NS_DEFINE_CLASSINFO_DATA(MozCellBroadcast, nsDOMGenericSH,
-                           DOM_DEFAULT_SCRIPTABLE_FLAGS)
 #endif
 
   NS_DEFINE_CLASSINFO_DATA(CSSFontFaceRule, nsDOMGenericSH,
@@ -556,14 +550,7 @@ static nsDOMClassInfoData sClassInfoData[] = {
                            EVENTTARGET_SCRIPTABLE_FLAGS)
 #endif
 
-  NS_DEFINE_CLASSINFO_DATA(CameraControl, nsDOMGenericSH,
-                           DOM_DEFAULT_SCRIPTABLE_FLAGS)
   NS_DEFINE_CLASSINFO_DATA(CameraCapabilities, nsDOMGenericSH,
-                           DOM_DEFAULT_SCRIPTABLE_FLAGS)
-
-  NS_DEFINE_CLASSINFO_DATA(OpenWindowEventDetail, nsDOMGenericSH,
-                           DOM_DEFAULT_SCRIPTABLE_FLAGS)
-  NS_DEFINE_CLASSINFO_DATA(AsyncScrollEventDetail, nsDOMGenericSH,
                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
 
   NS_DEFINE_CLASSINFO_DATA(LockedFile, nsEventTargetSH,
@@ -572,8 +559,6 @@ static nsDOMClassInfoData sClassInfoData[] = {
                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
 
   NS_DEFINE_CLASSINFO_DATA(UserDataHandler, nsDOMGenericSH,
-                           DOM_DEFAULT_SCRIPTABLE_FLAGS)
-  NS_DEFINE_CLASSINFO_DATA(GeoPositionError, nsDOMGenericSH,
                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
   NS_DEFINE_CLASSINFO_DATA(LoadStatus, nsDOMGenericSH,
                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
@@ -1060,26 +1045,22 @@ nsDOMClassInfo::RegisterExternalClasses()
   }
 
 #ifdef MOZ_B2G
-#define DOM_CLASSINFO_WINDOW_MAP_ENTRIES(_support_indexed_db)                  \
+#define DOM_CLASSINFO_WINDOW_MAP_ENTRIES                                       \
   DOM_CLASSINFO_MAP_ENTRY(nsIDOMWindow)                                        \
   DOM_CLASSINFO_MAP_ENTRY(nsIDOMWindowB2G)                                     \
   DOM_CLASSINFO_MAP_ENTRY(nsIDOMJSWindow)                                      \
   DOM_CLASSINFO_MAP_ENTRY(nsIDOMEventTarget)                                   \
   DOM_CLASSINFO_MAP_ENTRY(nsIInlineEventHandlers)                              \
   DOM_CLASSINFO_MAP_ENTRY(nsIDOMWindowPerformance)                             \
-  DOM_CLASSINFO_MAP_CONDITIONAL_ENTRY(nsIDOMStorageIndexedDB,                  \
-                                      _support_indexed_db)                     \
   DOM_CLASSINFO_MAP_CONDITIONAL_ENTRY(nsITouchEventReceiver,                   \
                                       nsDOMTouchEvent::PrefEnabled())
 #else // !MOZ_B2G
-#define DOM_CLASSINFO_WINDOW_MAP_ENTRIES(_support_indexed_db)                  \
+#define DOM_CLASSINFO_WINDOW_MAP_ENTRIES                                       \
   DOM_CLASSINFO_MAP_ENTRY(nsIDOMWindow)                                        \
   DOM_CLASSINFO_MAP_ENTRY(nsIDOMJSWindow)                                      \
   DOM_CLASSINFO_MAP_ENTRY(nsIDOMEventTarget)                                   \
   DOM_CLASSINFO_MAP_ENTRY(nsIInlineEventHandlers)                              \
   DOM_CLASSINFO_MAP_ENTRY(nsIDOMWindowPerformance)                             \
-  DOM_CLASSINFO_MAP_CONDITIONAL_ENTRY(nsIDOMStorageIndexedDB,                  \
-                                      _support_indexed_db)                     \
   DOM_CLASSINFO_MAP_CONDITIONAL_ENTRY(nsITouchEventReceiver,                   \
                                       nsDOMTouchEvent::PrefEnabled())
 #endif // MOZ_B2G
@@ -1114,7 +1095,7 @@ nsDOMClassInfo::Init()
   AutoSafeJSContext cx;
 
   DOM_CLASSINFO_MAP_BEGIN(Window, nsIDOMWindow)
-    DOM_CLASSINFO_WINDOW_MAP_ENTRIES(true)
+    DOM_CLASSINFO_WINDOW_MAP_ENTRIES
 #ifdef MOZ_WEBSPEECH
     DOM_CLASSINFO_MAP_ENTRY(nsISpeechSynthesisGetter)
 #endif
@@ -1225,7 +1206,7 @@ nsDOMClassInfo::Init()
 #endif
 
   DOM_CLASSINFO_MAP_BEGIN_NO_CLASS_IF(ChromeWindow, nsIDOMWindow)
-    DOM_CLASSINFO_WINDOW_MAP_ENTRIES(true)
+    DOM_CLASSINFO_WINDOW_MAP_ENTRIES
     DOM_CLASSINFO_MAP_ENTRY(nsIDOMChromeWindow)
 #ifdef MOZ_WEBSPEECH
     DOM_CLASSINFO_MAP_ENTRY(nsISpeechSynthesisGetter)
@@ -1309,7 +1290,7 @@ nsDOMClassInfo::Init()
   DOM_CLASSINFO_MAP_END
 
   DOM_CLASSINFO_MAP_BEGIN_NO_CLASS_IF(ModalContentWindow, nsIDOMWindow)
-    DOM_CLASSINFO_WINDOW_MAP_ENTRIES(true)
+    DOM_CLASSINFO_WINDOW_MAP_ENTRIES
     DOM_CLASSINFO_MAP_ENTRY(nsIDOMModalContentWindow)
 #ifdef MOZ_WEBSPEECH
     DOM_CLASSINFO_MAP_ENTRY(nsISpeechSynthesisGetter)
@@ -1356,11 +1337,6 @@ nsDOMClassInfo::Init()
 #ifdef MOZ_B2G_RIL
   DOM_CLASSINFO_MAP_BEGIN(MozMobileConnection, nsIDOMMozMobileConnection)
      DOM_CLASSINFO_MAP_ENTRY(nsIDOMMozMobileConnection)
-     DOM_CLASSINFO_MAP_ENTRY(nsIDOMEventTarget)
-  DOM_CLASSINFO_MAP_END
-
-  DOM_CLASSINFO_MAP_BEGIN(MozCellBroadcast, nsIDOMMozCellBroadcast)
-     DOM_CLASSINFO_MAP_ENTRY(nsIDOMMozCellBroadcast)
      DOM_CLASSINFO_MAP_ENTRY(nsIDOMEventTarget)
   DOM_CLASSINFO_MAP_END
 #endif // MOZ_B2G_RIL
@@ -1445,20 +1421,8 @@ nsDOMClassInfo::Init()
   DOM_CLASSINFO_MAP_END
 #endif
 
-  DOM_CLASSINFO_MAP_BEGIN(CameraControl, nsICameraControl)
-    DOM_CLASSINFO_MAP_ENTRY(nsICameraControl)
-  DOM_CLASSINFO_MAP_END
-
   DOM_CLASSINFO_MAP_BEGIN(CameraCapabilities, nsICameraCapabilities)
     DOM_CLASSINFO_MAP_ENTRY(nsICameraCapabilities)
-  DOM_CLASSINFO_MAP_END
-
-  DOM_CLASSINFO_MAP_BEGIN(OpenWindowEventDetail, nsIOpenWindowEventDetail)
-    DOM_CLASSINFO_MAP_ENTRY(nsIOpenWindowEventDetail)
-  DOM_CLASSINFO_MAP_END
-
-  DOM_CLASSINFO_MAP_BEGIN(AsyncScrollEventDetail, nsIAsyncScrollEventDetail)
-    DOM_CLASSINFO_MAP_ENTRY(nsIAsyncScrollEventDetail)
   DOM_CLASSINFO_MAP_END
 
   DOM_CLASSINFO_MAP_BEGIN(LockedFile, nsIDOMLockedFile)
@@ -1471,10 +1435,6 @@ nsDOMClassInfo::Init()
 
   DOM_CLASSINFO_MAP_BEGIN_NO_CLASS_IF(UserDataHandler, nsIDOMUserDataHandler)
     DOM_CLASSINFO_MAP_ENTRY(nsIDOMUserDataHandler)
-  DOM_CLASSINFO_MAP_END
-
-  DOM_CLASSINFO_MAP_BEGIN(GeoPositionError, nsIDOMGeoPositionError)
-    DOM_CLASSINFO_MAP_ENTRY(nsIDOMGeoPositionError)
   DOM_CLASSINFO_MAP_END
 
   DOM_CLASSINFO_MAP_BEGIN_NO_CLASS_IF(LoadStatus, nsIDOMLoadStatus)
@@ -2215,12 +2175,13 @@ nsWindowSH::PreCreate(nsISupports *nativeObj, JSContext *cx,
 NS_IMETHODIMP
 nsWindowSH::PostCreatePrototype(JSContext* aCx, JSObject* aProto)
 {
-  nsresult rv = nsDOMClassInfo::PostCreatePrototype(aCx, aProto);
+  JS::Rooted<JSObject*> proto(aCx, aProto);
+
+  nsresult rv = nsDOMClassInfo::PostCreatePrototype(aCx, proto);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // We should probably move this into the CreateInterfaceObjects for Window
   // once it is on WebIDL bindings.
-  JS::Rooted<JSObject*> proto(aCx, aProto);
   WindowNamedPropertiesHandler::Install(aCx, proto);
   return NS_OK;
 }
@@ -3558,7 +3519,6 @@ const InterfaceShimEntry kInterfaceShimMap[] =
   { "nsIDOMMutationEvent", "MutationEvent" },
   { "nsIDOMSimpleGestureEvent", "SimpleGestureEvent" },
   { "nsIDOMUIEvent", "UIEvent" },
-  { "nsIDOMGeoPositionError", "GeoPositionError" },
   { "nsIDOMHTMLMediaElement", "HTMLMediaElement" },
   { "nsIDOMMediaError", "MediaError" },
   { "nsIDOMLoadStatus", "LoadStatus" },
@@ -4280,7 +4240,7 @@ nsHTMLDocumentSH::GetDocumentAllNodeList(JSContext *cx,
     // We already have a node list in our reserved slot, use it.
     JS::Rooted<JSObject*> obj(cx, JSVAL_TO_OBJECT(collection));
     nsIHTMLCollection* htmlCollection;
-    rv = mozilla::dom::UnwrapObject<nsIHTMLCollection>(cx, obj, htmlCollection);
+    rv = UNWRAP_OBJECT(HTMLCollection, cx, obj, htmlCollection);
     if (NS_SUCCEEDED(rv)) {
       NS_ADDREF(*nodeList = static_cast<nsContentList*>(htmlCollection));
     }
