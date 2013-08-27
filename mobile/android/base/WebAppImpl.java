@@ -125,7 +125,7 @@ public class WebAppImpl extends GeckoApp {
         Display display = getWindowManager().getDefaultDisplay();
         gd.setGradientCenter(0.5f, 0.5f);
         gd.setGradientRadius(Math.max(display.getWidth()/2, display.getHeight()/2));
-        mSplashscreen.setBackgroundDrawable((Drawable)gd);
+        mSplashscreen.setBackgroundDrawable(gd);
 
         // look for a logo.png in the profile dir and show it. If we can't find a logo show nothing
         File profile = getProfile().getDir();
