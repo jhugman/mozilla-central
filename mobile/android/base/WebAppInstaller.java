@@ -122,13 +122,7 @@ public class WebAppInstaller extends GeckoApp {
 
     @Override
     protected String getDefaultProfileName() {
-        String profile;
-        if (GeckoThread.checkLaunchState(LaunchState.GeckoRunning)) {
-            profile = GeckoProfile.findDefaultProfile(this);
-        } else {
-            profile = "webapp-installer";
-        }
-        Logger.i("Installing using the " + profile + " profile");
+        String profile = "webapp-installer";
         return profile;
     }
 
