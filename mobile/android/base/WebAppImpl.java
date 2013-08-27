@@ -145,6 +145,8 @@ public class WebAppImpl extends GeckoApp {
     @Override
     protected String getDefaultProfileName() {
         String action = getIntent().getAction();
+        // We're not using implicit intent resolution for this, so the action is
+        // irrelevant.
         if (!action.startsWith(ACTION_WEBAPP_PREFIX)) {
             Log.e(LOGTAG, "WebApp launch, but intent action is " + action + "!");
             return null;
