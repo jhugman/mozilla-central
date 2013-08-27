@@ -98,6 +98,9 @@ public class WebAppInstaller extends GeckoApp {
                 Log.i(LOGTAG, "Webapp action is: " + "org.mozilla.gecko.WEBAPP" + index);
                 intent.putExtra("appAction", "org.mozilla.gecko.WEBAPP" + index);
                 intent.putExtra("appUri", origin);
+
+                intent.putExtra("fennecPackageName", getPackageName());
+                intent.putExtra("slotClassName", getPackageName() + ".WebApps$WebApp" + index);
             }
 
             if (getParent() == null) {
