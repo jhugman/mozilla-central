@@ -8,6 +8,7 @@ package org.mozilla.gecko;
 import java.net.MalformedURLException;
 
 import org.json.JSONObject;
+
 import org.mozilla.gecko.GeckoThread.LaunchState;
 import org.mozilla.gecko.webapps.Logger;
 
