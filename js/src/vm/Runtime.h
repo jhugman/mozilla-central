@@ -663,6 +663,8 @@ typedef Vector<JS::Zone *, 1, SystemAllocPolicy> ZoneVector;
 
 class AutoLockForExclusiveAccess;
 class AutoPauseWorkersForGC;
+struct SelfHostedClass;
+class ThreadDataIter;
 
 } // namespace js
 
@@ -753,6 +755,13 @@ struct JSRuntime : public JS::shadow::Runtime,
     }
 
 #ifdef JS_THREADSAFE
+
+    js::SourceCompressorThread sourceCompressorThread;
+
+# ifdef JS_ION
+    js::WorkerThreadState *workerThreadState;
+# define JS_WORKER_THREADS
+
   private:
     /*
      * Lock taken when using per-runtime or per-zone data that could otherwise
@@ -772,15 +781,17 @@ struct JSRuntime : public JS::shadow::Runtime,
 
     friend class js::AutoLockForExclusiveAccess;
     friend class js::AutoPauseWorkersForGC;
+    friend class js::ThreadDataIter;
 
   public:
     void setUsedByExclusiveThread(JS::Zone *zone);
     void clearUsedByExclusiveThread(JS::Zone *zone);
 
+# endif // JS_ION
 #endif // JS_THREADSAFE
 
     bool currentThreadHasExclusiveAccess() {
-#if defined(JS_THREADSAFE) && defined(DEBUG)
+#if defined(JS_WORKER_THREADS) && defined(DEBUG)
         return (!numExclusiveThreads && mainThreadHasExclusiveAccess) ||
             exclusiveThreadsPaused ||
             exclusiveAccessOwner == PR_GetCurrentThread();
@@ -790,7 +801,7 @@ struct JSRuntime : public JS::shadow::Runtime,
     }
 
     bool exclusiveThreadsPresent() const {
-#ifdef JS_THREADSAFE
+#ifdef JS_WORKER_THREADS
         return numExclusiveThreads > 0;
 #else
         return false;
@@ -843,6 +854,7 @@ struct JSRuntime : public JS::shadow::Runtime,
     js::ion::IonRuntime *ionRuntime_;
 
     JSObject *selfHostingGlobal_;
+    js::SelfHostedClass *selfHostedClasses_;
 
     /* Space for interpreter frames. */
     js::InterpreterStack interpreterStack_;
@@ -888,6 +900,10 @@ struct JSRuntime : public JS::shadow::Runtime,
     bool isSelfHostingGlobal(js::HandleObject global) {
         return global == selfHostingGlobal_;
     }
+    js::SelfHostedClass *selfHostedClasses() {
+        return selfHostedClasses_;
+    }
+    void addSelfHostedClass(js::SelfHostedClass *shClass);
     bool cloneSelfHostedFunctionScript(JSContext *cx, js::Handle<js::PropertyName*> name,
                                        js::Handle<JSFunction*> targetFun);
     bool cloneSelfHostedValue(JSContext *cx, js::Handle<js::PropertyName*> name,
@@ -1314,14 +1330,6 @@ struct JSRuntime : public JS::shadow::Runtime,
         return signalHandlersInstalled_;
     }
 
-#ifdef JS_THREADSAFE
-# ifdef JS_ION
-    js::WorkerThreadState *workerThreadState;
-# endif
-
-    js::SourceCompressorThread sourceCompressorThread;
-#endif
-
   private:
     js::FreeOp          defaultFreeOp_;
 
@@ -1573,6 +1581,10 @@ struct JSRuntime : public JS::shadow::Runtime,
     JSUseHelperThreads useHelperThreads_;
     int32_t requestedHelperThreadCount;
 
+    // Settings for how helper threads can be used.
+    bool useHelperThreadsForIonCompilation_;
+    bool useHelperThreadsForParsing_;
+
   public:
 
     bool useHelperThreads() const {
@@ -1596,6 +1608,20 @@ struct JSRuntime : public JS::shadow::Runtime,
 #else
         return 0;
 #endif
+    }
+
+    void setCanUseHelperThreadsForIonCompilation(bool value) {
+        useHelperThreadsForIonCompilation_ = value;
+    }
+    bool useHelperThreadsForIonCompilation() const {
+        return useHelperThreadsForIonCompilation_;
+    }
+
+    void setCanUseHelperThreadsForParsing(bool value) {
+        useHelperThreadsForParsing_ = value;
+    }
+    bool useHelperThreadsForParsing() const {
+        return useHelperThreadsForParsing_;
     }
 
 #ifdef DEBUG

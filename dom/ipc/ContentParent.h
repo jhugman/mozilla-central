@@ -55,6 +55,7 @@ class PCompositorParent;
 
 namespace dom {
 
+class Element;
 class TabParent;
 class PStorageParent;
 class ClonedMessageData;
@@ -178,6 +179,8 @@ public:
 protected:
     void OnChannelConnected(int32_t pid) MOZ_OVERRIDE;
     virtual void ActorDestroy(ActorDestroyReason why);
+
+    bool ShouldContinueFromReplyTimeout() MOZ_OVERRIDE;
 
 private:
     static nsDataHashtable<nsStringHashKey, ContentParent*> *sAppContentParents;

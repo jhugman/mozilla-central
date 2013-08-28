@@ -377,7 +377,7 @@ class JSObject : public js::ObjectImpl
     inline void prepareSlotRangeForOverwrite(size_t start, size_t end);
     inline void prepareElementRangeForOverwrite(size_t start, size_t end);
 
-    void rollbackProperties(JSContext *cx, uint32_t slotSpan);
+    void rollbackProperties(js::ExclusiveContext *cx, uint32_t slotSpan);
 
     inline void nativeSetSlot(uint32_t slot, const js::Value &value);
     static inline void nativeSetSlotWithType(js::ExclusiveContext *cx,
@@ -1112,7 +1112,7 @@ extern const char js_hasOwnProperty_str[];
 extern const char js_isPrototypeOf_str[];
 extern const char js_propertyIsEnumerable_str[];
 
-#ifdef OLD_GETTER_SETTER_METHODS
+#ifdef JS_OLD_GETTER_SETTER_METHODS
 extern const char js_defineGetter_str[];
 extern const char js_defineSetter_str[];
 extern const char js_lookupGetter_str[];

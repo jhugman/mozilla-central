@@ -1017,7 +1017,9 @@ js::math_acosh(JSContext *cx, unsigned argc, Value *vp)
 }
 
 #if !HAVE_ASINH
-double asinh(double x)
+// Bug 899712 - gcc incorrectly rewrites -asinh(-x) to asinh(x) when overriding
+// asinh.
+static double my_asinh(double x)
 {
     const double SQUARE_ROOT_EPSILON = sqrt(std::numeric_limits<double>::epsilon());
     const double FOURTH_ROOT_EPSILON = sqrt(SQUARE_ROOT_EPSILON);
@@ -1032,7 +1034,7 @@ double asinh(double x)
         else
             return log(x + sqrt(x * x + 1));
     } else if (x <= -FOURTH_ROOT_EPSILON) {
-        return -asinh(-x);
+        return -my_asinh(-x);
     } else {
         // http://functions.wolfram.com/ElementaryFunctions/ArcSinh/06/01/03/01/0001/
         // approximation by taylor series in x at 0 up to order 2
@@ -1052,7 +1054,11 @@ double asinh(double x)
 double
 js::math_asinh_impl(MathCache *cache, double x)
 {
+#ifdef HAVE_ASINH
     return cache->lookup(asinh, x);
+#else
+    return cache->lookup(my_asinh, x);
+#endif
 }
 
 bool
@@ -1101,6 +1107,8 @@ js::math_atanh(JSContext *cx, unsigned argc, Value *vp)
     return math_function<math_atanh_impl>(cx, argc, vp);
 }
 
+// Math.hypot is disabled pending the resolution of spec issues (bug 896264).
+#if 0
 #if !HAVE_HYPOT
 double hypot(double x, double y)
 {
@@ -1166,6 +1174,7 @@ js::math_hypot(JSContext *cx, unsigned argc, Value *vp)
     args.rval().setNumber(math_hypot_impl(math_hypot_impl(x, y), z));
     return true;
 }
+#endif
 
 #if !HAVE_TRUNC
 double trunc(double x)
@@ -1274,7 +1283,10 @@ static const JSFunctionSpec math_static_methods[] = {
     JS_FN("acosh",          math_acosh,           1, 0),
     JS_FN("asinh",          math_asinh,           1, 0),
     JS_FN("atanh",          math_atanh,           1, 0),
+// Math.hypot is disabled pending the resolution of spec issues (bug 896264).
+#if 0
     JS_FN("hypot",          math_hypot,           2, 0),
+#endif
     JS_FN("trunc",          math_trunc,           1, 0),
     JS_FN("sign",           math_sign,            1, 0),
     JS_FN("cbrt",           math_cbrt,            1, 0),

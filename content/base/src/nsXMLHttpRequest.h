@@ -13,36 +13,28 @@
 #include "nsString.h"
 #include "nsIURI.h"
 #include "nsIHttpChannel.h"
-#include "nsIJARChannel.h"
 #include "nsIDocument.h"
+#include "nsIContent.h"
 #include "nsIStreamListener.h"
 #include "nsWeakReference.h"
 #include "jsapi.h"
-#include "nsIScriptContext.h"
 #include "nsIChannelEventSink.h"
 #include "nsIAsyncVerifyRedirectCallback.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIHttpHeaderVisitor.h"
 #include "nsIProgressEventSink.h"
-#include "nsCOMArray.h"
 #include "nsJSUtils.h"
 #include "nsTArray.h"
 #include "nsITimer.h"
-#include "nsIDOMProgressEvent.h"
 #include "nsDOMEventTargetHelper.h"
-#include "nsDOMFile.h"
-#include "nsDOMBlobBuilder.h"
 #include "nsIPrincipal.h"
 #include "nsIScriptObjectPrincipal.h"
 #include "nsISizeOfEventTarget.h"
 
 #include "mozilla/Assertions.h"
 #include "mozilla/MemoryReporting.h"
-#include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/TypedArray.h"
 #include "mozilla/dom/XMLHttpRequestBinding.h"
-#include "mozilla/dom/XMLHttpRequestUploadBinding.h"
-#include "mozilla/dom/EventHandlerBinding.h"
 
 #ifdef Status
 /* Xlib headers insist on this for some reason... Nuke it because
@@ -50,10 +42,13 @@
 #undef Status
 #endif
 
-class nsILoadGroup;
 class AsyncVerifyRedirectCallbackForwarder;
-class nsIUnicodeDecoder;
+class BlobSet;
+class nsDOMFile;
 class nsFormData;
+class nsIJARChannel;
+class nsILoadGroup;
+class nsIUnicodeDecoder;
 
 class nsXHREventTarget : public nsDOMEventTargetHelper,
                          public nsIXMLHttpRequestEventTarget
@@ -82,25 +77,22 @@ public:
   virtual void DisconnectFromOwner();
 };
 
-class nsXMLHttpRequestUpload : public nsXHREventTarget,
-                               public nsIXMLHttpRequestUpload
+class nsXMLHttpRequestUpload MOZ_FINAL : public nsXHREventTarget,
+                                         public nsIXMLHttpRequestUpload
 {
 public:
   nsXMLHttpRequestUpload(nsDOMEventTargetHelper* aOwner)
   {
     BindToOwner(aOwner);
     SetIsDOMBinding();
-  }                                         
+  }
   NS_DECL_ISUPPORTS_INHERITED
   NS_FORWARD_NSIXMLHTTPREQUESTEVENTTARGET(nsXHREventTarget::)
   NS_REALLY_FORWARD_NSIDOMEVENTTARGET(nsXHREventTarget)
   NS_DECL_NSIXMLHTTPREQUESTUPLOAD
 
   virtual JSObject* WrapObject(JSContext *cx,
-                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE
-  {
-    return mozilla::dom::XMLHttpRequestUploadBinding::Wrap(cx, scope, this);
-  }
+                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
   nsISupports* GetParentObject()
   {
     return GetOwner();
@@ -151,9 +143,9 @@ public:
               const mozilla::dom::MozXMLHttpRequestParameters& aParams,
               ErrorResult& aRv)
   {
-    nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(aGlobal.Get());
+    nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(aGlobal.GetAsSupports());
     nsCOMPtr<nsIScriptObjectPrincipal> principal =
-      do_QueryInterface(aGlobal.Get());
+      do_QueryInterface(aGlobal.GetAsSupports());
     if (!global || ! principal) {
       aRv.Throw(NS_ERROR_FAILURE);
       return nullptr;

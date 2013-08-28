@@ -82,6 +82,42 @@ namespace mozilla {
 
 namespace mozilla {
 namespace gl {
+
+/** GLFeature::Enum
+ * We don't use typed enum to keep the implicit integer conversion.
+ * This enum should be sorted by name.
+ */
+namespace GLFeature {
+    enum Enum {
+        bind_buffer_offset,
+        blend_minmax,
+        depth_texture,
+        draw_buffers,
+        draw_instanced,
+        element_index_uint,
+        ES2_compatibility,
+        ES3_compatibility,
+        framebuffer_blit,
+        framebuffer_multisample,
+        framebuffer_object,
+        get_query_object_iv,
+        instanced_arrays,
+        occlusion_query,
+        occlusion_query_boolean,
+        occlusion_query2,
+        packed_depth_stencil,
+        query_objects,
+        robustness,
+        standard_derivatives,
+        texture_float,
+        texture_float_linear,
+        texture_non_power_of_two,
+        transform_feedback,
+        vertex_array_object,
+        EnumMax
+    };
+}
+
 typedef uintptr_t SharedTextureHandle;
 
 MOZ_BEGIN_ENUM_CLASS(ContextProfile, uint8_t)
@@ -463,58 +499,32 @@ protected:
 
 
 // -----------------------------------------------------------------------------
-// XXX_* Extension group queries
+// Feature queries
 /*
- * This mecahnism introduces a new way to check if an extension is supported,
- * regardless if it is an ARB, EXT, OES, etc.
+ * This mecahnism introduces a new way to check if a OpenGL feature is
+ * supported, regardless of whether it is supported by an extension or natively
+ * by the context version/profile
  */
 public:
+    bool IsSupported(GLFeature::Enum feature) const {
+        return mAvailableFeatures[feature];
+    }
 
-    /**
-     * This enum should be sorted by name.
-     */
-    enum GLExtensionGroup {
-        XXX_depth_texture,
-        XXX_draw_buffers,
-        XXX_draw_instanced,
-        XXX_element_index_uint,
-        XXX_ES2_compatibility,
-        XXX_ES3_compatibility,
-        XXX_framebuffer_blit,
-        XXX_framebuffer_multisample,
-        XXX_framebuffer_object,
-        XXX_get_query_object_iv,
-        XXX_instanced_arrays,
-        XXX_occlusion_query,
-        XXX_occlusion_query_boolean,
-        XXX_occlusion_query2,
-        XXX_packed_depth_stencil,
-        XXX_query_objects,
-        XXX_robustness,
-        XXX_standard_derivatives,
-        XXX_texture_float,
-        XXX_texture_float_linear,
-        XXX_texture_non_power_of_two,
-        XXX_transform_feedback,
-        XXX_vertex_array_object,
-        ExtensionGroup_Max
-    };
-
-    bool IsExtensionSupported(GLExtensionGroup extensionGroup) const;
-
-    static const char* GetExtensionGroupName(GLExtensionGroup extensionGroup);
+    static const char* GetFeatureName(GLFeature::Enum feature);
 
 
 private:
+    ExtensionBitset<GLFeature::EnumMax> mAvailableFeatures;
 
     /**
-     * Mark all extensions of this group as unsupported.
-     *
-     * Returns false if marking this extension group as unsupported contradicts
-     * the OpenGL version and profile. Returns true otherwise.
+     * Init features regarding OpenGL extension and context version and profile
      */
-    bool MarkExtensionGroupUnsupported(GLExtensionGroup extensionGroup);
+    void InitFeatures();
 
+    /**
+     * Mark the feature and associated extensions as unsupported
+     */
+    void MarkUnsupported(GLFeature::Enum feature);
 
 // -----------------------------------------------------------------------------
 // Robustness handling
@@ -2035,6 +2045,18 @@ public:
 
 
 // -----------------------------------------------------------------------------
+// Package XXX_bind_buffer_offset
+public:
+    void fBindBufferOffset(GLenum target, GLuint index, GLuint buffer, GLintptr offset)
+    {
+        BEFORE_GL_CALL;
+        ASSERT_SYMBOL_PRESENT(fBindBufferOffset);
+        mSymbols.fBindBufferOffset(target, index, buffer, offset);
+        AFTER_GL_CALL;
+    }
+
+
+// -----------------------------------------------------------------------------
 // Package XXX_draw_buffers
 public:
     void fDrawBuffers(GLsizei n, const GLenum* bufs) {
@@ -2183,6 +2205,66 @@ public:
         BEFORE_GL_CALL;
         ASSERT_SYMBOL_PRESENT(fGetQueryObjectiv);
         mSymbols.fGetQueryObjectiv(id, pname, params);
+        AFTER_GL_CALL;
+    }
+
+
+// -----------------------------------------------------------------------------
+// Package XXX_transform_feedback
+public:
+    void fBindBufferBase(GLenum target, GLuint index, GLuint buffer)
+    {
+        BEFORE_GL_CALL;
+        ASSERT_SYMBOL_PRESENT(fBindBufferBase);
+        mSymbols.fBindBufferBase(target, index, buffer);
+        AFTER_GL_CALL;
+    }
+
+    void fBindBufferRange(GLenum target, GLuint index, GLuint buffer, GLintptr offset, GLsizeiptr size)
+    {
+        BEFORE_GL_CALL;
+        ASSERT_SYMBOL_PRESENT(fBindBufferRange);
+        mSymbols.fBindBufferRange(target, index, buffer, offset, size);
+        AFTER_GL_CALL;
+    }
+
+    void fBeginTransformFeedback(GLenum primitiveMode)
+    {
+        BEFORE_GL_CALL;
+        ASSERT_SYMBOL_PRESENT(fBeginTransformFeedback);
+        mSymbols.fBeginTransformFeedback(primitiveMode);
+        AFTER_GL_CALL;
+    }
+
+    void fEndTransformFeedback()
+    {
+        BEFORE_GL_CALL;
+        ASSERT_SYMBOL_PRESENT(fEndTransformFeedback);
+        mSymbols.fEndTransformFeedback();
+        AFTER_GL_CALL;
+    }
+
+    void fTransformFeedbackVaryings(GLuint program, GLsizei count, const GLchar* const* varyings, GLenum bufferMode)
+    {
+        BEFORE_GL_CALL;
+        ASSERT_SYMBOL_PRESENT(fTransformFeedbackVaryings);
+        mSymbols.fTransformFeedbackVaryings(program, count, varyings, bufferMode);
+        AFTER_GL_CALL;
+    }
+
+    void fGetTransformFeedbackVarying(GLuint program, GLuint index, GLsizei bufSize, GLsizei* length, GLsizei* size, GLenum* type, GLchar* name)
+    {
+        BEFORE_GL_CALL;
+        ASSERT_SYMBOL_PRESENT(fGetTransformFeedbackVarying);
+        mSymbols.fGetTransformFeedbackVarying(program, index, bufSize, length, size, type, name);
+        AFTER_GL_CALL;
+    }
+
+    void fGetIntegeri_v(GLenum param, GLuint index, GLint* values)
+    {
+        BEFORE_GL_CALL;
+        ASSERT_SYMBOL_PRESENT(fGetIntegeri_v);
+        mSymbols.fGetIntegeri_v(param, index, values);
         AFTER_GL_CALL;
     }
 
@@ -2614,7 +2696,7 @@ public:
         if (mScreen)
             return mScreen->GetReadFB();
 
-        GLenum bindEnum = IsExtensionSupported(XXX_framebuffer_blit)
+        GLenum bindEnum = IsSupported(GLFeature::framebuffer_blit)
                             ? LOCAL_GL_READ_FRAMEBUFFER_BINDING_EXT
                             : LOCAL_GL_FRAMEBUFFER_BINDING;
 

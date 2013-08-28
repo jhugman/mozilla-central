@@ -593,45 +593,6 @@ CodeGenerator::visitTypeObjectDispatch(LTypeObjectDispatch *lir)
     return true;
 }
 
-bool
-CodeGenerator::visitPolyInlineDispatch(LPolyInlineDispatch *lir)
-{
-    MPolyInlineDispatch *mir = lir->mir();
-    Register inputReg = ToRegister(lir->input());
-
-    InlinePropertyTable *inlinePropTable = mir->propTable();
-    if (inlinePropTable) {
-        // Temporary register is only assigned in the TypeObject case.
-        Register tempReg = ToRegister(lir->temp());
-        masm.loadPtr(Address(inputReg, JSObject::offsetOfType()), tempReg);
-
-        // Detect functions by TypeObject.
-        for (size_t i = 0; i < inlinePropTable->numEntries(); i++) {
-            types::TypeObject *typeObj = inlinePropTable->getTypeObject(i);
-            JSFunction *func = inlinePropTable->getFunction(i);
-            LBlock *target = mir->getFunctionBlock(func)->lir();
-            masm.branchPtr(Assembler::Equal, tempReg, ImmGCPtr(typeObj), target->label());
-        }
-
-        // Unknown function: jump to fallback block.
-        LBlock *fallback = mir->fallbackPrepBlock()->lir();
-        masm.jump(fallback->label());
-        return true;
-    }
-
-    // Compare function pointers directly.
-    for (size_t i = 0; i < mir->numCallees() - 1; i++) {
-        JSFunction *func = mir->getFunction(i);
-        LBlock *target = mir->getFunctionBlock(i)->lir();
-        masm.branchPtr(Assembler::Equal, inputReg, ImmGCPtr(func), target->label());
-    }
-
-    // There's no fallback case, so a final guard isn't necessary.
-    LBlock *target = mir->getFunctionBlock(mir->numCallees() - 1)->lir();
-    masm.jump(target->label());
-    return true;
-}
-
 typedef JSFlatString *(*IntToStringFn)(ThreadSafeContext *, int);
 typedef ParallelResult (*IntToStringParFn)(ForkJoinSlice *, int, MutableHandleString);
 static const VMFunctionsModal IntToStringInfo = VMFunctionsModal(
@@ -6171,7 +6132,7 @@ CodeGenerator::visitBindNameIC(OutOfLineUpdateCache *ool, BindNameIC *ic)
 }
 
 typedef bool (*SetPropertyFn)(JSContext *, HandleObject,
-                              HandlePropertyName, const HandleValue, bool, int);
+                              HandlePropertyName, const HandleValue, bool, jsbytecode *);
 static const VMFunction SetPropertyInfo =
     FunctionInfo<SetPropertyFn>(SetProperty);
 
@@ -6181,9 +6142,8 @@ CodeGenerator::visitCallSetProperty(LCallSetProperty *ins)
     ConstantOrRegister value = TypedOrValueRegister(ToValue(ins, LCallSetProperty::Value));
 
     const Register objReg = ToRegister(ins->getOperand(0));
-    JSOp op = JSOp(*ins->mir()->resumePoint()->pc());
 
-    pushArg(Imm32(op));
+    pushArg(ImmWord(ins->mir()->resumePoint()->pc()));
     pushArg(Imm32(ins->mir()->strict()));
 
     pushArg(value);
@@ -6217,11 +6177,8 @@ CodeGenerator::visitSetPropertyCacheV(LSetPropertyCacheV *ins)
     RegisterSet liveRegs = ins->safepoint()->liveRegs();
     Register objReg = ToRegister(ins->getOperand(0));
     ConstantOrRegister value = TypedOrValueRegister(ToValue(ins, LSetPropertyCacheV::Value));
-    jsbytecode *pc = ins->mir()->resumePoint()->pc();
-    bool isSetName = JSOp(*pc) == JSOP_SETNAME || JSOp(*pc) == JSOP_SETGNAME;
 
-    SetPropertyIC cache(liveRegs, objReg, ins->mir()->name(), value,
-                        isSetName, ins->mir()->strict());
+    SetPropertyIC cache(liveRegs, objReg, ins->mir()->name(), value, ins->mir()->strict());
     return addCache(ins, allocateCache(cache));
 }
 
@@ -6231,16 +6188,13 @@ CodeGenerator::visitSetPropertyCacheT(LSetPropertyCacheT *ins)
     RegisterSet liveRegs = ins->safepoint()->liveRegs();
     Register objReg = ToRegister(ins->getOperand(0));
     ConstantOrRegister value;
-    jsbytecode *pc = ins->mir()->resumePoint()->pc();
-    bool isSetName = JSOp(*pc) == JSOP_SETNAME || JSOp(*pc) == JSOP_SETGNAME;
 
     if (ins->getOperand(1)->isConstant())
         value = ConstantOrRegister(*ins->getOperand(1)->toConstant());
     else
         value = TypedOrValueRegister(ins->valueType(), ToAnyRegister(ins->getOperand(1)));
 
-    SetPropertyIC cache(liveRegs, objReg, ins->mir()->name(), value,
-                        isSetName, ins->mir()->strict());
+    SetPropertyIC cache(liveRegs, objReg, ins->mir()->name(), value, ins->mir()->strict());
     return addCache(ins, allocateCache(cache));
 }
 
@@ -6479,6 +6433,8 @@ CodeGenerator::visitLoadElementHole(LLoadElementHole *lir)
     Register initLength = ToRegister(lir->initLength());
     const ValueOperand out = ToOutValue(lir);
 
+    const MLoadElementHole *mir = lir->mir();
+
     // If the index is out of bounds, load |undefined|. Otherwise, load the
     // value.
     Label undefined, done;
@@ -6498,6 +6454,19 @@ CodeGenerator::visitLoadElementHole(LLoadElementHole *lir)
         masm.jump(&done);
 
     masm.bind(&undefined);
+
+    if (mir->needsNegativeIntCheck()) {
+        if (lir->index()->isConstant()) {
+            if (ToInt32(lir->index()) < 0 && !bailout(lir->snapshot()))
+                return false;
+        } else {
+            Label negative;
+            masm.branch32(Assembler::LessThan, ToRegister(lir->index()), Imm32(0), &negative);
+            if (!bailoutFrom(&negative, lir->snapshot()))
+                return false;
+        }
+    }
+
     masm.moveValue(UndefinedValue(), out);
     masm.bind(&done);
     return true;
@@ -7305,11 +7274,8 @@ CodeGenerator::visitAsmJSCheckOverRecursed(LAsmJSCheckOverRecursed *lir)
 }
 
 bool
-CodeGenerator::visitRangeAssert(LRangeAssert *ins)
+CodeGenerator::emitAssertRangeI(Range *r, Register input)
 {
-     Register input = ToRegister(ins->input());
-     Range *r = ins->range();
-
     // Check the lower bound.
     if (r->lower() != INT32_MIN) {
         Label success;
@@ -7334,12 +7300,8 @@ CodeGenerator::visitRangeAssert(LRangeAssert *ins)
 }
 
 bool
-CodeGenerator::visitDoubleRangeAssert(LDoubleRangeAssert *ins)
+CodeGenerator::emitAssertRangeD(Range *r, FloatRegister input, FloatRegister temp)
 {
-     FloatRegister input = ToFloatRegister(ins->input());
-     FloatRegister temp = ToFloatRegister(ins->temp());
-     Range *r = ins->range();
-
     // Check the lower bound.
     if (!r->isLowerInfinite()) {
         Label success;
@@ -7381,6 +7343,59 @@ CodeGenerator::visitDoubleRangeAssert(LDoubleRangeAssert *ins)
         masm.bind(&exponentHiOk);
     }
 
+    return true;
+}
+
+bool
+CodeGenerator::visitAssertRangeI(LAssertRangeI *ins)
+{
+    Register input = ToRegister(ins->input());
+    Range *r = ins->range();
+
+    return emitAssertRangeI(r, input);
+}
+
+bool
+CodeGenerator::visitAssertRangeD(LAssertRangeD *ins)
+{
+    FloatRegister input = ToFloatRegister(ins->input());
+    FloatRegister temp = ToFloatRegister(ins->temp());
+    Range *r = ins->range();
+
+    return emitAssertRangeD(r, input, temp);
+}
+
+bool
+CodeGenerator::visitAssertRangeV(LAssertRangeV *ins)
+{
+    Range *r = ins->range();
+    const ValueOperand value = ToValue(ins, LAssertRangeV::Input);
+    Register tag = masm.splitTagForTest(value);
+    Label done;
+
+    {
+        Label isNotInt32;
+        masm.branchTestInt32(Assembler::NotEqual, tag, &isNotInt32);
+        Register unboxInt32 = ToTempUnboxRegister(ins->temp());
+        Register input = masm.extractInt32(value, unboxInt32);
+        emitAssertRangeI(r, input);
+        masm.jump(&done);
+        masm.bind(&isNotInt32);
+    }
+
+    {
+        Label isNotDouble;
+        masm.branchTestDouble(Assembler::NotEqual, tag, &isNotDouble);
+        FloatRegister input = ToFloatRegister(ins->floatTemp1());
+        FloatRegister temp = ToFloatRegister(ins->floatTemp2());
+        masm.unboxDouble(value, input);
+        emitAssertRangeD(r, input, temp);
+        masm.jump(&done);
+        masm.bind(&isNotDouble);
+    }
+
+    masm.breakpoint();
+    masm.bind(&done);
     return true;
 }
 

@@ -69,6 +69,7 @@ XPCOMUtils.defineLazyServiceGetter(this, "uuidgen",
   ["MasterPassword", "chrome://browser/content/MasterPassword.js"],
   ["PluginHelper", "chrome://browser/content/PluginHelper.js"],
   ["OfflineApps", "chrome://browser/content/OfflineApps.js"],
+  ["Linkifier", "chrome://browser/content/Linkify.js"],
 ].forEach(function (aScript) {
   let [name, script] = aScript;
   XPCOMUtils.defineLazyGetter(window, name, function() {
@@ -242,6 +243,7 @@ var BrowserApp = {
   _tabs: [],
   _selectedTab: null,
   _prefObservers: [],
+  isGuest: false,
 
   get isTablet() {
     let sysInfo = Cc["@mozilla.org/system-info;1"].getService(Ci.nsIPropertyBag2);
@@ -335,9 +337,6 @@ var BrowserApp = {
     ExternalApps.init();
     Distribution.init();
     Tabs.init();
-#ifdef MOZ_TELEMETRY_REPORTING
-    Telemetry.init();
-#endif
 #ifdef ACCESSIBILITY
     AccessFu.attach(window);
 #endif
@@ -356,6 +355,8 @@ var BrowserApp = {
         gScreenHeight = window.arguments[2];
       if (window.arguments[3])
         pinned = window.arguments[3];
+      if (window.arguments[4])
+        this.isGuest = window.arguments[4];
     }
 
     let status = this.startupStatus();
@@ -453,7 +454,7 @@ var BrowserApp = {
       });
 
     NativeWindow.contextmenus.add(Strings.browser.GetStringFromName("contextmenu.shareLink"),
-      NativeWindow.contextmenus.linkShareableContext,
+      NativeWindow.contextmenus._disableInGuest(NativeWindow.contextmenus.linkShareableContext),
       function(aTarget) {
         let url = NativeWindow.contextmenus._getLinkURL(aTarget);
         let title = aTarget.textContent || aTarget.title;
@@ -461,7 +462,7 @@ var BrowserApp = {
       });
 
     NativeWindow.contextmenus.add(Strings.browser.GetStringFromName("contextmenu.shareEmailAddress"),
-      NativeWindow.contextmenus.emailLinkContext,
+      NativeWindow.contextmenus._disableInGuest(NativeWindow.contextmenus.emailLinkContext),
       function(aTarget) {
         let url = NativeWindow.contextmenus._getLinkURL(aTarget);
         let emailAddr = NativeWindow.contextmenus._stripScheme(url);
@@ -470,7 +471,7 @@ var BrowserApp = {
       });
 
     NativeWindow.contextmenus.add(Strings.browser.GetStringFromName("contextmenu.sharePhoneNumber"),
-      NativeWindow.contextmenus.phoneNumberLinkContext,
+      NativeWindow.contextmenus._disableInGuest(NativeWindow.contextmenus.phoneNumberLinkContext),
       function(aTarget) {
         let url = NativeWindow.contextmenus._getLinkURL(aTarget);
         let phoneNumber = NativeWindow.contextmenus._stripScheme(url);
@@ -479,7 +480,7 @@ var BrowserApp = {
       });
 
     NativeWindow.contextmenus.add(Strings.browser.GetStringFromName("contextmenu.addToContacts"),
-      NativeWindow.contextmenus.emailLinkContext,
+      NativeWindow.contextmenus._disableInGuest(NativeWindow.contextmenus.emailLinkContext),
       function(aTarget) {
         let url = NativeWindow.contextmenus._getLinkURL(aTarget);
         sendMessageToJava({
@@ -489,7 +490,7 @@ var BrowserApp = {
       });
 
     NativeWindow.contextmenus.add(Strings.browser.GetStringFromName("contextmenu.addToContacts"),
-      NativeWindow.contextmenus.phoneNumberLinkContext,
+      NativeWindow.contextmenus._disableInGuest(NativeWindow.contextmenus.phoneNumberLinkContext),
       function(aTarget) {
         let url = NativeWindow.contextmenus._getLinkURL(aTarget);
         sendMessageToJava({
@@ -529,7 +530,7 @@ var BrowserApp = {
       });
 
     NativeWindow.contextmenus.add(Strings.browser.GetStringFromName("contextmenu.shareMedia"),
-      NativeWindow.contextmenus.SelectorContext("video"),
+      NativeWindow.contextmenus._disableInGuest(NativeWindow.contextmenus.SelectorContext("video")),
       function(aTarget) {
         let url = (aTarget.currentSrc || aTarget.src);
         let title = aTarget.textContent || aTarget.title;
@@ -562,7 +563,7 @@ var BrowserApp = {
       });
 
     NativeWindow.contextmenus.add(Strings.browser.GetStringFromName("contextmenu.shareImage"),
-      NativeWindow.contextmenus.imageSaveableContext,
+      NativeWindow.contextmenus._disableInGuest(NativeWindow.contextmenus.imageSaveableContext),
       function(aTarget) {
         let doc = aTarget.ownerDocument;
         let imageCache = Cc["@mozilla.org/image/tools;1"].getService(Ci.imgITools)
@@ -591,7 +592,7 @@ var BrowserApp = {
       });
 
     NativeWindow.contextmenus.add(Strings.browser.GetStringFromName("contextmenu.setImageAs"),
-      NativeWindow.contextmenus.imageSaveableContext,
+      NativeWindow.contextmenus._disableInGuest(NativeWindow.contextmenus.imageSaveableContext),
       function(aTarget) {
         let src = aTarget.src;
         sendMessageToJava({
@@ -656,9 +657,6 @@ var BrowserApp = {
     ExternalApps.uninit();
     Distribution.uninit();
     Tabs.uninit();
-#ifdef MOZ_TELEMETRY_REPORTING
-    Telemetry.uninit();
-#endif
   },
 
   // This function returns false during periods where the browser displayed document is
@@ -778,18 +776,16 @@ var BrowserApp = {
     let referrerURI = "referrerURI" in aParams ? aParams.referrerURI : null;
     let charset = "charset" in aParams ? aParams.charset : null;
 
-    if ("showProgress" in aParams || "userSearch" in aParams) {
-      let tab = this.getTabForBrowser(aBrowser);
-      if (tab) {
-        if ("showProgress" in aParams) tab.showProgress = aParams.showProgress;
-        if ("userSearch" in aParams) tab.userSearch = aParams.userSearch;
-      }
+    let tab = this.getTabForBrowser(aBrowser);
+    if (tab) {
+      if (!tab.aboutHomePage) tab.aboutHomePage = ("aboutHomePage" in aParams) ? aParams.aboutHomePage : "";
+      if ("showProgress" in aParams) tab.showProgress = aParams.showProgress;
+      if ("userSearch" in aParams) tab.userSearch = aParams.userSearch;
     }
 
     try {
       aBrowser.loadURIWithFlags(aURI, flags, referrerURI, charset, postData);
     } catch(e) {
-      let tab = this.getTabForBrowser(aBrowser);
       if (tab) {
         let message = {
           type: "Content:LoadError",
@@ -1389,6 +1385,7 @@ var BrowserApp = {
           flags: flags,
           tabID: data.tabID,
           isPrivate: (data.isPrivate === true),
+          aboutHomePage: ("aboutHomePage" in data) ? data.aboutHomePage : "",
           pinned: (data.pinned === true),
           delayLoad: (delayLoad === true),
           desktopMode: (data.desktopMode === true)
@@ -1628,7 +1625,8 @@ var NativeWindow = {
         type: "PageActions:Add",
         id: id,
         title: aOptions.title,
-        icon: resolveGeckoURI(aOptions.icon)
+        icon: resolveGeckoURI(aOptions.icon),
+        important: "important" in aOptions ? aOptions.important : false
       });
       this._items[id] = {
         clickCallback: aOptions.clickCallback,
@@ -2201,6 +2199,16 @@ var NativeWindow = {
       return null;
     },
 
+    _disableInGuest: function _disableInGuest(selector) {
+      return {
+        matches: function _disableInGuestMatches(aElement, aX, aY) {
+          if (BrowserApp.isGuest)
+            return false;
+          return selector.matches(aElement, aX, aY);
+        }
+      }
+    },
+
     _getLinkURL: function ch_getLinkURL(aLink) {
       let href = aLink.href;
       if (href)
@@ -2567,6 +2575,7 @@ function Tab(aURL, aParams) {
   this.clickToPlayPluginsActivated = false;
   this.desktopMode = false;
   this.originalURI = null;
+  this.aboutHomePage = null;
   this.savedArticle = null;
   this.hasTouchListener = false;
   this.browserWidth = 0;
@@ -2668,6 +2677,7 @@ Tab.prototype = {
     this.browser.sessionHistory.addSHistoryListener(this);
 
     this.browser.addEventListener("DOMContentLoaded", this, true);
+    this.browser.addEventListener("DOMFormHasPassword", this, true);
     this.browser.addEventListener("DOMLinkAdded", this, true);
     this.browser.addEventListener("DOMTitleChanged", this, true);
     this.browser.addEventListener("DOMWindowClose", this, true);
@@ -2816,6 +2826,7 @@ Tab.prototype = {
     this.browser.sessionHistory.removeSHistoryListener(this);
 
     this.browser.removeEventListener("DOMContentLoaded", this, true);
+    this.browser.removeEventListener("DOMFormHasPassword", this, true);
     this.browser.removeEventListener("DOMLinkAdded", this, true);
     this.browser.removeEventListener("DOMTitleChanged", this, true);
     this.browser.removeEventListener("DOMWindowClose", this, true);
@@ -3373,6 +3384,11 @@ Tab.prototype = {
         break;
       }
 
+      case "DOMFormHasPassword": {
+        LoginManagerContent.onFormPassword(aEvent);
+        break;
+      }
+
       case "DOMLinkAdded": {
         let target = aEvent.originalTarget;
         if (!target.href || target.disabled)
@@ -3539,6 +3555,15 @@ Tab.prototype = {
           tabID: this.id
         });
 
+        if (!aEvent.persisted && Services.prefs.getBoolPref("browser.ui.linkify.phone")) {
+          if (!this._linkifier)
+            this._linkifier = new Linkifier();
+          this._linkifier.linkifyNumbers(this.browser.contentWindow.document);
+        }
+
+        // Show page actions for helper apps.
+        HelperApps.updatePageAction(this.browser.currentURI);
+
         if (!Reader.isEnabledForParseOnLoad)
           return;
 
@@ -3679,6 +3704,7 @@ Tab.prototype = {
       uri: fixedURI.spec,
       userSearch: this.userSearch || "",
       baseDomain: baseDomain,
+      aboutHomePage: this.aboutHomePage || "",
       contentType: (contentType ? contentType : ""),
       sameDocument: sameDocument
     };
@@ -7079,25 +7105,9 @@ var RemoteDebugger = {
 var Telemetry = {
   SHARED_PREF_TELEMETRY_ENABLED: "datareporting.telemetry.enabled",
 
-  init: function init() {
-    Services.obs.addObserver(this, "Telemetry:Add", false);
-  },
-
-  uninit: function uninit() {
-    Services.obs.removeObserver(this, "Telemetry:Add");
-  },
-
   addData: function addData(aHistogramId, aValue) {
-    let telemetry = Cc["@mozilla.org/base/telemetry;1"].getService(Ci.nsITelemetry);
-    let histogram = telemetry.getHistogramById(aHistogramId);
+    let histogram = Services.telemetry.getHistogramById(aHistogramId);
     histogram.add(aValue);
-  },
-
-  observe: function observe(aSubject, aTopic, aData) {
-    if (aTopic == "Telemetry:Add") {
-      let json = JSON.parse(aData);
-      this.addData(json.name, json.value);
-    }
   },
 };
 
@@ -7157,14 +7167,16 @@ let Reader = {
       this.pageAction.id = NativeWindow.pageactions.add({
         title: Strings.browser.GetStringFromName("readerMode.exit"),
         icon: "drawable://reader_active",
-        clickCallback: this.pageAction.readerModeCallback
+        clickCallback: this.pageAction.readerModeCallback,
+        important: true
       });
     } else if (tab.readerEnabled) {
       this.pageAction.id = NativeWindow.pageactions.add({
         title: Strings.browser.GetStringFromName("readerMode.enter"),
         icon: "drawable://reader",
         clickCallback:this.pageAction.readerModeCallback,
-        longClickCallback: this.pageAction.readerModeActiveCallback
+        longClickCallback: this.pageAction.readerModeActiveCallback,
+        important: true
       });
     }
   },
