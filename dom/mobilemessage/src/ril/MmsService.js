@@ -1152,6 +1152,12 @@ AcknowledgeTransaction.prototype = {
  * MmsService
  */
 function MmsService() {
+  if (DEBUG) {
+    let macro = (MMS.MMS_VERSION >> 4) & 0x0f;
+    let minor = MMS.MMS_VERSION & 0x0f;
+    debug("Running protocol version: " + macro + "." + minor);
+  }
+
   // TODO: bug 810084 - support application identifier
 }
 MmsService.prototype = {
@@ -1921,9 +1927,19 @@ MmsService.prototype = {
                             null,
                             null,
                             DELIVERY_STATUS_PENDING,
-                            this.retrieveMessage(url,
-                                                 responseNotify.bind(this),
-                                                 aDomMessage));
+                            (function (rv) {
+          let success = Components.isSuccessCode(rv);
+          if (!success) {
+            if (DEBUG) debug("Could not change the delivery status: MMS " +
+                             domMessage.id + ", error code " + rv);
+            aRequest.notifyGetMessageFailed(Ci.nsIMobileMessageCallback.INTERNAL_ERROR);
+            return;
+          }
+
+          this.retrieveMessage(url,
+                               responseNotify.bind(this),
+                               aDomMessage);
+        }).bind(this));
     }).bind(this));
   },
 
