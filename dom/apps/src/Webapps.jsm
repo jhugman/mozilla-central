@@ -1745,7 +1745,6 @@ this.DOMApplicationRegistry = {
         app.manifest = xhr.response;
         if (!app.manifest) {
           sendError("MANIFEST_PARSE_ERROR");
-
           return;
         }
 
@@ -1938,11 +1937,6 @@ this.DOMApplicationRegistry = {
     let appObject = AppsUtils.cloneAppObject(aNewApp);
     appObject.appStatus = aNewApp.appStatus || Ci.nsIPrincipal.APP_STATUS_INSTALLED;
 
-<Merge Conflict>
-    appObject.installTime = aNewApp.installTime = Date.now();
-    appObject.lastUpdateCheck = aNewApp.lastUpdateCheck = Date.now();
->>>>>>> 70b33409774c4a95654d665d30ac8f4211630ef5
-
     let appNote = JSON.stringify(appObject);
     appNote.id = aId;
 
@@ -1965,8 +1959,6 @@ this.DOMApplicationRegistry = {
       appObject.readyToApplyDownload = false;
     }
 
-
-
     appObject.localId = aLocalId;
     appObject.basePath = FileUtils.getDir(DIRECTORY_NAME, ["webapps"], true,
                                           true).path;
@@ -1978,12 +1970,10 @@ this.DOMApplicationRegistry = {
     return [appNote, appObject];
   },
 
-  _copyStates: function(aData, aNewApp) {
+  _copyStates: function(aData, aAppObject) {
     ["installState", "downloadAvailable",
      "downloading", "downloadSize", "readyToApplyDownload"].forEach(function(aProp) {
-
-
-      aData.app[aProp] = aNewApp[aProp];
+      aData.app[aProp] = aAppObject[aProp];
      });
   },
 
@@ -1991,13 +1981,11 @@ this.DOMApplicationRegistry = {
     let dir = this._getAppDir(aId);
     let manFile = dir.clone();
 
-
     // For packaged apps, keep the update manifest distinct from the app manifest.
     let manifestName = aIsPackage ? "update.webapp" : "manifest.webapp";
     manFile.append(manifestName);
     this._writeFile(manFile, JSON.stringify(aJsonManifest), function() { });
   },
-
 
   confirmInstall: function(aData, aFromSync, aProfileDir, aOfflineCacheObserver,
                            aInstallSuccessCallback) {
@@ -2109,7 +2097,6 @@ this.DOMApplicationRegistry = {
    * @param aId {Integer} the uniquie id of the application
    * @param aManifest {Object} The manifest of the application
    */
-
   _onDownloadPackage: function(aNewApp, aInstallSuccessCallback,
                                aId, aManifest) {
     debug("_onDownloadPackage");
@@ -2258,10 +2245,6 @@ this.DOMApplicationRegistry = {
     let checkDownloadSize = this._checkDownloadSize.bind(this, aNewApp,
                                                          cleanup, download);
 
-
-
-
-
     let deviceStorage = Services.wm.getMostRecentWindow("navigator:browser").navigator.getDeviceStorage("apps");
     if (deviceStorage) {
       let req = deviceStorage.freeSpace();
@@ -2325,7 +2308,6 @@ this.DOMApplicationRegistry = {
       delete aOldApp.staged;
     }
 
-
     this.broadcastMessage("Webapps:PackageEvent",
                           { type: "error",
                             manifestURL:  aNewApp.manifestURL,
@@ -2334,7 +2316,6 @@ this.DOMApplicationRegistry = {
     this._saveApps();
     AppDownloadManager.remove(aNewApp.manifestURL);
   },
-
 
   _download: function(aManifest, aOldApp, aNewApp, aId, aIsUpdate, aCleanup,
                       aOnSuccess) {
@@ -2349,7 +2330,6 @@ this.DOMApplicationRegistry = {
       requestChannel.setRequestHeader("If-None-Match", aOldApp.packageEtag,
                                       false);
     }
-
 
     AppDownloadManager.add(aNewApp.manifestURL,
       {
@@ -2535,7 +2515,6 @@ this.DOMApplicationRegistry = {
     );
   },
 
-
   /**
    * Send an "applied" event right away for the package being installed.
    *
@@ -2584,7 +2563,6 @@ this.DOMApplicationRegistry = {
     }
     aDownLoad();
   },
-
 
   _sendDownloadProgressEvent: function(aNewApp, aOldApp) {
     debug("_sendDownloadProgressEvent");
@@ -2663,7 +2641,6 @@ this.DOMApplicationRegistry = {
 
       if ((!isInstalled && !isPending) || (isInstalled && isDifferent)) {
         throw "WRONG_APP_STORE_ID";
-
       }
 
       if (!isPending && (aNewApp.storeVersion >= aStoreVersion)) {
@@ -2726,7 +2703,6 @@ this.DOMApplicationRegistry = {
       if (!zipReader.hasEntry("manifest.webapp")) {
         throw "MISSING_MANIFEST";
       }
-
 
       let istream = zipReader.getInputStream("manifest.webapp");
 
@@ -2897,7 +2873,6 @@ this.DOMApplicationRegistry = {
         aOldApp.packageEtag = aRequestChannel.getResponseHeader("Etag");
       } catch(e) {
         // NO-OP
-
       }
       aOldApp.packageHash = aHash;
       aOldApp.appStatus = AppsUtils.getAppManifestStatus(aManifest);
@@ -3142,7 +3117,6 @@ this.DOMApplicationRegistry = {
     });
   },
 
-
   getAppByManifestURL: function(aManifestURL) {
     return AppsUtils.getAppByManifestURL(this.webapps, aManifestURL);
   },
@@ -3175,7 +3149,6 @@ this.DOMApplicationRegistry = {
 
   getWebAppsBasePath: function getWebAppsBasePath() {
     return FileUtils.getDir(DIRECTORY_NAME, ["webapps"], false).path;
-
   },
 
   _isLaunchable: function(aApp) {
