@@ -2483,6 +2483,7 @@ public class GeckoAppShell
 
     public static void showFilePickerAsync(String aMimeType, final long id) {
         sActivityHelper.showFilePickerAsync(getGeckoInterface().getActivity(), aMimeType, new ActivityHandlerHelper.FileResultHandler() {
+            @Override
             public void gotFile(String filename) {
                 GeckoAppShell.notifyFilePickerResult(filename, id);
             }

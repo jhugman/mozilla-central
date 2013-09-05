@@ -71,7 +71,6 @@ import android.telephony.NeighboringCellInfo;
 import android.telephony.SignalStrength;
 import android.telephony.TelephonyManager;
 import android.telephony.PhoneStateListener;
-import android.telephony.SignalStrength;
 import android.telephony.gsm.GsmCellLocation;
 
 import android.text.TextUtils;
@@ -133,7 +132,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 abstract public class GeckoApp
-                extends GeckoActivity 
+                extends GeckoActivity
     implements GeckoEventListener, SensorEventListener, LocationListener,
                            Tabs.OnTabsChangedListener, GeckoEventResponder,
                            GeckoMenu.Callback, GeckoMenu.MenuPresenter,
@@ -222,6 +221,7 @@ abstract public class GeckoApp
     private boolean mShouldReportGeoData = false;
 
     abstract public int getLayout();
+    @Override
     abstract public boolean hasTabsSideBar();
     abstract protected String getDefaultProfileName();
 
@@ -243,17 +243,21 @@ abstract public class GeckoApp
 
     void focusChrome() { }
 
+    @Override
     public Context getContext() {
         return sAppContext;
     }
 
+    @Override
     public Activity getActivity() {
         return this;
     }
 
+    @Override
     public LocationListener getLocationListener() {
         if (mShouldReportGeoData && mPhoneStateListener == null) {
             mPhoneStateListener = new PhoneStateListener() {
+                @Override
                 public void onSignalStrengthsChanged(SignalStrength signalStrength) {
                     setCurrentSignalStrenth(signalStrength);
                 }
@@ -264,6 +268,7 @@ abstract public class GeckoApp
         return this;
     }
 
+    @Override
     public SensorEventListener getSensorEventListener() {
         return this;
     }
@@ -272,18 +277,22 @@ abstract public class GeckoApp
         return GeckoApp.sAppContext.getSharedPreferences(PREFS_NAME, 0);
     }
 
+    @Override
     public View getCameraView() {
         return mCameraView;
     }
 
+    @Override
     public void addAppStateListener(GeckoAppShell.AppStateListener listener) {
         mAppStateListeners.add(listener);
     }
 
+    @Override
     public void removeAppStateListener(GeckoAppShell.AppStateListener listener) {
         mAppStateListeners.remove(listener);
     }
 
+    @Override
     public FormAssistPopup getFormAssistPopup() {
         return mFormAssistPopup;
     }
@@ -394,9 +403,9 @@ abstract public class GeckoApp
                 onPreparePanel(featureId, mMenuPanel, mMenu);
             }
 
-            return mMenuPanel; 
+            return mMenuPanel;
         }
-  
+
         return super.onCreatePanelView(featureId);
     }
 
@@ -472,7 +481,7 @@ abstract public class GeckoApp
             mMenuPanel.addView((GeckoMenu) mMenu);
         }
     }
- 
+
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         // Handle hardware menu key presses separately so that we can show a custom menu in some cases.
@@ -544,6 +553,7 @@ abstract public class GeckoApp
      */
     public boolean autoHideTabs() { return false; }
 
+    @Override
     public boolean areTabsShown() { return false; }
 
     @Override
@@ -703,19 +713,19 @@ abstract public class GeckoApp
                 } else {
                     mPrivateBrowsingSession = message.getString("session");
                 }
-            } else if (event.equals("Contact:Add")) {                
+            } else if (event.equals("Contact:Add")) {
                 if (!message.isNull("email")) {
-                    Uri contactUri = Uri.parse(message.getString("email"));       
+                    Uri contactUri = Uri.parse(message.getString("email"));
                     Intent i = new Intent(ContactsContract.Intents.SHOW_OR_CREATE_CONTACT, contactUri);
                     startActivity(i);
                 } else if (!message.isNull("phone")) {
-                    Uri contactUri = Uri.parse(message.getString("phone"));       
+                    Uri contactUri = Uri.parse(message.getString("phone"));
                     Intent i = new Intent(ContactsContract.Intents.SHOW_OR_CREATE_CONTACT, contactUri);
                     startActivity(i);
                 } else {
                     // something went wrong.
                     Log.e(LOGTAG, "Received Contact:Add message with no email nor phone number");
-                }                
+                }
             } else if (event.equals("Intent:GetHandlers")) {
                 Intent intent = GeckoAppShell.getOpenURIIntent(sAppContext, message.optString("url"),
                     message.optString("mime"), message.optString("action"), message.optString("title"));
@@ -737,6 +747,7 @@ abstract public class GeckoApp
         }
     }
 
+    @Override
     public String getResponse(JSONObject origMessage) {
         String res = mCurrentResponse;
         mCurrentResponse = "";
@@ -859,6 +870,7 @@ abstract public class GeckoApp
     void showButtonToast(final String message, final String buttonText,
                          final String buttonIcon, final String buttonId) {
         BitmapUtils.getDrawable(GeckoApp.this, buttonIcon, new BitmapUtils.BitmapLoader() {
+            @Override
             public void onBitmapFound(Drawable d) {
                 mToast.show(false, message, buttonText, d, new ButtonToast.ToastListener() {
                     @Override
@@ -905,6 +917,7 @@ abstract public class GeckoApp
         mFullScreenPluginView = view;
     }
 
+    @Override
     public void addPluginView(final View view, final Rect rect, final boolean isFullScreen) {
         ThreadUtils.postToUiThread(new Runnable() {
             @Override
@@ -962,6 +975,7 @@ abstract public class GeckoApp
         setFullScreen(false);
     }
 
+    @Override
     public void removePluginView(final View view, final boolean isFullScreen) {
         ThreadUtils.postToUiThread(new Runnable() {
             @Override
@@ -1078,7 +1092,7 @@ abstract public class GeckoApp
     public void requestRender() {
         mLayerView.requestRender();
     }
-    
+
     public void hidePlugins(Tab tab) {
         for (Layer layer : tab.getPluginLayers()) {
             if (layer instanceof PluginLayer) {
@@ -1110,6 +1124,7 @@ abstract public class GeckoApp
         requestRender();
     }
 
+    @Override
     public void setFullScreen(final boolean fullscreen) {
         ThreadUtils.postToUiThread(new Runnable() {
             @Override
@@ -1660,6 +1675,7 @@ abstract public class GeckoApp
         }
     }
 
+    @Override
     public GeckoProfile getProfile() {
         // fall back to default profile if we didn't load a specific one
         if (mProfile == null) {
@@ -1746,6 +1762,7 @@ abstract public class GeckoApp
                                .build());
     }
 
+    @Override
     public void enableCameraView() {
         // Start listening for orientation events
         mCameraOrientationEventListener = new OrientationEventListener(this) {
@@ -1774,6 +1791,7 @@ abstract public class GeckoApp
                               new AbsoluteLayout.LayoutParams(8, 16, 0, 0));
     }
 
+    @Override
     public void disableCameraView() {
         if (mCameraOrientationEventListener != null) {
             mCameraOrientationEventListener.disable();
@@ -1783,6 +1801,7 @@ abstract public class GeckoApp
         mCameraLayout.removeView(mCameraView);
     }
 
+    @Override
     public String getDefaultUAString() {
         return HardwareUtils.isTablet() ? AppConstants.USER_AGENT_FENNEC_TABLET :
                                           AppConstants.USER_AGENT_FENNEC_MOBILE;
@@ -2165,6 +2184,7 @@ abstract public class GeckoApp
         }
     }
 
+    @Override
     public void doRestart() {
         doRestart(RESTARTER_ACTION, null);
     }
@@ -2262,6 +2282,7 @@ abstract public class GeckoApp
         }
     }
 
+    @Override
     public PromptService getPromptService() {
         return mPromptService;
     }
@@ -2332,6 +2353,7 @@ abstract public class GeckoApp
         }
     }
 
+    @Override
     public AbsoluteLayout getPluginContainer() { return mPluginContainer; }
 
     // Accelerometer.
@@ -2508,6 +2530,7 @@ abstract public class GeckoApp
         }
 
         ThreadUtils.postToBackgroundThread(new Runnable() {
+            @Override
             public void run() {
                 try {
                     URL url = new URL(LOCATION_URL);
@@ -2572,6 +2595,7 @@ abstract public class GeckoApp
     }
 
     // Called when a Gecko Hal WakeLock is changed
+    @Override
     public void notifyWakeLockChanged(String topic, String state) {
         PowerManager.WakeLock wl = mWakeLocks.get(topic);
         if (state.equals("locked-foreground") && wl == null) {
@@ -2585,6 +2609,7 @@ abstract public class GeckoApp
         }
     }
 
+    @Override
     public void notifyCheckUpdateResult(String result) {
         GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Update:CheckResult", result));
     }
