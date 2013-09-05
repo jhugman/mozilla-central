@@ -548,7 +548,7 @@ var BrowserApp = {
       function(aTarget) {
         aTarget.muted = true;
       });
-  
+
     NativeWindow.contextmenus.add(Strings.browser.GetStringFromName("contextmenu.unmute"),
       NativeWindow.contextmenus.mediaContext("media-muted"),
       function(aTarget) {
@@ -6689,6 +6689,7 @@ var WebappsUI = {
     DOMApplicationRegistry.allAppsLaunchable = true;
 
     Services.obs.addObserver(this, "webapps-ask-install", false);
+    Services.obs.addObserver(this, "webapps-download-apk", false);
     Services.obs.addObserver(this, "webapps-launch", false);
     Services.obs.addObserver(this, "webapps-sync-install", false);
     Services.obs.addObserver(this, "webapps-sync-uninstall", false);
@@ -6697,6 +6698,7 @@ var WebappsUI = {
 
   uninit: function unint() {
     Services.obs.removeObserver(this, "webapps-ask-install");
+    Services.obs.removeObserver(this, "webapps-download-apk");
     Services.obs.removeObserver(this, "webapps-launch");
     Services.obs.removeObserver(this, "webapps-sync-install");
     Services.obs.removeObserver(this, "webapps-sync-uninstall");
@@ -6731,6 +6733,9 @@ var WebappsUI = {
         break;
       case "webapps-ask-install":
         this.doInstall(data);
+        break;
+      case "webapps-download-apk":
+        this.downloadApk(data);
         break;
       case "webapps-launch":
         this.openURL(data.manifestURL, data.origin);
@@ -6795,6 +6800,15 @@ var WebappsUI = {
     }
 
     return iconURI ? iconURI.spec : DEFAULT_ICON;
+  },
+
+  downloadApk: function downloadApk(aData) {
+    console.log("Downloading apk from " + aData.generatorUrl);
+    sendMessageToJava({
+      type: "WebApps:DownloadApk",
+      manifestUrl: aData.manifestURL,
+      generatorUrl: aData.generatorUrl
+    });
   },
 
   doInstall: function doInstall(aData) {

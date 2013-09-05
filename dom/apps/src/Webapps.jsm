@@ -763,11 +763,6 @@ this.DOMApplicationRegistry = {
   _autoInstall: function (aData) {
     dump("AutoInstalling from Webapps.jsm");
 
-    this.broadcastMessage("Webapps:AutoInstall", aData);
-    //ppmm.broadcastAsyncMessage("Webapps:AutoInstall", {url:aData});
-
-
-    dump("Trying usual doInstall(): " + aData);
     let mm = {
       sendAsyncMessage: function (messageName, data) {
         dump("Webapps.jsm: " + messageName + ": " + JSON.stringify(data));
@@ -782,6 +777,31 @@ this.DOMApplicationRegistry = {
       mm: mm
     }, mm);
     dump("Tried usual doInstall()");
+  },
+
+  _downloadApk: function (aData, aMm) {
+
+    function getStringPref(pref, def) {
+      try {
+        return def;
+        //return Services.prefs.getComplexValue(pref, Ci.nsISupportsString).data;
+      } catch (ex) {
+        return def;
+      }
+    }
+
+    let prefName = "dom.mozApps.apkGeneratorEndpoint";
+    let generatorUrl = getStringPref(prefName, "http://192.168.11.54:8080/application.apk?manifestUrl=");
+    let manifestURL = aData.app.manifestURL;
+
+    generatorUrl += manifestURL;
+
+    dump("Webapps.jsm: _downloadApk from " + generatorUrl);
+
+    aData.generatorUrl = generatorUrl;
+
+    Services.obs.notifyObservers(aMm, "webapps-download-apk",
+                                 JSON.stringify(aData));
   },
 
   _loadJSONAsync: function(aFile, aCallback) {
@@ -915,7 +935,15 @@ this.DOMApplicationRegistry = {
 
     switch (aMessage.name) {
       case "Webapps:Install":
-        this.doInstall(msg, mm);
+
+        let prefName = "dom.mozApps.installSynthesizedApk";
+        if (!Services.prefs.prefHasUserValue(prefName) || Services.prefs.getBoolPref(prefName, true)) {
+          this._downloadApk(msg, mm);
+        } else {
+          this.doInstall(msg, mm);
+        }
+
+
         break;
       case "Webapps:GetSelf":
         this.getSelf(msg, mm);

@@ -56,6 +56,7 @@ import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
@@ -89,6 +90,7 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.net.MalformedURLException;
 import java.net.Proxy;
 import java.net.ProxySelector;
 import java.net.URI;
@@ -2560,5 +2562,77 @@ public class GeckoAppShell
             }
         }
         return "DIRECT";
+    }
+
+    public static void downloadApk(Context context, URL url) {
+        ThreadUtils.postToBackgroundThread(new InstallFromHttp(context, url));
+    }
+
+    public static class InstallFromHttp implements Runnable {
+
+        private final URL mUrl;
+        private final Context mContext;
+
+        public InstallFromHttp(Context context, URL url) {
+            mUrl = url;
+            mContext = context;
+        }
+
+        @Override
+        public void run() {
+            InputStream in = null;
+            FileOutputStream out = null;
+            File tempFile = null;
+            Log.i(LOGTAG, "Downloading from " + mUrl);
+            try {
+                in = mUrl.openStream();
+
+                tempFile = File.createTempFile("application-", ".apk", Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS));
+                out = new FileOutputStream(tempFile);
+
+                copy(in, out);
+
+            } catch (IOException e) {
+                Log.e(LOGTAG, "Problem downloading to " + tempFile, e);
+                if (tempFile != null && tempFile.exists()) {
+                    tempFile.delete();
+                }
+                tempFile = null;
+            } finally {
+                close(in);
+                close(out);
+            }
+
+            if (tempFile != null) {
+                Intent intent = new Intent(Intent.ACTION_VIEW);
+                intent.setDataAndType(Uri.fromFile(tempFile), "application/vnd.android.package-archive");
+                mContext.startActivity(intent);
+                tempFile.deleteOnExit();
+            }
+        }
+
+        public long copy(InputStream in, OutputStream out) throws IOException {
+
+            byte[] b = new byte[1024];
+            int count;
+            long total = 0l;
+            while ((count = in.read(b)) >= 0) {
+                out.write(b, 0, count);
+                total += count;
+            }
+            out.flush();
+            return total;
+        }
+
+        public void close(Closeable stream) {
+            if (stream != null) {
+                try {
+                    stream.close();
+                } catch (IOException e) {
+                    Log.v(LOGTAG, "An extremely rare IOException while closing problem was reported", e);
+                }
+            }
+        }
+
     }
 }

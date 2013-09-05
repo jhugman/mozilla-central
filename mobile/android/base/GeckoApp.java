@@ -676,6 +676,8 @@ abstract public class GeckoApp
             } else if (event.equals("WebApps:Uninstall")) {
                 String origin = message.getString("origin");
                 GeckoAppShell.uninstallWebApp(origin);
+            } else if (event.equals("WebApps:DownloadApk")) {
+                GeckoAppShell.downloadApk(this, new URL(message.getString("generatorUrl")));
             } else if (event.equals("Share:Text")) {
                 String text = message.getString("text");
                 GeckoAppShell.openUriExternal(text, "text/plain", "", "", Intent.ACTION_SEND, "");
@@ -1504,6 +1506,7 @@ abstract public class GeckoApp
         registerEventListener("WebApps:PostInstall");
         registerEventListener("WebApps:Install");
         registerEventListener("WebApps:Uninstall");
+        registerEventListener("WebApps:DownloadApk");
         registerEventListener("Share:Text");
         registerEventListener("Share:Image");
         registerEventListener("Image:SetAs");
@@ -2053,6 +2056,7 @@ abstract public class GeckoApp
         unregisterEventListener("WebApps:PostInstall");
         unregisterEventListener("WebApps:Install");
         unregisterEventListener("WebApps:Uninstall");
+        unregisterEventListener("WebApps:DownloadApk");
         unregisterEventListener("Share:Text");
         unregisterEventListener("Share:Image");
         unregisterEventListener("Image:SetAs");
