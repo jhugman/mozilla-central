@@ -21,6 +21,7 @@ Cu.import("resource://gre/modules/OfflineCacheInstaller.jsm");
 Cu.import("resource://gre/modules/SystemMessagePermissionsChecker.jsm");
 Cu.import("resource://gre/modules/AppDownloadManager.jsm");
 Cu.import("resource://gre/modules/WebappOSUtils.jsm");
+Cu.import("resource://gre/modules/osfile.jsm");
 
 #ifdef MOZ_DEBUG
 const { console } = Cu.import("resource://gre/modules/devtools/Console.jsm", {});
@@ -1136,7 +1137,7 @@ this.DOMApplicationRegistry = {
 
         if (manifest.appcache_path) {
           debug("appcache found");
-          this.startOfflineCacheDownload(manifest, app, null, isUpdate);
+          this.startOfflineCacheDownload(manifest, app, null, null, isUpdate);
         } else {
           // hosted app with no appcache, nothing to do, but we fire a
           // downloaded event
@@ -1286,7 +1287,10 @@ this.DOMApplicationRegistry = {
     }).bind(this));
   },
 
-  startOfflineCacheDownload: function(aManifest, aApp, aProfileDir, aIsUpdate) {
+  startOfflineCacheDownload: function startOfflineCacheDownload(aManifest, aApp,
+                                                                aProfileDir,
+                                                                aOfflineCacheObserver,
+                                                                aIsUpdate) {
     if (!aManifest.appcache_path) {
       return;
     }
@@ -1323,6 +1327,8 @@ this.DOMApplicationRegistry = {
       AppDownloadManager.add(aApp.manifestURL, download);
 
       cacheUpdate.addObserver(new AppcacheObserver(aApp), false);
+      if (aOfflineCacheObserver) {
+        cacheUpdate.addObserver(aOfflineCacheObserver, false);
       }
     }).bind(this));
   },
@@ -1740,7 +1746,6 @@ this.DOMApplicationRegistry = {
         app.manifest = xhr.response;
         if (!app.manifest) {
           sendError("MANIFEST_PARSE_ERROR");
-
           return;
         }
 
@@ -1804,7 +1809,7 @@ this.DOMApplicationRegistry = {
     debug("doInstallPackage getting: " + app.manifestURL);
     xhr.open("GET", app.manifestURL, true);
     xhr.channel.loadFlags |= Ci.nsIRequest.INHIBIT_CACHING;
-    xhr.channel.notificationCallbacks = this.createLoadContext(aData.appId, 
+    xhr.channel.notificationCallbacks = this.createLoadContext(aData.appId,
                                                                aData.isBrowser);
     xhr.responseType = "json";
 
@@ -1869,7 +1874,7 @@ this.DOMApplicationRegistry = {
   denyInstall: function(aData) {
     let packageId = aData.app.packageId;
     if (packageId) {
-      let dir = FileUtils.getDir("TmpD", ["webapps", packageId], 
+      let dir = FileUtils.getDir("TmpD", ["webapps", packageId],
                                  true, true);
       try {
         dir.remove(true);
@@ -1933,7 +1938,6 @@ this.DOMApplicationRegistry = {
     let appObject = AppsUtils.cloneAppObject(aNewApp);
     appObject.appStatus = aNewApp.appStatus || Ci.nsIPrincipal.APP_STATUS_INSTALLED;
 
-
     let appNote = JSON.stringify(appObject);
     appNote.id = aId;
 
@@ -1967,10 +1971,10 @@ this.DOMApplicationRegistry = {
     return [appNote, appObject];
   },
 
-  _copyStates: function(aData, aNewApp) {
+  _copyStates: function(aData, aAppObject) {
     ["installState", "downloadAvailable",
      "downloading", "downloadSize", "readyToApplyDownload"].forEach(function(aProp) {
-      aData.app[aProp] = aNewApp[aProp];
+      aData.app[aProp] = aAppObject[aProp];
      });
   },
 
@@ -1989,14 +1993,9 @@ this.DOMApplicationRegistry = {
     debug("confirmInstall");
 
     let origin = Services.io.newURI(aData.app.origin, null, null);
-    let id = aData.app.syncId || this._appId(aData.app.origin);
+    let id = this._appIdForManifestURL(aData.app.manifestURL);
     let manifestURL = origin.resolve(aData.app.manifestURL);
     let localId = this.getAppLocalIdByManifestURL(manifestURL);
-
-    // For packaged apps, we need to get the id from the manifestURL.
-    if (localId && !id) {
-      id = this._appIdForManifestURL(manifestURL);
-    }
 
     let isReinstall = false;
 
@@ -2062,7 +2061,9 @@ this.DOMApplicationRegistry = {
     if (!aData.isPackage) {
       this.updateAppHandlers(null, app.manifest, app);
       if (aInstallSuccessCallback) {
-        aInstallSuccessCallback(app.manifest);
+        //should we use manifest or app.manifest here?
+        // are they both the same, if so - why are we using both?
+        aInstallSuccessCallback(manifest);
       }
     }
 
@@ -2071,9 +2072,11 @@ this.DOMApplicationRegistry = {
       // can't be used to resolve package paths.
       manifest = new ManifestHelper(jsonManifest, app.manifestURL);
 
-      this.downloadPackage(manifest, appObject, false, (function(aId, aManifest) {
-        this._downloadPackageCallback(aId, aManifest, app, appObject, aInstallSuccessCallback);
-      }).bind(this));
+      this.queuedPackageDownload[app.manifestURL] = {
+        manifest: manifest,
+        app: appObject,
+        callback: aInstallSuccessCallback
+      }
     }
   },
 
@@ -2090,7 +2093,6 @@ this.DOMApplicationRegistry = {
    * @param aId {Integer} the uniquie id of the application
    * @param aManifest {Object} The manifest of the application
    */
-
   _onDownloadPackage: function(aNewApp, aInstallSuccessCallback,
                                aId, aManifest) {
     debug("_onDownloadPackage");
@@ -2140,14 +2142,6 @@ this.DOMApplicationRegistry = {
     Services.prefs.setIntPref("dom.mozApps.maxLocalId", id);
     Services.prefs.savePrefFile(null);
     return id;
-  },
-
-  _appId: function(aURI) {
-    for (let id in this.webapps) {
-      if (this.webapps[id].origin == aURI)
-        return id;
-    }
-    return null;
   },
 
   _appIdForManifestURL: function(aURI) {
@@ -2237,18 +2231,16 @@ this.DOMApplicationRegistry = {
                                               aIsUpdate, cleanup, aOnSuccess);
 
     let checkDownloadSize = this._checkDownloadSize.bind(this, aNewApp,
-                                                                cleanup,
-                                                                download);
+                                                         cleanup, download);
 
     let navigator = Services.wm.getMostRecentWindow("navigator:browser")
-                            .navigator;
+                                 .navigator;
     let deviceStorage = null;
-
     if (navigator.getDeviceStorage) {
       deviceStorage = navigator.getDeviceStorage("apps");
     }
 
-    if (deviceStorage) {
+   if (deviceStorage) {
       let req = deviceStorage.freeSpace();
       req.onsuccess = req.onerror = function statResult(e) {
         // Even if we could not retrieve the device storage free space, we try
@@ -2303,8 +2295,8 @@ this.DOMApplicationRegistry = {
     // installState to 'pending' at first download and to 'installed' when
     // updating.
     aOldApp.installState = download ? download.previousState
-                                          : aIsUpdate ? "installed"
-                                                      : "pending";
+                                    : aIsUpdate ? "installed"
+                                                : "pending";
 
     if (aOldApp.staged) {
       delete aOldApp.staged;
@@ -2892,6 +2884,7 @@ this.DOMApplicationRegistry = {
       } catch (e) {
         throw aZipReader.hasEntry("META-INF/ids.json") ? e : "MISSING_IDS_JSON";
       }
+
       let ids = JSON.parse(aConverter.ConvertToUnicode(NetUtil.
              readInputStreamToString( idsStream, idsStream.available()) || ""));
       if ((!ids.id) || !Number.isInteger(ids.version) ||
@@ -2977,7 +2970,6 @@ this.DOMApplicationRegistry = {
         Cu.reportError("DOMApplicationRegistry: Exception on app uninstall: " +
                        ex + "\n" + ex.stack);
       }
-      Services.obs.notifyObservers(this, "webapps-sync-uninstall", JSON.stringify(appClone));
       this.broadcastMessage("Webapps:RemoveApp", { id: id });
     }).bind(this));
   },
