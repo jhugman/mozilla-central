@@ -783,15 +783,14 @@ this.DOMApplicationRegistry = {
 
     function getStringPref(pref, def) {
       try {
-        return def;
-        //return Services.prefs.getComplexValue(pref, Ci.nsISupportsString).data;
+        return Services.prefs.getComplexValue(pref, Ci.nsISupportsString).data;
       } catch (ex) {
         return def;
       }
     }
 
     let prefName = "dom.mozApps.apkGeneratorEndpoint";
-    let generatorUrl = getStringPref(prefName, "http://192.168.11.54:8080/application.apk?manifestUrl=");
+    let generatorUrl = getStringPref(prefName, null);
     let manifestURL = aData.app.manifestURL;
 
     generatorUrl += manifestURL;

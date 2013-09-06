@@ -777,4 +777,7 @@ pref("security.csp.speccompliant", true);
 pref("gfx.canvas.azure.backends", "skia");
 pref("gfx.canvas.azure.accelerated", true);
 
+pref("dom.mozApps.installSynthesizedApk", true);
+pref("dom.mozApps.apkGeneratorEndpoint", "http://10.251.33.13:8080/application.apk?manifestUrl=");
+
 pref("general.useragent.override.youtube.com", "Android; Tablet;#Android; Mobile;");
