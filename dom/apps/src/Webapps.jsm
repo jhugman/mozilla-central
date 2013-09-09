@@ -22,6 +22,7 @@ Cu.import("resource://gre/modules/SystemMessagePermissionsChecker.jsm");
 Cu.import("resource://gre/modules/AppDownloadManager.jsm");
 Cu.import("resource://gre/modules/WebappOSUtils.jsm");
 Cu.import("resource://gre/modules/osfile.jsm");
+
 #ifdef MOZ_DEBUG
 const { console } = Cu.import("resource://gre/modules/devtools/Console.jsm", {});
 #endif
@@ -2067,6 +2068,8 @@ this.DOMApplicationRegistry = {
     if (!aData.isPackage) {
       this.updateAppHandlers(null, app.manifest, app);
       if (aInstallSuccessCallback) {
+        aInstallSuccessCallback(app.manifest);
+        // are they both the same, if so - why are we using both?
         aInstallSuccessCallback(manifest);
       }
     }
