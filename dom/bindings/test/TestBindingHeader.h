@@ -7,12 +7,13 @@
 #ifndef TestBindingHeader_h
 #define TestBindingHeader_h
 
-#include "nsWrapperCache.h"
-#include "mozilla/ErrorResult.h"
 #include "mozilla/dom/BindingUtils.h"
+#include "mozilla/dom/Date.h"
 #include "mozilla/dom/TypedArray.h"
-#include "nsCOMPtr.h"
 #include "mozilla/dom/UnionTypes.h"
+#include "mozilla/ErrorResult.h"
+#include "nsCOMPtr.h"
+#include "nsWrapperCache.h"
 
 // Forward declare this before we include TestCodeGenBinding.h, because that header relies on including
 // this one for it, for ParentDict. Hopefully it won't begin to rely on it in more fundamental ways.
@@ -479,6 +480,7 @@ public:
   void PassOptionalNullableObjectWithDefaultValue(JSContext*, JS::Handle<JSObject*>);
   void PassSequenceOfObject(JSContext*, const Sequence<JSObject*>&);
   void PassSequenceOfNullableObject(JSContext*, const Sequence<JSObject*>&);
+  void PassNullableSequenceOfObject(JSContext*, const Nullable<Sequence<JSObject*> >&);
   void PassOptionalNullableSequenceOfNullableSequenceOfObject(JSContext*, const Optional<Nullable<Sequence<Nullable<Sequence<JSObject*> > > > >&);
   void PassOptionalNullableSequenceOfNullableSequenceOfNullableObject(JSContext*, const Optional<Nullable<Sequence<Nullable<Sequence<JSObject*> > > > >&);
   JSObject* ReceiveObject(JSContext*);
@@ -510,6 +512,34 @@ public:
   //void PassUnionWithEnum(JSContext*, const TestEnumOrObject&);
   //void PassUnionWithCallback(JSContext*, const TestCallbackOrLong&);
   void PassUnionWithObject(JSContext*, const ObjectOrLong&);
+
+  void PassUnionWithDefaultValue1(const DoubleOrString& arg);
+  void PassUnionWithDefaultValue2(const DoubleOrString& arg);
+  void PassUnionWithDefaultValue3(const DoubleOrString& arg);
+  void PassUnionWithDefaultValue4(const FloatOrString& arg);
+  void PassUnionWithDefaultValue5(const FloatOrString& arg);
+  void PassUnionWithDefaultValue6(const FloatOrString& arg);
+  void PassUnionWithDefaultValue7(const UnrestrictedDoubleOrString& arg);
+  void PassUnionWithDefaultValue8(const UnrestrictedDoubleOrString& arg);
+  void PassUnionWithDefaultValue9(const UnrestrictedDoubleOrString& arg);
+  void PassUnionWithDefaultValue10(const UnrestrictedDoubleOrString& arg);
+  void PassUnionWithDefaultValue11(const UnrestrictedFloatOrString& arg);
+  void PassUnionWithDefaultValue12(const UnrestrictedFloatOrString& arg);
+  void PassUnionWithDefaultValue13(const UnrestrictedFloatOrString& arg);
+  void PassUnionWithDefaultValue14(const UnrestrictedFloatOrString& arg);
+
+  void PassNullableUnionWithDefaultValue1(const Nullable<DoubleOrString>& arg);
+  void PassNullableUnionWithDefaultValue2(const Nullable<DoubleOrString>& arg);
+  void PassNullableUnionWithDefaultValue3(const Nullable<DoubleOrString>& arg);
+  void PassNullableUnionWithDefaultValue4(const Nullable<FloatOrString>& arg);
+  void PassNullableUnionWithDefaultValue5(const Nullable<FloatOrString>& arg);
+  void PassNullableUnionWithDefaultValue6(const Nullable<FloatOrString>& arg);
+  void PassNullableUnionWithDefaultValue7(const Nullable<UnrestrictedDoubleOrString>& arg);
+  void PassNullableUnionWithDefaultValue8(const Nullable<UnrestrictedDoubleOrString>& arg);
+  void PassNullableUnionWithDefaultValue9(const Nullable<UnrestrictedDoubleOrString>& arg);
+  void PassNullableUnionWithDefaultValue10(const Nullable<UnrestrictedFloatOrString>& arg);
+  void PassNullableUnionWithDefaultValue11(const Nullable<UnrestrictedFloatOrString>& arg);
+  void PassNullableUnionWithDefaultValue12(const Nullable<UnrestrictedFloatOrString>& arg);
 
   void ReceiveUnion(const CanvasPatternOrCanvasGradientReturnValue&);
   void ReceiveUnionContainingNull(const CanvasPatternOrNullOrCanvasGradientReturnValue&);

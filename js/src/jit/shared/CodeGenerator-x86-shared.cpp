@@ -17,12 +17,15 @@
 #include "jit/shared/CodeGenerator-shared-inl.h"
 
 using namespace js;
-using namespace js::ion;
+using namespace js::jit;
 
+using mozilla::DoubleSignificandBits;
 using mozilla::FloorLog2;
+using mozilla::NegativeInfinity;
+using mozilla::SpecificNaN;
 
 namespace js {
-namespace ion {
+namespace jit {
 
 CodeGeneratorX86Shared::CodeGeneratorX86Shared(MIRGenerator *gen, LIRGraph *graph, MacroAssembler *masm)
   : CodeGeneratorShared(gen, graph, masm)
@@ -65,20 +68,16 @@ void
 CodeGeneratorX86Shared::emitBranch(Assembler::Condition cond, MBasicBlock *mirTrue,
                                    MBasicBlock *mirFalse, Assembler::NaNCond ifNaN)
 {
-    LBlock *ifTrue = mirTrue->lir();
-    LBlock *ifFalse = mirFalse->lir();
-
     if (ifNaN == Assembler::NaN_IsFalse)
-        masm.j(Assembler::Parity, ifFalse->label());
+        jumpToBlock(mirFalse, Assembler::Parity);
     else if (ifNaN == Assembler::NaN_IsTrue)
-        masm.j(Assembler::Parity, ifTrue->label());
+        jumpToBlock(mirTrue, Assembler::Parity);
 
-    if (isNextBlock(ifFalse)) {
-        masm.j(cond, ifTrue->label());
+    if (isNextBlock(mirFalse->lir())) {
+        jumpToBlock(mirTrue, cond);
     } else {
-        masm.j(Assembler::InvertCondition(cond), ifFalse->label());
-        if (!isNextBlock(ifTrue))
-            masm.jmp(ifTrue->label());
+        jumpToBlock(mirFalse, Assembler::InvertCondition(cond));
+        jumpToBlock(mirTrue);
     }
 }
 
@@ -424,9 +423,9 @@ CodeGeneratorX86Shared::visitAbsD(LAbsD *ins)
 {
     FloatRegister input = ToFloatRegister(ins->input());
     JS_ASSERT(input == ToFloatRegister(ins->output()));
-    masm.xorpd(ScratchFloatReg, ScratchFloatReg);
-    masm.subsd(input, ScratchFloatReg); // negate the sign bit.
-    masm.andpd(ScratchFloatReg, input); // s & ~s
+    // Load a value which is all ones except for the sign bit.
+    masm.loadConstantDouble(SpecificNaN(0, DoubleSignificandBits), ScratchFloatReg);
+    masm.andpd(ScratchFloatReg, input);
     return true;
 }
 
@@ -434,8 +433,8 @@ bool
 CodeGeneratorX86Shared::visitSqrtD(LSqrtD *ins)
 {
     FloatRegister input = ToFloatRegister(ins->input());
-    JS_ASSERT(input == ToFloatRegister(ins->output()));
-    masm.sqrtsd(input, input);
+    FloatRegister output = ToFloatRegister(ins->output());
+    masm.sqrtsd(input, output);
     return true;
 }
 
@@ -443,15 +442,12 @@ bool
 CodeGeneratorX86Shared::visitPowHalfD(LPowHalfD *ins)
 {
     FloatRegister input = ToFloatRegister(ins->input());
-    Register scratch = ToRegister(ins->temp());
     JS_ASSERT(input == ToFloatRegister(ins->output()));
 
-    const uint32_t NegInfinityFloatBits = 0xFF800000;
     Label done, sqrt;
 
     // Branch if not -Infinity.
-    masm.move32(Imm32(NegInfinityFloatBits), scratch);
-    masm.loadFloatAsDouble(scratch, ScratchFloatReg);
+    masm.loadConstantDouble(NegativeInfinity(), ScratchFloatReg);
     masm.branchDouble(Assembler::DoubleNotEqualOrUnordered, input, ScratchFloatReg, &sqrt);
 
     // Math.pow(-Infinity, 0.5) == Infinity.
@@ -1532,5 +1528,5 @@ CodeGeneratorX86Shared::visitNegD(LNegD *ins)
 }
 
 
-} // namespace ion
+} // namespace jit
 } // namespace js

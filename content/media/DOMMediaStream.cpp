@@ -4,7 +4,6 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "DOMMediaStream.h"
-#include "nsDOMClassInfoID.h"
 #include "nsContentUtils.h"
 #include "mozilla/dom/MediaStreamBinding.h"
 #include "mozilla/dom/LocalMediaStreamBinding.h"
@@ -238,6 +237,14 @@ DOMMediaStream::CreateTrackUnionStream(nsIDOMWindow* aWindow, TrackTypeHints aHi
   nsRefPtr<DOMMediaStream> stream = new DOMMediaStream();
   stream->InitTrackUnionStream(aWindow, aHintContents);
   return stream.forget();
+}
+
+void
+DOMMediaStream::SetTrackEnabled(TrackID aTrackID, bool aEnabled)
+{
+  if (mStream) {
+    mStream->SetTrackEnabled(aTrackID, aEnabled);
+  }
 }
 
 bool

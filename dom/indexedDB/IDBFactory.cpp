@@ -4,8 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "base/basictypes.h"
-
 #include "IDBFactory.h"
 
 #include "nsIFile.h"
@@ -88,7 +86,7 @@ IDBFactory::~IDBFactory()
   }
   if (mRootedOwningObject) {
     mOwningObject = nullptr;
-    NS_DROP_JS_OBJECTS(this, IDBFactory);
+    mozilla::DropJSObjects(this);
   }
 }
 
@@ -231,7 +229,7 @@ IDBFactory::Create(ContentParent* aContentParent,
   rv = Create(cx, global, aContentParent, getter_AddRefs(factory));
   NS_ENSURE_SUCCESS(rv, rv);
 
-  NS_HOLD_JS_OBJECTS(factory, IDBFactory);
+  mozilla::HoldJSObjects(factory.get());
   factory->mRootedOwningObject = true;
 
   factory.forget(aFactory);
@@ -510,7 +508,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(IDBFactory)
     tmp->mOwningObject = nullptr;
   }
   if (tmp->mRootedOwningObject) {
-    NS_DROP_JS_OBJECTS(tmp, IDBFactory);
+    mozilla::DropJSObjects(tmp);
     tmp->mRootedOwningObject = false;
   }
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mWindow)

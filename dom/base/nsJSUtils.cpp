@@ -13,23 +13,19 @@
 
 #include "nsJSUtils.h"
 #include "jsapi.h"
-#include "jsdbgapi.h"
-#include "prprf.h"
+#include "js/OldDebugAPI.h"
+#include "jsfriendapi.h"
 #include "nsIScriptContext.h"
 #include "nsIScriptGlobalObject.h"
-#include "nsIServiceManager.h"
 #include "nsIXPConnect.h"
 #include "nsCOMPtr.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsPIDOMWindow.h"
 #include "GeckoProfiler.h"
-
 #include "nsDOMJSUtils.h" // for GetScriptContextFromJSContext
-
-#include "nsContentUtils.h"
 #include "nsJSPrincipals.h"
-
-#include "mozilla/dom/BindingUtils.h"
+#include "xpcpublic.h"
+#include "nsContentUtils.h"
 
 bool
 nsJSUtils::GetCallingLocation(JSContext* aContext, const char* *aFilename,
@@ -145,7 +141,11 @@ nsJSUtils::ReportPendingException(JSContext *aContext)
   if (JS_IsExceptionPending(aContext)) {
     bool saved = JS_SaveFrameChain(aContext);
     {
-      JSAutoCompartment ac(aContext, js::DefaultObjectForContextOrNull(aContext));
+      nsIScriptContext* scx = GetScriptContextFromJSContext(aContext);
+      JS::Rooted<JSObject*> scope(aContext);
+      scope = scx ? scx->GetWindowProxy()
+                  : js::DefaultObjectForContextOrNull(aContext);
+      JSAutoCompartment ac(aContext, scope);
       JS_ReportPendingException(aContext);
     }
     if (saved) {
@@ -177,7 +177,9 @@ nsJSUtils::CompileFunction(JSContext* aCx,
   aOptions.setPrincipals(p);
 
   // Do the junk Gecko is supposed to do before calling into JSAPI.
-  xpc_UnmarkGrayObject(aTarget);
+  if (aTarget) {
+    JS::ExposeObjectToActiveJS(aTarget);
+  }
 
   // Compile.
   JSFunction* fun = JS::CompileFunction(aCx, aTarget, aOptions,
@@ -193,6 +195,27 @@ nsJSUtils::CompileFunction(JSContext* aCx,
   *aFunctionObject = JS_GetFunctionObject(fun);
   return NS_OK;
 }
+
+class MOZ_STACK_CLASS AutoDontReportUncaught {
+  JSContext* mContext;
+  bool mWasSet;
+
+public:
+  AutoDontReportUncaught(JSContext* aContext) : mContext(aContext) {
+    MOZ_ASSERT(aContext);
+    uint32_t oldOptions = JS_GetOptions(mContext);
+    mWasSet = oldOptions & JSOPTION_DONT_REPORT_UNCAUGHT;
+    if (!mWasSet) {
+      JS_SetOptions(mContext, oldOptions | JSOPTION_DONT_REPORT_UNCAUGHT);
+    }
+  }
+  ~AutoDontReportUncaught() {
+    if (!mWasSet) {
+      JS_SetOptions(mContext,
+                    JS_GetOptions(mContext) & ~JSOPTION_DONT_REPORT_UNCAUGHT);
+    }
+  }
+};
 
 nsresult
 nsJSUtils::EvaluateString(JSContext* aCx,
@@ -217,7 +240,7 @@ nsJSUtils::EvaluateString(JSContext* aCx,
     *aRetValue = JSVAL_VOID;
   }
 
-  xpc_UnmarkGrayObject(aScopeObject);
+  JS::ExposeObjectToActiveJS(aScopeObject);
   nsAutoMicroTask mt;
 
   JSPrincipals* p = JS_GetCompartmentPrincipals(js::GetObjectCompartment(aScopeObject));
@@ -228,6 +251,13 @@ nsJSUtils::EvaluateString(JSContext* aCx,
                   CanExecuteScripts(aCx, nsJSPrincipals::get(p), &ok);
   NS_ENSURE_SUCCESS(rv, rv);
   NS_ENSURE_TRUE(ok, NS_OK);
+
+  mozilla::Maybe<AutoDontReportUncaught> dontReport;
+  if (!aEvaluateOptions.reportUncaught) {
+    // We need to prevent AutoLastFrameCheck from reporting and clearing
+    // any pending exceptions.
+    dontReport.construct(aCx);
+  }
 
   // Scope the JSAutoCompartment so that we can later wrap the return value
   // into the caller's cx.
@@ -263,4 +293,20 @@ nsJSUtils::EvaluateString(JSContext* aCx,
   if (aRetValue && !JS_WrapValue(aCx, aRetValue))
     return NS_ERROR_OUT_OF_MEMORY;
   return rv;
+}
+
+//
+// nsDOMJSUtils.h
+//
+
+JSObject* GetDefaultScopeFromJSContext(JSContext *cx)
+{
+  // DOM JSContexts don't store their default compartment object on
+  // the cx, so in those cases we need to fetch it via the scx
+  // instead.
+  nsIScriptContext *scx = GetScriptContextFromJSContext(cx);
+  if (scx) {
+    return scx->GetWindowProxy();
+  }
+  return js::DefaultObjectForContextOrNull(cx);
 }

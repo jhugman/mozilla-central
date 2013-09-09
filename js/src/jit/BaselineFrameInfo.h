@@ -9,6 +9,8 @@
 
 #ifdef JS_ION
 
+#include "mozilla/Alignment.h"
+
 #include "jit/BaselineFrame.h"
 #include "jit/BaselineJIT.h"
 #include "jit/BaselineRegisters.h"
@@ -17,7 +19,7 @@
 #include "jit/IonMacroAssembler.h"
 
 namespace js {
-namespace ion {
+namespace jit {
 
 // FrameInfo overview.
 //
@@ -325,7 +327,7 @@ class FrameInfo
 #endif
 };
 
-} // namespace ion
+} // namespace jit
 } // namespace js
 
 #endif // JS_ION

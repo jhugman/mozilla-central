@@ -21,7 +21,6 @@
 #include "jsatom.h"
 #include "jsautooplen.h"
 #include "jscntxt.h"
-#include "jsdbgapi.h"
 #include "jsfun.h"
 #include "jsgc.h"
 #include "jsiter.h"
@@ -39,6 +38,7 @@
 #include "builtin/Eval.h"
 #include "jit/BaselineJIT.h"
 #include "jit/Ion.h"
+#include "js/OldDebugAPI.h"
 #include "vm/Debugger.h"
 #include "vm/Shape.h"
 
@@ -417,22 +417,22 @@ js::RunScript(JSContext *cx, RunState &state)
     SPSEntryMarker marker(cx->runtime());
 
 #ifdef JS_ION
-    if (ion::IsEnabled(cx)) {
-        ion::MethodStatus status = ion::CanEnter(cx, state);
-        if (status == ion::Method_Error)
+    if (jit::IsIonEnabled(cx)) {
+        jit::MethodStatus status = jit::CanEnter(cx, state);
+        if (status == jit::Method_Error)
             return false;
-        if (status == ion::Method_Compiled) {
-            ion::IonExecStatus status = ion::Cannon(cx, state);
+        if (status == jit::Method_Compiled) {
+            jit::IonExecStatus status = jit::Cannon(cx, state);
             return !IsErrorStatus(status);
         }
     }
 
-    if (ion::IsBaselineEnabled(cx)) {
-        ion::MethodStatus status = ion::CanEnterBaselineMethod(cx, state);
-        if (status == ion::Method_Error)
+    if (jit::IsBaselineEnabled(cx)) {
+        jit::MethodStatus status = jit::CanEnterBaselineMethod(cx, state);
+        if (status == jit::Method_Error)
             return false;
-        if (status == ion::Method_Compiled) {
-            ion::IonExecStatus status = ion::EnterBaselineMethod(cx, state);
+        if (status == jit::Method_Compiled) {
+            jit::IonExecStatus status = jit::EnterBaselineMethod(cx, state);
             return !IsErrorStatus(status);
         }
     }
@@ -953,8 +953,8 @@ TryNoteIter::settle()
     }
 }
 
-#define PUSH_COPY(v)             do { *regs.sp++ = v; assertSameCompartmentDebugOnly(cx, regs.sp[-1]); } while (0)
-#define PUSH_COPY_SKIP_CHECK(v)  *regs.sp++ = v
+#define PUSH_COPY(v)             do { *regs.sp++ = (v); assertSameCompartmentDebugOnly(cx, regs.sp[-1]); } while (0)
+#define PUSH_COPY_SKIP_CHECK(v)  *regs.sp++ = (v)
 #define PUSH_NULL()              regs.sp++->setNull()
 #define PUSH_UNDEFINED()         regs.sp++->setUndefined()
 #define PUSH_BOOLEAN(b)          regs.sp++->setBoolean(b)
@@ -964,40 +964,16 @@ TryNoteIter::settle()
 #define PUSH_OBJECT(obj)         do { regs.sp++->setObject(obj); assertSameCompartmentDebugOnly(cx, regs.sp[-1]); } while (0)
 #define PUSH_OBJECT_OR_NULL(obj) do { regs.sp++->setObjectOrNull(obj); assertSameCompartmentDebugOnly(cx, regs.sp[-1]); } while (0)
 #define PUSH_HOLE()              regs.sp++->setMagic(JS_ELEMENTS_HOLE)
-#define POP_COPY_TO(v)           v = *--regs.sp
+#define POP_COPY_TO(v)           (v) = *--regs.sp
 #define POP_RETURN_VALUE()       regs.fp()->setReturnValue(*--regs.sp)
 
 #define FETCH_OBJECT(cx, n, obj)                                              \
     JS_BEGIN_MACRO                                                            \
         HandleValue val = regs.stackHandleAt(n);                              \
-        obj = ToObjectFromStack(cx, (val));                                   \
+        obj = ToObjectFromStack((cx), (val));                                 \
         if (!obj)                                                             \
             goto error;                                                       \
     JS_END_MACRO
-
-template<typename T>
-class GenericInterruptEnabler : public InterpreterFrames::InterruptEnablerBase {
-  public:
-    GenericInterruptEnabler(T *variable, T value) : variable(variable), value(value) { }
-    void enable() const { *variable = value; }
-
-  private:
-    T *variable;
-    T value;
-};
-
-inline InterpreterFrames::InterpreterFrames(JSContext *cx, FrameRegs *regs,
-                                            const InterruptEnablerBase &enabler)
-  : context(cx), regs(regs), enabler(enabler)
-{
-    older = cx->runtime()->interpreterFrames;
-    cx->runtime()->interpreterFrames = this;
-}
-
-inline InterpreterFrames::~InterpreterFrames()
-{
-    context->runtime()->interpreterFrames = older;
-}
 
 /*
  * Ensure that the interpreter switch can close call-bytecode cases in the
@@ -1285,42 +1261,41 @@ Interpret(JSContext *cx, RunState &state)
 
     JS_ASSERT(!cx->compartment()->activeAnalysis);
 
-#define CHECK_PCCOUNT_INTERRUPTS() JS_ASSERT_IF(script->hasScriptCounts, switchMask == -1)
+#define CHECK_PCCOUNT_INTERRUPTS() \
+    JS_ASSERT_IF(script->hasScriptCounts, switchMask == EnableInterruptsPseudoOpcode)
 
-    register int switchMask = 0;
-    int switchOp;
-    typedef GenericInterruptEnabler<int> InterruptEnabler;
-    InterruptEnabler interrupts(&switchMask, -1);
+    /*
+     * When Debugger puts a script in single-step mode, all js::Interpret
+     * invocations that might be presently running that script must have
+     * interrupts enabled. It's not practical to simply check
+     * script->stepModeEnabled() at each point some callee could have changed
+     * it, because there are so many places js::Interpret could possibly cause
+     * JavaScript to run: each place an object might be coerced to a primitive
+     * or a number, for example. So instead, we expose a simple mechanism to
+     * let Debugger tweak the affected js::Interpret frames when an onStep
+     * handler is added: setting switchMask to EnableInterruptsPseudoOpcode
+     * will enable interrupts.
+     */
+    static_assert(EnableInterruptsPseudoOpcode >= JSOP_LIMIT,
+                  "EnableInterruptsPseudoOpcode must be greater than any opcode");
+    static_assert(EnableInterruptsPseudoOpcode == jsbytecode(-1),
+                  "EnableInterruptsPseudoOpcode must be the maximum jsbytecode value");
+    jsbytecode switchMask = 0;
+    jsbytecode switchOp;
 
-# define DO_OP()            goto do_op
+#define DO_OP()            goto do_op
 
-# define BEGIN_CASE(OP)     case OP:
-# define END_CASE(OP)       END_CASE_LEN(OP##_LENGTH)
-# define END_CASE_LEN(n)    END_CASE_LENX(n)
-# define END_CASE_LENX(n)   END_CASE_LEN##n
+#define BEGIN_CASE(OP)     case OP:
+#define END_CASE(OP)                                                          \
+    JS_BEGIN_MACRO                                                            \
+        len = OP##_LENGTH;                                                    \
+        goto advanceAndDoOp;                                                  \
+    JS_END_MACRO;
 
-/*
- * To share the code for all len == 1 cases we use the specialized label with
- * code that falls through to advanceAndDoOp: .
- */
-# define END_CASE_LEN1      goto advance_pc_by_one;
-# define END_CASE_LEN2      len = 2; goto advanceAndDoOp;
-# define END_CASE_LEN3      len = 3; goto advanceAndDoOp;
-# define END_CASE_LEN4      len = 4; goto advanceAndDoOp;
-# define END_CASE_LEN5      len = 5; goto advanceAndDoOp;
-# define END_CASE_LEN6      len = 6; goto advanceAndDoOp;
-# define END_CASE_LEN7      len = 7; goto advanceAndDoOp;
-# define END_CASE_LEN8      len = 8; goto advanceAndDoOp;
-# define END_CASE_LEN9      len = 9; goto advanceAndDoOp;
-# define END_CASE_LEN10     len = 10; goto advanceAndDoOp;
-# define END_CASE_LEN11     len = 11; goto advanceAndDoOp;
-# define END_CASE_LEN12     len = 12; goto advanceAndDoOp;
-# define END_VARLEN_CASE    goto advanceAndDoOp;
-# define ADD_EMPTY_CASE(OP) BEGIN_CASE(OP)
-# define END_EMPTY_CASES    goto advance_pc_by_one;
+#define END_VARLEN_CASE    goto advanceAndDoOp;
 
 #define LOAD_DOUBLE(PCOFF, dbl)                                               \
-    (dbl = script->getConst(GET_UINT32_INDEX(regs.pc + (PCOFF))).toDouble())
+    ((dbl) = script->getConst(GET_UINT32_INDEX(regs.pc + (PCOFF))).toDouble())
 
     /*
      * Prepare to call a user-supplied branch handler, and abort the script
@@ -1328,16 +1303,17 @@ Interpret(JSContext *cx, RunState &state)
      */
 #define CHECK_BRANCH()                                                        \
     JS_BEGIN_MACRO                                                            \
-        if (cx->runtime()->interrupt && !js_HandleExecutionInterrupt(cx))       \
+        if (cx->runtime()->interrupt && !js_HandleExecutionInterrupt(cx))     \
             goto error;                                                       \
     JS_END_MACRO
 
 #define BRANCH(n)                                                             \
     JS_BEGIN_MACRO                                                            \
-        regs.pc += (n);                                                       \
+        int32_t nlen = (n);                                                   \
+        regs.pc += nlen;                                                      \
         op = (JSOp) *regs.pc;                                                 \
-        if ((n) <= 0)                                                         \
-            goto check_backedge;                                              \
+        if (nlen <= 0)                                                        \
+            CHECK_BRANCH();                                                   \
         DO_OP();                                                              \
     JS_END_MACRO
 
@@ -1345,7 +1321,7 @@ Interpret(JSContext *cx, RunState &state)
     JS_BEGIN_MACRO                                                            \
         script = (s);                                                         \
         if (script->hasAnyBreakpointsOrStepMode() || script->hasScriptCounts) \
-            interrupts.enable();                                              \
+            switchMask = EnableInterruptsPseudoOpcode; /* Enable interrupts. */ \
     JS_END_MACRO
 
     FrameRegs regs;
@@ -1364,13 +1340,7 @@ Interpret(JSContext *cx, RunState &state)
 
     JS_ASSERT_IF(entryFrame->isEvalFrame(), state.script()->isActiveEval);
 
-    InterpreterActivation activation(cx, entryFrame, regs);
-
-    /*
-     * Help Debugger find frames running scripts that it has put in
-     * single-step mode.
-     */
-    InterpreterFrames interpreterFrame(cx, &regs, interrupts);
+    InterpreterActivation activation(cx, entryFrame, regs, &switchMask);
 
     /* Copy in hot values that change infrequently. */
     JSRuntime *const rt = cx->runtime();
@@ -1450,140 +1420,139 @@ Interpret(JSContext *cx, RunState &state)
     len = 0;
 
     if (rt->profilingScripts || cx->runtime()->debugHooks.interruptHook)
-        interrupts.enable();
+        switchMask = EnableInterruptsPseudoOpcode; /* Enable interrupts. */
 
-    goto advanceAndDoOp;
+  advanceAndDoOp:
+    js::gc::MaybeVerifyBarriers(cx);
+    regs.pc += len;
+    op = (JSOp) *regs.pc;
 
-    for (;;) {
-      advance_pc_by_one:
-        JS_ASSERT(js_CodeSpec[op].length == 1);
-        len = 1;
-      advanceAndDoOp:
-        js::gc::MaybeVerifyBarriers(cx);
-        regs.pc += len;
-        op = (JSOp) *regs.pc;
+  do_op:
+    CHECK_PCCOUNT_INTERRUPTS();
+    switchOp = jsbytecode(op) | switchMask;
+  do_switch:
+    switch (switchOp) {
 
-      do_op:
-        CHECK_PCCOUNT_INTERRUPTS();
-        switchOp = int(op) | switchMask;
-      do_switch:
-        switch (switchOp) {
+BEGIN_CASE(EnableInterruptsPseudoOpcode)
+{
+    bool moreInterrupts = false;
 
-  case -1:
-    JS_ASSERT(switchMask == -1);
-    {
-        bool moreInterrupts = false;
-
-        if (cx->runtime()->profilingScripts) {
-            if (!script->hasScriptCounts)
-                script->initScriptCounts(cx);
-            moreInterrupts = true;
-        }
-
-        if (script->hasScriptCounts) {
-            PCCounts counts = script->getPCCounts(regs.pc);
-            counts.get(PCCounts::BASE_INTERP)++;
-            moreInterrupts = true;
-        }
-
-        JSInterruptHook hook = cx->runtime()->debugHooks.interruptHook;
-        if (hook || script->stepModeEnabled()) {
-            RootedValue rval(cx);
-            JSTrapStatus status = JSTRAP_CONTINUE;
-            if (hook)
-                status = hook(cx, script, regs.pc, rval.address(), cx->runtime()->debugHooks.interruptHookData);
-            if (status == JSTRAP_CONTINUE && script->stepModeEnabled())
-                status = Debugger::onSingleStep(cx, &rval);
-            switch (status) {
-              case JSTRAP_ERROR:
-                goto error;
-              case JSTRAP_CONTINUE:
-                break;
-              case JSTRAP_RETURN:
-                regs.fp()->setReturnValue(rval);
-                interpReturnOK = true;
-                goto forced_return;
-              case JSTRAP_THROW:
-                cx->setPendingException(rval);
-                goto error;
-              default:;
-            }
-            moreInterrupts = true;
-        }
-
-        if (script->hasAnyBreakpointsOrStepMode())
-            moreInterrupts = true;
-
-        if (script->hasBreakpointsAt(regs.pc)) {
-            RootedValue rval(cx);
-            JSTrapStatus status = Debugger::onTrap(cx, &rval);
-            switch (status) {
-              case JSTRAP_ERROR:
-                goto error;
-              case JSTRAP_RETURN:
-                regs.fp()->setReturnValue(rval);
-                interpReturnOK = true;
-                goto forced_return;
-              case JSTRAP_THROW:
-                cx->setPendingException(rval);
-                goto error;
-              default:
-                break;
-            }
-            JS_ASSERT(status == JSTRAP_CONTINUE);
-            JS_ASSERT(rval.isInt32() && rval.toInt32() == op);
-        }
-
-        switchMask = moreInterrupts ? -1 : 0;
-        switchOp = int(op);
-        goto do_switch;
+    if (cx->runtime()->profilingScripts) {
+        if (!script->hasScriptCounts)
+            script->initScriptCounts(cx);
+        moreInterrupts = true;
     }
 
-/* No-ops for ease of decompilation. */
-ADD_EMPTY_CASE(JSOP_NOP)
-ADD_EMPTY_CASE(JSOP_UNUSED125)
-ADD_EMPTY_CASE(JSOP_UNUSED126)
-ADD_EMPTY_CASE(JSOP_UNUSED132)
-ADD_EMPTY_CASE(JSOP_UNUSED148)
-ADD_EMPTY_CASE(JSOP_UNUSED161)
-ADD_EMPTY_CASE(JSOP_UNUSED162)
-ADD_EMPTY_CASE(JSOP_UNUSED163)
-ADD_EMPTY_CASE(JSOP_UNUSED164)
-ADD_EMPTY_CASE(JSOP_UNUSED165)
-ADD_EMPTY_CASE(JSOP_UNUSED166)
-ADD_EMPTY_CASE(JSOP_UNUSED167)
-ADD_EMPTY_CASE(JSOP_UNUSED168)
-ADD_EMPTY_CASE(JSOP_UNUSED169)
-ADD_EMPTY_CASE(JSOP_UNUSED170)
-ADD_EMPTY_CASE(JSOP_UNUSED171)
-ADD_EMPTY_CASE(JSOP_UNUSED172)
-ADD_EMPTY_CASE(JSOP_UNUSED173)
-ADD_EMPTY_CASE(JSOP_UNUSED174)
-ADD_EMPTY_CASE(JSOP_UNUSED175)
-ADD_EMPTY_CASE(JSOP_UNUSED176)
-ADD_EMPTY_CASE(JSOP_UNUSED177)
-ADD_EMPTY_CASE(JSOP_UNUSED178)
-ADD_EMPTY_CASE(JSOP_UNUSED179)
-ADD_EMPTY_CASE(JSOP_UNUSED180)
-ADD_EMPTY_CASE(JSOP_UNUSED181)
-ADD_EMPTY_CASE(JSOP_UNUSED182)
-ADD_EMPTY_CASE(JSOP_UNUSED183)
-ADD_EMPTY_CASE(JSOP_UNUSED188)
-ADD_EMPTY_CASE(JSOP_UNUSED189)
-ADD_EMPTY_CASE(JSOP_UNUSED190)
-ADD_EMPTY_CASE(JSOP_UNUSED200)
-ADD_EMPTY_CASE(JSOP_UNUSED201)
-ADD_EMPTY_CASE(JSOP_UNUSED208)
-ADD_EMPTY_CASE(JSOP_UNUSED209)
-ADD_EMPTY_CASE(JSOP_UNUSED210)
-ADD_EMPTY_CASE(JSOP_UNUSED219)
-ADD_EMPTY_CASE(JSOP_UNUSED220)
-ADD_EMPTY_CASE(JSOP_UNUSED221)
-ADD_EMPTY_CASE(JSOP_UNUSED222)
-ADD_EMPTY_CASE(JSOP_UNUSED223)
-ADD_EMPTY_CASE(JSOP_CONDSWITCH)
-ADD_EMPTY_CASE(JSOP_TRY)
-END_EMPTY_CASES
+    if (script->hasScriptCounts) {
+        PCCounts counts = script->getPCCounts(regs.pc);
+        counts.get(PCCounts::BASE_INTERP)++;
+        moreInterrupts = true;
+    }
+
+    JSInterruptHook hook = cx->runtime()->debugHooks.interruptHook;
+    if (hook || script->stepModeEnabled()) {
+        RootedValue rval(cx);
+        JSTrapStatus status = JSTRAP_CONTINUE;
+        if (hook)
+            status = hook(cx, script, regs.pc, rval.address(), cx->runtime()->debugHooks.interruptHookData);
+        if (status == JSTRAP_CONTINUE && script->stepModeEnabled())
+            status = Debugger::onSingleStep(cx, &rval);
+        switch (status) {
+          case JSTRAP_ERROR:
+            goto error;
+          case JSTRAP_CONTINUE:
+            break;
+          case JSTRAP_RETURN:
+            regs.fp()->setReturnValue(rval);
+            interpReturnOK = true;
+            goto forced_return;
+          case JSTRAP_THROW:
+            cx->setPendingException(rval);
+            goto error;
+          default:;
+        }
+        moreInterrupts = true;
+    }
+
+    if (script->hasAnyBreakpointsOrStepMode())
+        moreInterrupts = true;
+
+    if (script->hasBreakpointsAt(regs.pc)) {
+        RootedValue rval(cx);
+        JSTrapStatus status = Debugger::onTrap(cx, &rval);
+        switch (status) {
+          case JSTRAP_ERROR:
+            goto error;
+          case JSTRAP_RETURN:
+            regs.fp()->setReturnValue(rval);
+            interpReturnOK = true;
+            goto forced_return;
+          case JSTRAP_THROW:
+            cx->setPendingException(rval);
+            goto error;
+          default:
+            break;
+        }
+        JS_ASSERT(status == JSTRAP_CONTINUE);
+        JS_ASSERT(rval.isInt32() && rval.toInt32() == op);
+    }
+
+    JS_ASSERT(switchMask == EnableInterruptsPseudoOpcode);
+    switchMask = moreInterrupts ? EnableInterruptsPseudoOpcode : 0;
+
+    switchOp = jsbytecode(op);
+    goto do_switch;
+}
+
+/* Various 1-byte no-ops. */
+BEGIN_CASE(JSOP_NOP)
+BEGIN_CASE(JSOP_UNUSED125)
+BEGIN_CASE(JSOP_UNUSED126)
+BEGIN_CASE(JSOP_UNUSED132)
+BEGIN_CASE(JSOP_UNUSED148)
+BEGIN_CASE(JSOP_UNUSED161)
+BEGIN_CASE(JSOP_UNUSED162)
+BEGIN_CASE(JSOP_UNUSED163)
+BEGIN_CASE(JSOP_UNUSED164)
+BEGIN_CASE(JSOP_UNUSED165)
+BEGIN_CASE(JSOP_UNUSED166)
+BEGIN_CASE(JSOP_UNUSED167)
+BEGIN_CASE(JSOP_UNUSED168)
+BEGIN_CASE(JSOP_UNUSED169)
+BEGIN_CASE(JSOP_UNUSED170)
+BEGIN_CASE(JSOP_UNUSED171)
+BEGIN_CASE(JSOP_UNUSED172)
+BEGIN_CASE(JSOP_UNUSED173)
+BEGIN_CASE(JSOP_UNUSED174)
+BEGIN_CASE(JSOP_UNUSED175)
+BEGIN_CASE(JSOP_UNUSED176)
+BEGIN_CASE(JSOP_UNUSED177)
+BEGIN_CASE(JSOP_UNUSED178)
+BEGIN_CASE(JSOP_UNUSED179)
+BEGIN_CASE(JSOP_UNUSED180)
+BEGIN_CASE(JSOP_UNUSED181)
+BEGIN_CASE(JSOP_UNUSED182)
+BEGIN_CASE(JSOP_UNUSED183)
+BEGIN_CASE(JSOP_UNUSED188)
+BEGIN_CASE(JSOP_UNUSED189)
+BEGIN_CASE(JSOP_UNUSED190)
+BEGIN_CASE(JSOP_UNUSED200)
+BEGIN_CASE(JSOP_UNUSED201)
+BEGIN_CASE(JSOP_UNUSED208)
+BEGIN_CASE(JSOP_UNUSED209)
+BEGIN_CASE(JSOP_UNUSED210)
+BEGIN_CASE(JSOP_UNUSED219)
+BEGIN_CASE(JSOP_UNUSED220)
+BEGIN_CASE(JSOP_UNUSED221)
+BEGIN_CASE(JSOP_UNUSED222)
+BEGIN_CASE(JSOP_UNUSED223)
+BEGIN_CASE(JSOP_CONDSWITCH)
+BEGIN_CASE(JSOP_TRY)
+{
+    JS_ASSERT(js_CodeSpec[op].length == 1);
+    len = 1;
+    goto advanceAndDoOp;
+}
 
 BEGIN_CASE(JSOP_LOOPHEAD)
 END_CASE(JSOP_LOOPHEAD)
@@ -1591,28 +1560,22 @@ END_CASE(JSOP_LOOPHEAD)
 BEGIN_CASE(JSOP_LABEL)
 END_CASE(JSOP_LABEL)
 
-check_backedge:
-{
-    CHECK_BRANCH();
-    DO_OP();
-}
-
 BEGIN_CASE(JSOP_LOOPENTRY)
 
 #ifdef JS_ION
     // Attempt on-stack replacement with Baseline code.
-    if (ion::IsBaselineEnabled(cx)) {
-        ion::MethodStatus status = ion::CanEnterBaselineAtBranch(cx, regs.fp(), false);
-        if (status == ion::Method_Error)
+    if (jit::IsBaselineEnabled(cx)) {
+        jit::MethodStatus status = jit::CanEnterBaselineAtBranch(cx, regs.fp(), false);
+        if (status == jit::Method_Error)
             goto error;
-        if (status == ion::Method_Compiled) {
-            ion::IonExecStatus maybeOsr = ion::EnterBaselineAtBranch(cx, regs.fp(), regs.pc);
+        if (status == jit::Method_Compiled) {
+            jit::IonExecStatus maybeOsr = jit::EnterBaselineAtBranch(cx, regs.fp(), regs.pc);
 
             // We failed to call into baseline at all, so treat as an error.
-            if (maybeOsr == ion::IonExec_Aborted)
+            if (maybeOsr == jit::IonExec_Aborted)
                 goto error;
 
-            interpReturnOK = (maybeOsr == ion::IonExec_Ok);
+            interpReturnOK = (maybeOsr == jit::IonExec_Ok);
 
             if (entryFrame != regs.fp())
                 goto jit_return_pop_frame;
@@ -1626,7 +1589,6 @@ END_CASE(JSOP_LOOPENTRY)
 BEGIN_CASE(JSOP_NOTEARG)
 END_CASE(JSOP_NOTEARG)
 
-/* ADD_EMPTY_CASE is not used here as JSOP_LINENO_LENGTH == 3. */
 BEGIN_CASE(JSOP_LINENO)
 END_CASE(JSOP_LINENO)
 
@@ -1744,19 +1706,15 @@ BEGIN_CASE(JSOP_DEFAULT)
     /* FALL THROUGH */
 BEGIN_CASE(JSOP_GOTO)
 {
-    len = GET_JUMP_OFFSET(regs.pc);
-    BRANCH(len);
+    BRANCH(GET_JUMP_OFFSET(regs.pc));
 }
-END_CASE(JSOP_GOTO)
 
 BEGIN_CASE(JSOP_IFEQ)
 {
     bool cond = ToBooleanOp(regs);
     regs.sp--;
-    if (cond == false) {
-        len = GET_JUMP_OFFSET(regs.pc);
-        BRANCH(len);
-    }
+    if (!cond)
+        BRANCH(GET_JUMP_OFFSET(regs.pc));
 }
 END_CASE(JSOP_IFEQ)
 
@@ -1764,17 +1722,15 @@ BEGIN_CASE(JSOP_IFNE)
 {
     bool cond = ToBooleanOp(regs);
     regs.sp--;
-    if (cond != false) {
-        len = GET_JUMP_OFFSET(regs.pc);
-        BRANCH(len);
-    }
+    if (cond)
+        BRANCH(GET_JUMP_OFFSET(regs.pc));
 }
 END_CASE(JSOP_IFNE)
 
 BEGIN_CASE(JSOP_OR)
 {
     bool cond = ToBooleanOp(regs);
-    if (cond == true) {
+    if (cond) {
         len = GET_JUMP_OFFSET(regs.pc);
         goto advanceAndDoOp;
     }
@@ -1784,7 +1740,7 @@ END_CASE(JSOP_OR)
 BEGIN_CASE(JSOP_AND)
 {
     bool cond = ToBooleanOp(regs);
-    if (cond == false) {
+    if (!cond) {
         len = GET_JUMP_OFFSET(regs.pc);
         goto advanceAndDoOp;
     }
@@ -1793,20 +1749,19 @@ END_CASE(JSOP_AND)
 
 #define FETCH_ELEMENT_ID(n, id)                                               \
     JS_BEGIN_MACRO                                                            \
-        if (!ValueToId<CanGC>(cx, regs.stackHandleAt(n), &id))                \
+        if (!ValueToId<CanGC>(cx, regs.stackHandleAt(n), &(id)))              \
             goto error;                                                       \
     JS_END_MACRO
 
 #define TRY_BRANCH_AFTER_COND(cond,spdec)                                     \
     JS_BEGIN_MACRO                                                            \
         JS_ASSERT(js_CodeSpec[op].length == 1);                               \
-        unsigned diff_ = (unsigned) GET_UINT8(regs.pc) - (unsigned) JSOP_IFEQ;         \
+        unsigned diff_ = (unsigned) GET_UINT8(regs.pc) - (unsigned) JSOP_IFEQ;\
         if (diff_ <= 1) {                                                     \
-            regs.sp -= spdec;                                                 \
-            if (cond == (diff_ != 0)) {                                       \
+            regs.sp -= (spdec);                                               \
+            if ((cond) == (diff_ != 0)) {                                     \
                 ++regs.pc;                                                    \
-                len = GET_JUMP_OFFSET(regs.pc);                               \
-                BRANCH(len);                                                  \
+                BRANCH(GET_JUMP_OFFSET(regs.pc));                             \
             }                                                                 \
             len = 1 + JSOP_IFEQ_LENGTH;                                       \
             goto advanceAndDoOp;                                              \
@@ -2025,7 +1980,7 @@ END_CASE(JSOP_NE)
         bool equal;                                                           \
         if (!StrictlyEqual(cx, lref, rref, &equal))                           \
             goto error;                                                       \
-        COND = equal OP true;                                                 \
+        (COND) = equal OP true;                                               \
         regs.sp--;                                                            \
     JS_END_MACRO
 
@@ -2051,8 +2006,7 @@ BEGIN_CASE(JSOP_CASE)
     STRICT_EQUALITY_OP(==, cond);
     if (cond) {
         regs.sp--;
-        len = GET_JUMP_OFFSET(regs.pc);
-        BRANCH(len);
+        BRANCH(GET_JUMP_OFFSET(regs.pc));
     }
 }
 END_CASE(JSOP_CASE)
@@ -2515,39 +2469,41 @@ BEGIN_CASE(JSOP_FUNCALL)
     InitialFrameFlags initial = construct ? INITIAL_CONSTRUCT : INITIAL_NONE;
     bool newType = cx->typeInferenceEnabled() && UseNewType(cx, script, regs.pc);
 
+    TypeMonitorCall(cx, args, construct);
+
 #ifdef JS_ION
-    InvokeState state(cx, args, initial);
-    if (newType)
-        state.setUseNewType();
+    {
+        InvokeState state(cx, args, initial);
+        if (newType)
+            state.setUseNewType();
 
-    if (!newType && ion::IsEnabled(cx)) {
-        ion::MethodStatus status = ion::CanEnter(cx, state);
-        if (status == ion::Method_Error)
-            goto error;
-        if (status == ion::Method_Compiled) {
-            ion::IonExecStatus exec = ion::Cannon(cx, state);
-            CHECK_BRANCH();
-            regs.sp = args.spAfterCall();
-            interpReturnOK = !IsErrorStatus(exec);
-            goto jit_return;
+        if (!newType && jit::IsIonEnabled(cx)) {
+            jit::MethodStatus status = jit::CanEnter(cx, state);
+            if (status == jit::Method_Error)
+                goto error;
+            if (status == jit::Method_Compiled) {
+                jit::IonExecStatus exec = jit::Cannon(cx, state);
+                CHECK_BRANCH();
+                regs.sp = args.spAfterCall();
+                interpReturnOK = !IsErrorStatus(exec);
+                goto jit_return;
+            }
         }
-    }
 
-    if (ion::IsBaselineEnabled(cx)) {
-        ion::MethodStatus status = ion::CanEnterBaselineMethod(cx, state);
-        if (status == ion::Method_Error)
-            goto error;
-        if (status == ion::Method_Compiled) {
-            ion::IonExecStatus exec = ion::EnterBaselineMethod(cx, state);
-            CHECK_BRANCH();
-            regs.sp = args.spAfterCall();
-            interpReturnOK = !IsErrorStatus(exec);
-            goto jit_return;
+        if (jit::IsBaselineEnabled(cx)) {
+            jit::MethodStatus status = jit::CanEnterBaselineMethod(cx, state);
+            if (status == jit::Method_Error)
+                goto error;
+            if (status == jit::Method_Compiled) {
+                jit::IonExecStatus exec = jit::EnterBaselineMethod(cx, state);
+                CHECK_BRANCH();
+                regs.sp = args.spAfterCall();
+                interpReturnOK = !IsErrorStatus(exec);
+                goto jit_return;
+            }
         }
     }
 #endif
-
-    TypeMonitorCall(cx, args, construct);
 
     funScript = fun->nonLazyScript();
     if (!activation.pushInlineFrame(args, funScript, initial))
@@ -3306,17 +3262,18 @@ BEGIN_CASE(JSOP_ARRAYPUSH)
 }
 END_CASE(JSOP_ARRAYPUSH)
 
-          default:
-          {
-            char numBuf[12];
-            JS_snprintf(numBuf, sizeof numBuf, "%d", op);
-            JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL,
-                                 JSMSG_BAD_BYTECODE, numBuf);
-            goto error;
-          }
+default:
+{
+    char numBuf[12];
+    JS_snprintf(numBuf, sizeof numBuf, "%d", op);
+    JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL,
+                         JSMSG_BAD_BYTECODE, numBuf);
+    goto error;
+}
 
-        } /* switch (op) */
-    } /* for (;;) */
+    } /* switch (op) */
+
+    MOZ_ASSUME_UNREACHABLE("Interpreter loop exited via fallthrough");
 
   error:
     JS_ASSERT(uint32_t(regs.pc - script->code) < script->length);
@@ -3524,7 +3481,7 @@ js::Lambda(JSContext *cx, HandleFunction fun, HandleObject parent)
         } else {
 #ifdef JS_ION
             JS_ASSERT(cx->currentlyRunningInJit());
-            frame = ion::GetTopBaselineFrame(cx);
+            frame = jit::GetTopBaselineFrame(cx);
 #endif
         }
 

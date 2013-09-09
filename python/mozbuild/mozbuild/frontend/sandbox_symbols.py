@@ -98,6 +98,10 @@ VARIABLES = {
         delimiters.
         """),
 
+    'EXPORT_LIBRARY': (bool, bool, False,
+        """Install the library to the static libraries folder.
+        """),
+
     'EXTRA_COMPONENTS': (StrictOrderingOnAppendList, list, [],
         """Additional component files to distribute.
 
@@ -134,6 +138,18 @@ VARIABLES = {
         exist. These generally have .cpp extensions.
         """),
 
+    'FAIL_ON_WARNINGS': (bool, bool, False,
+        """Whether to treat warnings as errors.
+        """),
+
+    'FORCE_SHARED_LIB': (bool, bool, False,
+        """Whether the library in this directory is a shared library.
+        """),
+
+    'FORCE_STATIC_LIB': (bool, bool, False,
+        """Whether the library in this directory is a static library.
+        """),
+
     'GTEST_C_SOURCES': (StrictOrderingOnAppendList, list, [],
         """C code source files for GTest unit tests.
 
@@ -165,6 +181,10 @@ VARIABLES = {
         """C source files to compile with the host compiler.
 
         This variable contains a list of C source files to compile.
+        """),
+
+    'IS_COMPONENT': (bool, bool, False,
+        """Whether the library contains a binary XPCOM component manifest.
         """),
 
     'PARALLEL_DIRS': (list, list, [],
@@ -203,6 +223,20 @@ VARIABLES = {
         """Linker libraries and flags.
 
         A list of libraries and flags to include when linking.
+        """),
+
+    'LIBXUL_LIBRARY': (bool, bool, False,
+        """Whether the library in this directory is linked into libxul.
+
+        Implies MOZILLA_INTERNAL_API and FORCE_STATIC_LIB.
+        """),
+
+    'LOCAL_INCLUDES': (StrictOrderingOnAppendList, list, [],
+        """Additional directories to be searched for include files by the compiler.
+        """),
+
+    'MSVC_ENABLE_PGO': (bool, bool, False,
+        """Whether profile-guided optimization is enabled in this directory.
         """),
 
     'SDK_LIBRARY': (StrictOrderingOnAppendList, list, [],
@@ -295,10 +329,8 @@ VARIABLES = {
         """Module name.
 
         Historically, this variable was used to describe where to install header
-        files, but that feature is now handled by EXPORTS_NAMESPACES. Currently
-        it is used as the XPIDL module name if XPIDL_MODULE is not defined, but
-        using XPIDL_MODULE directly is preferred. MODULE will likely be removed
-        in the future.
+        files, but that feature is now handled by EXPORTS_NAMESPACES. MODULE
+        will likely be removed in the future.
         """),
 
     'EXPORTS': (HierarchicalStringList, list, HierarchicalStringList(),
@@ -355,14 +387,6 @@ VARIABLES = {
         MODULE.
         """),
 
-    'XPIDL_FLAGS': (list, list, [],
-        """XPCOM Interface Definition Module Flags.
-
-        This is a list of extra flags that are passed to the IDL compiler.
-        Typically this is a set of -I flags that denote extra include
-        directories to search for included .idl files.
-        """),
-
     'IPDL_SOURCES': (StrictOrderingOnAppendList, list, [],
         """IPDL source files.
 
@@ -410,7 +434,7 @@ FUNCTIONS = {
         include('/elsewhere/foo.build')
         """),
 
-    'add_tier_dir': ('_add_tier_directory', (str, [str, list], bool),
+    'add_tier_dir': ('_add_tier_directory', (str, [str, list], bool, bool),
         """Register a directory for tier traversal.
 
         This is the preferred way to populate the TIERS variable.
@@ -439,6 +463,10 @@ FUNCTIONS = {
 
         # Register a directory as having static content (no dependencies).
         add_tier_dir('base', 'foo', static=True)
+
+        # Register a directory as having external content (same as static
+        # content, but traversed with export, libs, and tools subtiers.
+        add_tier_dir('base', 'bar', external=True)
         """),
 
     'warning': ('_warning', (str,),

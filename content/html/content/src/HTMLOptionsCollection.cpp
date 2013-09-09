@@ -25,7 +25,6 @@
 #include "nsIFormControlFrame.h"
 #include "nsIForm.h"
 #include "nsIFormProcessor.h"
-#include "nsIFrame.h"
 #include "nsIListControlFrame.h"
 #include "nsLayoutUtils.h"
 #include "nsMappedAttributes.h"
@@ -358,6 +357,11 @@ HTMLOptionsCollection::Add(const HTMLOptionOrOptGroupElement& aElement,
                            const Nullable<HTMLElementOrLong>& aBefore,
                            ErrorResult& aError)
 {
+  if (!mSelect) {
+    aError.Throw(NS_ERROR_NOT_INITIALIZED);
+    return;
+  }
+
   mSelect->Add(aElement, aBefore, aError);
 }
 

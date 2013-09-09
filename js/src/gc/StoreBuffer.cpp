@@ -68,7 +68,7 @@ StoreBuffer::WholeCellEdges::mark(JSTracer *trc)
     }
 #ifdef JS_ION
     JS_ASSERT(kind == JSTRACE_IONCODE);
-    static_cast<ion::IonCode *>(tenured)->trace(trc);
+    static_cast<jit::IonCode *>(tenured)->trace(trc);
 #else
     MOZ_ASSUME_UNREACHABLE("Only objects can be in the wholeCellBuffer if IonMonkey is disabled.");
 #endif
@@ -210,6 +210,7 @@ StoreBuffer::GenericBuffer::mark(JSTracer *trc)
 void
 StoreBuffer::CellPtrEdge::mark(JSTracer *trc)
 {
+    JS_ASSERT(GetGCThingTraceKind(*edge) == JSTRACE_OBJECT);
     MarkObjectRoot(trc, reinterpret_cast<JSObject**>(edge), "store buffer edge");
 }
 
@@ -304,7 +305,7 @@ void
 StoreBuffer::setAboutToOverflow()
 {
     aboutToOverflow = true;
-    runtime->triggerOperationCallback();
+    runtime->triggerOperationCallback(JSRuntime::TriggerCallbackMainThread);
 }
 
 bool

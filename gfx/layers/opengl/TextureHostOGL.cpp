@@ -4,25 +4,38 @@
 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "TextureHostOGL.h"
-#include "ipc/AutoOpenSurface.h"
-#include "gfx2DGlue.h"
+#include "GLContext.h"                  // for GLContext, etc
+#include "SharedSurface.h"              // for SharedSurface
+#include "SharedSurfaceEGL.h"           // for SharedSurface_EGLImage
+#include "SharedSurfaceGL.h"            // for SharedSurface_GLTexture, etc
+#include "SurfaceStream.h"              // for SurfaceStream
+#include "SurfaceTypes.h"               // for SharedSurfaceType, etc
+#include "TiledLayerBuffer.h"           // for TILEDLAYERBUFFER_TILE_SIZE
+#include "gfx2DGlue.h"                  // for ContentForFormat, etc
+#include "gfxImageSurface.h"            // for gfxImageSurface
+#include "gfxPoint.h"                   // for gfxIntSize
+#include "gfxReusableSurfaceWrapper.h"  // for gfxReusableSurfaceWrapper
+#include "ipc/AutoOpenSurface.h"        // for AutoOpenSurface
+#include "mozilla/gfx/2D.h"             // for DataSourceSurface
+#include "mozilla/gfx/BaseSize.h"       // for BaseSize
+#include "mozilla/layers/CompositorOGL.h"  // for CompositorOGL
+#include "mozilla/layers/ISurfaceAllocator.h"
 #include "mozilla/layers/YCbCrImageDataSerializer.h"
-#include "GLContext.h"
-#include "gfxImageSurface.h"
-#include "SurfaceStream.h"
-#include "SharedSurface.h"
-#include "SharedSurfaceGL.h"
-#include "SharedSurfaceEGL.h"
+#include "mozilla/layers/GrallocTextureHost.h"
+#include "nsPoint.h"                    // for nsIntPoint
+#include "nsRegion.h"                   // for nsIntRegion
+#include "GfxTexturesReporter.h"        // for GfxTexturesReporter
 #ifdef XP_MACOSX
 #include "SharedSurfaceIO.h"
 #endif
-#include "mozilla/layers/CompositorOGL.h"
 
 using namespace mozilla::gl;
 using namespace mozilla::gfx;
 
 namespace mozilla {
 namespace layers {
+
+class Compositor; 
 
 TemporaryRef<DeprecatedTextureHost>
 CreateDeprecatedTextureHostOGL(SurfaceDescriptorType aDescriptorType,
@@ -77,6 +90,14 @@ CreateTextureHostOGL(uint64_t aID,
                                         desc.inverted());
       break;
     }
+#ifdef MOZ_WIDGET_GONK
+    case SurfaceDescriptor::TNewSurfaceDescriptorGralloc: {
+      const NewSurfaceDescriptorGralloc& desc =
+        aDesc.get_NewSurfaceDescriptorGralloc();
+      result = new GrallocTextureHostOGL(aID, aFlags, desc);
+      break;
+    }
+#endif
     default: return nullptr;
   }
   return result.forget();
@@ -149,9 +170,10 @@ TextureImageTextureSourceOGL::Update(gfx::DataSourceSurface* aSurface,
       mTexImage->GetSize() != size ||
       mTexImage->GetContentType() != gfx::ContentForFormat(aSurface->GetFormat())) {
     if (mAllowBigImage) {
-      // XXX - clarify the which size we want to use. Some use cases may
-      // require the size of the destnation surface to be different from
+      // XXX - clarify which size we want to use. IncrementalContentHost will
+      // require the size of the destination surface to be different from
       // the size of aSurface.
+      // See bug 893300 (tracks the implementation of ContentHost for new textures).
       mTexImage = mGL->CreateTextureImage(size,
                                           gfx::ContentForFormat(aSurface->GetFormat()),
                                           WrapMode(mGL, aFlags & TEXTURE_ALLOW_REPEAT),
@@ -178,10 +200,9 @@ TextureImageTextureSourceOGL::GetSize() const
 {
   if (mTexImage) {
     if (mIterating) {
-      nsIntRect rect = mTexImage->GetTileRect();
-      return gfx::IntSize(rect.width, rect.height);
+      return mTexImage->GetTileRect().Size();
     }
-    return gfx::IntSize(mTexImage->GetSize().width, mTexImage->GetSize().height);
+    return mTexImage->GetSize();
   }
   NS_WARNING("Trying to query the size of an empty TextureSource.");
   return gfx::IntSize(0, 0);
@@ -192,6 +213,11 @@ TextureImageTextureSourceOGL::GetFormat() const
 {
   MOZ_ASSERT(mTexImage);
   return mTexImage->GetTextureFormat();
+}
+
+nsIntRect TextureImageTextureSourceOGL::GetTileRect()
+{
+  return ThebesIntRect(mTexImage->GetTileRect());
 }
 
 void
@@ -256,7 +282,7 @@ SharedTextureSourceOGL::SetCompositor(CompositorOGL* aCompositor)
 bool
 SharedTextureSourceOGL::IsValid() const
 {
-  return gl() != nullptr;
+  return !!gl();
 }
 
 gl::GLContext*
@@ -267,7 +293,7 @@ SharedTextureSourceOGL::gl() const
 
 SharedTextureHostOGL::SharedTextureHostOGL(uint64_t aID,
                                            TextureFlags aFlags,
-                                           gl::GLContext::SharedTextureShareType aShareType,
+                                           gl::SharedTextureShareType aShareType,
                                            gl::SharedTextureHandle aSharedHandle,
                                            gfx::IntSize aSize,
                                            bool inverted)
@@ -308,7 +334,7 @@ SharedTextureHostOGL::Lock()
     }
 
     GLenum wrapMode = LOCAL_GL_CLAMP_TO_EDGE;
-    mTextureSource = new SharedTextureSourceOGL(nullptr, // Compositor
+    mTextureSource = new SharedTextureSourceOGL(mCompositor,
                                                 mSharedHandle,
                                                 handleDetails.mTextureFormat,
                                                 handleDetails.mTarget,
@@ -333,6 +359,7 @@ void
 SharedTextureHostOGL::SetCompositor(Compositor* aCompositor)
 {
   CompositorOGL* glCompositor = static_cast<CompositorOGL*>(aCompositor);
+  mCompositor = glCompositor;
   if (mTextureSource) {
     mTextureSource->SetCompositor(glCompositor);
   }
@@ -358,12 +385,16 @@ TextureImageDeprecatedTextureHostOGL::GetSize() const
 {
   if (mTexture) {
     if (mIterating) {
-      nsIntRect rect = mTexture->GetTileRect();
-      return gfx::IntSize(rect.width, rect.height);
+      return mTexture->GetTileRect().Size();
     }
-    return gfx::IntSize(mTexture->GetSize().width, mTexture->GetSize().height);
+    return mTexture->GetSize();
   }
   return gfx::IntSize(0, 0);
+}
+
+nsIntRect TextureImageDeprecatedTextureHostOGL::GetTileRect()
+{
+  return ThebesIntRect(mTexture->GetTileRect());
 }
 
 void
@@ -609,6 +640,7 @@ SurfaceStreamHostOGL::UpdateImpl(const SurfaceDescriptor& aImage,
   const SurfaceStreamDescriptor& streamDesc =
       aImage.get_SurfaceStreamDescriptor();
 
+
   mStream = SurfaceStream::FromHandle(streamDesc.handle());
   MOZ_ASSERT(mStream);
   mStreamGL = dont_AddRef(mStream->GLContext());
@@ -707,6 +739,14 @@ SurfaceStreamHostOGL::Lock()
   return true;
 }
 
+void
+SurfaceStreamHostOGL::BindTexture(GLenum activetex)
+{
+  MOZ_ASSERT(mGL);
+  mGL->fActiveTexture(activetex);
+  mGL->fBindTexture(mTextureTarget, mTextureHandle);
+}
+
 
 void
 YCbCrDeprecatedTextureHostOGL::SetCompositor(Compositor* aCompositor)
@@ -792,6 +832,13 @@ TiledDeprecatedTextureHostOGL::~TiledDeprecatedTextureHostOGL()
   DeleteTextures();
 }
 
+void
+TiledDeprecatedTextureHostOGL::BindTexture(GLenum aTextureUnit)
+{
+  mGL->fActiveTexture(aTextureUnit);
+  mGL->fBindTexture(LOCAL_GL_TEXTURE_2D, mTextureHandle);
+}
+
 static void
 GetFormatAndTileForImageFormat(gfxASurface::gfxImageFormat aFormat,
                                GLenum& aOutFormat,
@@ -823,8 +870,9 @@ TiledDeprecatedTextureHostOGL::DeleteTextures()
     mGL->MakeCurrent();
     mGL->fDeleteTextures(1, &mTextureHandle);
 
-    gl::GLContext::UpdateTextureMemoryUsage(gl::GLContext::MemoryFreed, mGLFormat,
-                                            GetTileType(), TILEDLAYERBUFFER_TILE_SIZE);
+    gl::GfxTexturesReporter::UpdateAmount(gl::GfxTexturesReporter::MemoryFreed,
+                                          mGLFormat, GetTileType(),
+                                          TILEDLAYERBUFFER_TILE_SIZE);
     mTextureHandle = 0;
   }
 }
@@ -846,8 +894,9 @@ TiledDeprecatedTextureHostOGL::Update(gfxReusableSurfaceWrapper* aReusableSurfac
     mGL->fBindTexture(LOCAL_GL_TEXTURE_2D, mTextureHandle);
     // We're re-using a texture, but the format may change. Update the memory
     // reporter with a free and alloc (below) using the old and new formats.
-    gl::GLContext::UpdateTextureMemoryUsage(gl::GLContext::MemoryFreed, mGLFormat,
-                                            GetTileType(), TILEDLAYERBUFFER_TILE_SIZE);
+    gl::GfxTexturesReporter::UpdateAmount(gl::GfxTexturesReporter::MemoryFreed,
+                                          mGLFormat, GetTileType(),
+                                          TILEDLAYERBUFFER_TILE_SIZE);
   }
 
   GLenum type;
@@ -858,8 +907,9 @@ TiledDeprecatedTextureHostOGL::Update(gfxReusableSurfaceWrapper* aReusableSurfac
                    TILEDLAYERBUFFER_TILE_SIZE, TILEDLAYERBUFFER_TILE_SIZE, 0,
                    mGLFormat, type, buf);
 
-  gl::GLContext::UpdateTextureMemoryUsage(gl::GLContext::MemoryAllocated, mGLFormat,
-                                          type, TILEDLAYERBUFFER_TILE_SIZE);
+  gl::GfxTexturesReporter::UpdateAmount(gl::GfxTexturesReporter::MemoryAllocated,
+                                        mGLFormat, type,
+                                        TILEDLAYERBUFFER_TILE_SIZE);
 
   if (mGLFormat == LOCAL_GL_RGB) {
     mFormat = FORMAT_R8G8B8X8;
@@ -1209,7 +1259,7 @@ GrallocDeprecatedTextureHostOGL::GetAsSurface() {
     : nullptr;
   return surf.forget();
 }
-#endif
+#endif // MOZ_WIDGET_GONK
 
 } // namespace
 } // namespace

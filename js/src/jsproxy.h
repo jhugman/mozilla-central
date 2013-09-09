@@ -7,10 +7,27 @@
 #ifndef jsproxy_h
 #define jsproxy_h
 
-#include "jsapi.h"
+#include "mozilla/Maybe.h"
+
 #include "jsfriendapi.h"
 
+#include "js/CallNonGenericMethod.h"
+#include "js/Class.h"
+
 namespace js {
+
+using JS::AutoIdVector;
+using JS::CallArgs;
+using JS::HandleId;
+using JS::HandleObject;
+using JS::HandleValue;
+using JS::IsAcceptableThis;
+using JS::MutableHandle;
+using JS::MutableHandleObject;
+using JS::MutableHandleValue;
+using JS::NativeImpl;
+using JS::PrivateValue;
+using JS::Value;
 
 class RegExpGuard;
 class JS_FRIEND_API(Wrapper);
@@ -72,6 +89,9 @@ class JS_FRIEND_API(BaseProxyHandler)
 
     inline void *family() {
         return mFamily;
+    }
+    static size_t offsetOfFamily() {
+        return offsetof(BaseProxyHandler, mFamily);
     }
 
     virtual bool isOuterWindow() {
@@ -146,7 +166,7 @@ class JS_FRIEND_API(BaseProxyHandler)
                                      uint32_t index, MutableHandleValue vp, bool *present);
     virtual bool getPrototypeOf(JSContext *cx, HandleObject proxy, MutableHandleObject protop);
 
-    /* See comment for weakmapKeyDelegateOp in jsclass.h. */
+    /* See comment for weakmapKeyDelegateOp in js/Class.h. */
     virtual JSObject *weakmapKeyDelegate(JSObject *proxy);
 };
 
@@ -206,8 +226,6 @@ class JS_PUBLIC_API(DirectProxyHandler) : public BaseProxyHandler
                                    unsigned indent) MOZ_OVERRIDE;
     virtual bool regexp_toShared(JSContext *cx, HandleObject proxy,
                                  RegExpGuard *g) MOZ_OVERRIDE;
-    virtual bool defaultValue(JSContext *cx, HandleObject obj, JSType hint,
-                              MutableHandleValue vp) MOZ_OVERRIDE;
     virtual JSObject *weakmapKeyDelegate(JSObject *proxy);
 };
 
@@ -260,14 +278,20 @@ class Proxy
     static JSObject * const LazyProto;
 };
 
+// These are equal to |&{Function,Object,OuterWindow}ProxyObject::class_|.  Use
+// them in places where you don't want to #include vm/ProxyObject.h.
+extern JS_FRIEND_DATA(js::Class* const) FunctionProxyClassPtr;
+extern JS_FRIEND_DATA(js::Class* const) ObjectProxyClassPtr;
+extern JS_FRIEND_DATA(js::Class* const) OuterWindowProxyClassPtr;
+
 inline bool IsObjectProxyClass(const Class *clasp)
 {
-    return clasp == js::ObjectProxyClassPtr || clasp == js::OuterWindowProxyClassPtr;
+    return clasp == ObjectProxyClassPtr || clasp == OuterWindowProxyClassPtr;
 }
 
 inline bool IsFunctionProxyClass(const Class *clasp)
 {
-    return clasp == js::FunctionProxyClassPtr;
+    return clasp == FunctionProxyClassPtr;
 }
 
 inline bool IsProxyClass(const Class *clasp)
@@ -375,8 +399,8 @@ class JS_FRIEND_API(AutoEnterPolicy)
         // * The policy set rv to false, indicating that we should throw.
         // * The caller did not instruct us to ignore exceptions.
         // * The policy did not throw itself.
-        if (!allow && !rv && mayThrow && !JS_IsExceptionPending(cx))
-            reportError(cx, id);
+        if (!allow && !rv && mayThrow)
+            reportErrorIfExceptionIsNotPending(cx, id);
     }
 
     virtual ~AutoEnterPolicy() { recordLeave(); }
@@ -390,7 +414,7 @@ class JS_FRIEND_API(AutoEnterPolicy)
         : context(NULL)
 #endif
         {};
-    void reportError(JSContext *cx, jsid id);
+    void reportErrorIfExceptionIsNotPending(JSContext *cx, jsid id);
     bool allow;
     bool rv;
 

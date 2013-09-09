@@ -13,7 +13,7 @@
 #include "jit/MIRGraph.h"
 
 namespace js {
-namespace ion {
+namespace jit {
 
 bool
 LIRGeneratorShared::emitAtUses(MInstruction *mir)
@@ -264,6 +264,14 @@ LIRGeneratorShared::useRegisterOrConstantAtStart(MDefinition *mir)
 }
 
 LAllocation
+LIRGeneratorShared::useRegisterOrNonNegativeConstantAtStart(MDefinition *mir)
+{
+    if (mir->isConstant() && mir->toConstant()->value().toInt32() >= 0)
+        return LAllocation(mir->toConstant()->vp());
+    return useRegisterAtStart(mir);
+}
+
+LAllocation
 LIRGeneratorShared::useRegisterOrNonDoubleConstant(MDefinition *mir)
 {
     if (mir->isConstant() && mir->type() != MIRType_Double)
@@ -456,7 +464,7 @@ LIRGeneratorShared::fillBoxUses(LInstruction *lir, size_t n, MDefinition *mir)
 }
 #endif
 
-} // namespace ion
+} // namespace jit
 } // namespace js
 
 #endif /* jit_shared_Lowering_shared_inl_h */

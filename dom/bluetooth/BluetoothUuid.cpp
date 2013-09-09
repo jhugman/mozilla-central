@@ -18,3 +18,41 @@ BluetoothUuidHelper::GetString(BluetoothServiceClass aServiceClassUuid,
   aRetUuidStr.AppendInt(aServiceClassUuid, 16);
   aRetUuidStr.AppendLiteral("-0000-1000-8000-00805F9B34FB");
 }
+
+BluetoothServiceClass
+BluetoothUuidHelper::GetBluetoothServiceClass(const nsAString& aUuidStr)
+{
+  // An example of input UUID string: 0000110D-0000-1000-8000-00805F9B34FB
+  MOZ_ASSERT(aUuidStr.Length() == 36);
+
+  /**
+   * Extract uuid16 from input UUID string and return a value of enum
+   * BluetoothServiceClass. If we failed to recognize the value,
+   * BluetoothServiceClass::UNKNOWN is returned.
+   */
+  BluetoothServiceClass retValue = BluetoothServiceClass::UNKNOWN;
+  nsString uuid(Substring(aUuidStr, 4, 4));
+
+  nsresult rv;
+  int32_t integer = uuid.ToInteger(&rv, 16);
+  NS_ENSURE_SUCCESS(rv, retValue);
+
+  return GetBluetoothServiceClass(integer);
+}
+
+BluetoothServiceClass
+BluetoothUuidHelper::GetBluetoothServiceClass(uint16_t aProfileId)
+{
+  BluetoothServiceClass retValue = BluetoothServiceClass::UNKNOWN;
+  switch (aProfileId) {
+    case BluetoothServiceClass::A2DP:
+    case BluetoothServiceClass::HANDSFREE:
+    case BluetoothServiceClass::HANDSFREE_AG:
+    case BluetoothServiceClass::HEADSET:
+    case BluetoothServiceClass::HEADSET_AG:
+    case BluetoothServiceClass::HID:
+    case BluetoothServiceClass::OBJECT_PUSH:
+      retValue = (BluetoothServiceClass)aProfileId;
+  }
+  return retValue;
+}

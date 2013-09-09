@@ -10,6 +10,7 @@
 #include "jscntxt.h"
 
 #include "jsiter.h"
+#include "jsworkers.h"
 
 #include "builtin/Object.h"
 #include "jit/IonFrames.h"
@@ -28,7 +29,7 @@ class CompartmentChecker
 
   public:
     explicit CompartmentChecker(ExclusiveContext *cx)
-      : compartment(cx->compartment_)
+      : compartment(cx->compartment())
     {}
 
     /*
@@ -45,16 +46,16 @@ class CompartmentChecker
         MOZ_CRASH();
     }
 
-    /* Note: should only be used when neither c1 nor c2 may be the default compartment. */
+    /* Note: should only be used when neither c1 nor c2 may be the atoms compartment. */
     static void check(JSCompartment *c1, JSCompartment *c2) {
-        JS_ASSERT(c1 != c1->runtimeFromMainThread()->atomsCompartment);
-        JS_ASSERT(c2 != c2->runtimeFromMainThread()->atomsCompartment);
+        JS_ASSERT(!c1->runtimeFromAnyThread()->isAtomsCompartment(c1));
+        JS_ASSERT(!c2->runtimeFromAnyThread()->isAtomsCompartment(c2));
         if (c1 != c2)
             fail(c1, c2);
     }
 
     void check(JSCompartment *c) {
-        if (c && c != compartment->runtimeFromMainThread()->atomsCompartment) {
+        if (c && !compartment->runtimeFromAnyThread()->isAtomsCompartment(c)) {
             if (!compartment)
                 compartment = c;
             else if (c != compartment)
@@ -333,55 +334,32 @@ CallSetter(JSContext *cx, HandleObject obj, HandleId id, StrictPropertyOp op, un
 }
 
 inline uintptr_t
-GetNativeStackLimit(ExclusiveContext *cx)
+GetNativeStackLimit(ThreadSafeContext *cx)
 {
-    return cx->perThreadData->nativeStackLimit;
-}
-
-inline RegExpCompartment &
-ExclusiveContext::regExps()
-{
-    return compartment_->regExps;
-}
-
-inline PropertyTree&
-ExclusiveContext::propertyTree()
-{
-    return compartment_->propertyTree;
-}
-
-inline BaseShapeSet &
-ExclusiveContext::baseShapes()
-{
-    return compartment_->baseShapes;
-}
-
-inline InitialShapeSet &
-ExclusiveContext::initialShapes()
-{
-    return compartment_->initialShapes;
-}
-
-inline DtoaCache &
-ExclusiveContext::dtoaCache()
-{
-    return compartment_->dtoaCache;
+    StackKind kind;
+    if (cx->isJSContext()) {
+        kind = cx->asJSContext()->runningWithTrustedPrincipals()
+                 ? StackForTrustedScript : StackForUntrustedScript;
+    } else {
+        // For other threads, we just use the trusted stack depth, since it's
+        // unlikely that we'll be mixing trusted and untrusted code together.
+        kind = StackForTrustedScript;
+    }
+    return cx->perThreadData->nativeStackLimit[kind];
 }
 
 inline void
 ExclusiveContext::maybePause() const
 {
 #ifdef JS_WORKER_THREADS
-    if (workerThread && runtime_->workerThreadState->shouldPause) {
-        AutoLockWorkerThreadState lock(runtime_);
-        workerThread->pause();
-    }
+    if (workerThread)
+        workerThread->maybePause();
 #endif
 }
 
 class AutoLockForExclusiveAccess
 {
-#ifdef JS_THREADSAFE
+#ifdef JS_WORKER_THREADS
     JSRuntime *runtime;
 
     void init(JSRuntime *rt) {
@@ -418,7 +396,7 @@ class AutoLockForExclusiveAccess
             runtime->mainThreadHasExclusiveAccess = false;
         }
     }
-#else // JS_THREADSAFE
+#else // JS_WORKER_THREADS
   public:
     AutoLockForExclusiveAccess(ExclusiveContext *cx MOZ_GUARD_OBJECT_NOTIFIER_PARAM) {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
@@ -430,10 +408,16 @@ class AutoLockForExclusiveAccess
         // An empty destructor is needed to avoid warnings from clang about
         // unused local variables of this type.
     }
-#endif // JS_THREADSAFE
+#endif // JS_WORKER_THREADS
 
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
+
+inline LifoAlloc &
+ExclusiveContext::typeLifoAlloc()
+{
+    return zone()->types.typeLifoAlloc;
+}
 
 }  /* namespace js */
 
@@ -441,12 +425,6 @@ inline js::LifoAlloc &
 JSContext::analysisLifoAlloc()
 {
     return compartment()->analysisLifoAlloc;
-}
-
-inline js::LifoAlloc &
-JSContext::typeLifoAlloc()
-{
-    return zone()->types.typeLifoAlloc;
 }
 
 inline void
@@ -460,14 +438,18 @@ JSContext::setPendingException(js::Value v) {
 inline void
 JSContext::setDefaultCompartmentObject(JSObject *obj)
 {
+    JS_ASSERT(!hasOption(JSOPTION_NO_DEFAULT_COMPARTMENT_OBJECT));
     defaultCompartmentObject_ = obj;
 }
 
 inline void
 JSContext::setDefaultCompartmentObjectIfUnset(JSObject *obj)
 {
-    if (!defaultCompartmentObject_)
+    if (!hasOption(JSOPTION_NO_DEFAULT_COMPARTMENT_OBJECT) &&
+        !defaultCompartmentObject_)
+    {
         setDefaultCompartmentObject(obj);
+    }
 }
 
 inline void
@@ -505,7 +487,7 @@ inline void
 js::ExclusiveContext::setCompartment(JSCompartment *comp)
 {
     // ExclusiveContexts can only be in the atoms zone or in exclusive zones.
-    JS_ASSERT_IF(!isJSContext() && comp != runtime_->atomsCompartment,
+    JS_ASSERT_IF(!isJSContext() && !runtime_->isAtomsCompartment(comp),
                  comp->zone()->usedByExclusiveThread);
 
     // Normal JSContexts cannot enter exclusive zones.
@@ -513,12 +495,12 @@ js::ExclusiveContext::setCompartment(JSCompartment *comp)
                  !comp->zone()->usedByExclusiveThread);
 
     // Only one thread can be in the atoms compartment at a time.
-    JS_ASSERT_IF(comp == runtime_->atomsCompartment,
+    JS_ASSERT_IF(runtime_->isAtomsCompartment(comp),
                  runtime_->currentThreadHasExclusiveAccess());
 
     // Make sure that the atoms compartment has its own zone.
-    JS_ASSERT_IF(comp && comp != runtime_->atomsCompartment,
-                 comp->zone() != runtime_->atomsCompartment->zone());
+    JS_ASSERT_IF(comp && !runtime_->isAtomsCompartment(comp),
+                 !runtime_->isAtomsZone(comp->zone()));
 
     // Both the current and the new compartment should be properly marked as
     // entered at this point.
@@ -549,7 +531,7 @@ JSContext::currentScript(jsbytecode **ppc,
 #ifdef JS_ION
     if (act->isJit()) {
         JSScript *script = NULL;
-        js::ion::GetPcScript(const_cast<JSContext *>(this), &script, ppc);
+        js::jit::GetPcScript(const_cast<JSContext *>(this), &script, ppc);
         if (!allowCrossCompartment && script->compartment() != compartment())
             return NULL;
         return script;

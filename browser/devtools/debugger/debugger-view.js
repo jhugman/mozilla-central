@@ -28,6 +28,8 @@ const SEARCH_TOKEN_FLAG = "#";
 const SEARCH_LINE_FLAG = ":";
 const SEARCH_VARIABLE_FLAG = "*";
 
+Cu.import("resource://gre/modules/devtools/DevToolsUtils.jsm");
+
 /**
  * Object defining the debugger view components.
  */
@@ -131,7 +133,7 @@ let DebuggerView = {
 
     // Attach a controller that handles interfacing with the debugger protocol.
     VariablesViewController.attach(this.Variables, {
-      getGripClient: aObject => gThreadClient.pauseGrip(aObject)
+      getObjectClient: aObject => gThreadClient.pauseGrip(aObject)
     });
 
     // Relay events from the VariablesView.
@@ -279,8 +281,10 @@ let DebuggerView = {
       window.dispatchEvent(document, "Debugger:SourceShown", aSource);
     },
     ([, aError]) => {
-      // Rejected. TODO: Bug 884484.
-      let msg = "Error loading: " + aSource.url + "\n" + aError;
+      // Rejected.
+      let msg = L10N.getStr("errorLoadingText") + DevToolsUtils.safeErrorString(aError);
+      this.editor.setText(msg);
+      window.dispatchEvent(document, "Debugger:SourceErrorShown", aError);
       dumpn(msg);
       Cu.reportError(msg);
     });

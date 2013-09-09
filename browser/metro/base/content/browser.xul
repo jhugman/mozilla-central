@@ -32,7 +32,6 @@
 <window id="main-window"
         onload="Browser.startup();"
         onunload="Browser.shutdown();"
-        onclose="return Browser.closing();"
         windowtype="navigator:browser"
         chromedir="&locale.dir;"
         title="&brandShortName;"
@@ -96,12 +95,6 @@
     <command id="cmd_sanitize" oncommand="CommandUpdater.doCommand(this.id);"/>
     <command id="cmd_contextUI" oncommand="CommandUpdater.doCommand(this.id);"/>
 
-    <!-- screen/display -->
-    <command id="cmd_lockscreen" oncommand="CommandUpdater.doCommand(this.id);"/>
-
-    <command id="cmd_volumeLeft" observes="bcast_contentShowing" oncommand="CommandUpdater.doCommand(this.id);"/>
-    <command id="cmd_volumeRight" observes="bcast_contentShowing" oncommand="CommandUpdater.doCommand(this.id);"/>
-
     <!-- scrolling -->
     <command id="cmd_scrollPageUp" oncommand="CommandUpdater.doCommand(this.id);"/>
     <command id="cmd_scrollPageDown" oncommand="CommandUpdater.doCommand(this.id);"/>
@@ -128,37 +121,39 @@
     <key id="key_backspace" keycode="VK_BACK" command="cmd_handleBackspace"/>
     <key id="key_shift_backspace" keycode="VK_BACK" command="cmd_handleShiftBackspace" modifiers="shift"/>
     <key id="key_reload" keycode="VK_F5" command="cmd_reload"/>
-    <key id="key_reload2" key="r" modifiers="accel" command="cmd_reload"/>
+    <key id="key_reload2" key="&reload.key;" modifiers="accel" command="cmd_reload"/>
     <key id="key_forceReload" keycode="VK_F5" modifiers="shift" command="cmd_forceReload"/>
-    <key id="key_forceReload2" key="r" modifiers="accel,shift" command="cmd_forceReload"/>
-    <key id="key_focusURL" key="l" modifiers="accel" command="cmd_openLocation"/>
+    <key id="key_forceReload2" key="&reload.key;" modifiers="accel,shift" command="cmd_forceReload"/>
+    <key id="key_focusURL" key="&focusURL.key;" modifiers="accel" command="cmd_openLocation"/>
     <key id="key_focusURL2" key="&urlbar.accesskey;" modifiers="alt" command="cmd_openLocation"/>
     <key id="key_home" keycode="VK_HOME" modifiers="accel" command="cmd_home"/>
-    <key id="key_open" key="o" modifiers="accel" command="cmd_openFile"/>
-    <key id="key_save" key="s" modifiers="accel" command="cmd_savePage"/>
+    <key id="key_open" key="&openFile.key;" modifiers="accel" command="cmd_openFile"/>
+    <key id="key_save" key="&savePage.key;" modifiers="accel" command="cmd_savePage"/>
 
     <!-- misc -->
-    <key id="key_find" key="f" modifiers="accel" command="cmd_find"/>
+    <key id="key_find" key="&find.key;" modifiers="accel" command="cmd_find"/>
     <key id="key_find" key="/" command="cmd_find"/>
     <key id="key_findNext" keycode="VK_F3" command="cmd_findNext"/>
-    <key id="key_findNext2" key="g" modifiers="accel" command="cmd_findNext"/>
+    <key id="key_findNext2" key="&findNext.key;" modifiers="accel" command="cmd_findNext"/>
     <key id="key_findPrevious" keycode="VK_F3" modifiers="shift" command="cmd_findPrevious"/>
-    <key id="key_findPrevious2" key="g" modifiers="accel,shift" command="cmd_findPrevious"/>
-    <key id="key_quit" key="q" modifiers="accel" command="cmd_quit"/>
-    <key id="key_addBoomkark" key="d" modifiers="accel" command="cmd_addBookmark"/>
-    <key id="key_console" key="j" modifiers="accel,shift" oncommand="PanelUI.show('console-container')"/>
-    <key id="key_options" key="o" modifiers="accel,shift" oncommand="FlyoutPanelsUI.show('PrefsFlyoutPanel')" />
+    <key id="key_findPrevious2" key="&findNext.key;" modifiers="accel,shift" command="cmd_findPrevious"/>
+    <key id="key_quit" key="&quit.key;" modifiers="accel" command="cmd_quit"/>
+    <key id="key_addBoomkark" key="&addBookmark.key;" modifiers="accel" command="cmd_addBookmark"/>
+
+    <!-- development/testing -->
+    <key id="key_console" key="&jsConsole.key;" modifiers="accel,shift" oncommand="PanelUI.show('console-container')"/>
+    <key id="key_options" key="&optionsFlyout.key;" modifiers="accel,shift" oncommand="FlyoutPanelsUI.show('PrefsFlyoutPanel')" />
 #ifdef MOZ_SERVICES_SYNC
-    <key id="key_options" key="s" modifiers="accel,shift" oncommand="FlyoutPanelsUI.show('SyncFlyoutPanel')" />
+    <key id="key_options" key="&syncFlyout.key;" modifiers="accel,shift" oncommand="FlyoutPanelsUI.show('SyncFlyoutPanel')" />
 #endif
-    <key id="key_options" key="a" modifiers="accel,shift" oncommand="FlyoutPanelsUI.show('AboutFlyoutPanel')" />
+    <key id="key_options" key="&aboutFlyout.key;" modifiers="accel,shift" oncommand="FlyoutPanelsUI.show('AboutFlyoutPanel')" />
 
     <!-- manage tabs -->
-    <key id="key_newTab" key="t" modifiers="accel" command="cmd_newTab"/>
-    <key id="key_newTab2" key="n" modifiers="accel" command="cmd_newTab"/>
-    <key id="key_closeTab" key="w" modifiers="accel" command="cmd_closeTab"/>
+    <key id="key_newTab" key="&newTab.key;" modifiers="accel" command="cmd_newTab"/>
+    <key id="key_newTab2" key="&newTab2.key;" modifiers="accel" command="cmd_newTab"/>
+    <key id="key_closeTab" key="&closeTab.key;" modifiers="accel" command="cmd_closeTab"/>
     <key id="key_closeTab2" keycode="VK_F4" modifiers="accel" command="cmd_closeTab"/>
-    <key id="key_undoCloseTab" key="t" modifiers="accel,shift" command="cmd_undoCloseTab"/>
+    <key id="key_undoCloseTab" key="&newTab.key;" modifiers="accel,shift" command="cmd_undoCloseTab"/>
 
     <!-- tab selection -->
     <key id="key_nextTab" oncommand="BrowserUI.selectNextTab();" keycode="VK_TAB" modifiers="accel"/>
@@ -195,6 +190,7 @@
 
       <!-- Content viewport -->
       <stack id="content-viewport">
+        <observes element="bcast_windowState" attribute="startpage"/>
         <deck id="browsers" flex="1" observes="bcast_preciseInput"/>
         <box id="vertical-scroller" class="scroller" orient="vertical" end="0" top="0"/>
         <box id="horizontal-scroller" class="scroller" orient="horizontal" left="0" bottom="0"/>
@@ -383,7 +379,7 @@
         <deck id="updateDeck" orient="vertical">
           <hbox id="updateButtonBox" align="center">
             <button id="updateButton" align="start"
-                    oncommand="FlyoutPanelsUI.AboutFlyout.appUpdater.buttonOnCommand();"/>
+                    oncommand="FlyoutPanelsUI.AboutFlyoutPanel.appUpdater.buttonOnCommand();"/>
             <spacer flex="1"/>
           </hbox>
           <hbox id="checkingForUpdates" align="center">
@@ -419,12 +415,11 @@
 
 #if MOZ_UPDATE_CHANNEL != release
 #ifdef MOZ_UPDATER
-      <description class="text-blurb" id="currentChannelText">&channel.description.start;<label id="currentChannel"/></description>
-      <description class="text-blurb" id="currentChannelText2">&channel.description.end;</description>
+      <description class="text-blurb" id="currentChannelText">&channel.description.start;<label id="currentChannel"/>&channel.description.end;</description>
 #endif
 #endif
       <label id="about-policy-label"
-            onclick="if (event.button == 0) { BrowserUI.onAboutPolicyClick(); }"
+            onclick="FlyoutPanelsUI.AboutFlyoutPanel.onPolicyClick(event);"
             class="text-link" value="&aboutHeader.policy.label;"/>
     </flyoutpanel>
 
@@ -477,21 +472,21 @@
                      flex="1"
                      onclick="FlyoutPanelsUI.SyncFlyoutPanel.abortEasySetup();
                               FlyoutPanelsUI.SyncFlyoutPanel.showManualSetup()">
-          &sync.flyout.setup.manual.label;
+          &sync.flyout.setup.manual.label_2;
         </description>
         <separator />
         <description>&sync.flyout.setup.description3;</description>
-        <description>&sync.flyout.setup.description4;</description>
+        <description>&sync.flyout.setup.description4_2;</description>
         <description class="syncInstructionText">
-          &sync.flyout.setup.description5;
+          &sync.flyout.setup.description5_2;
         </description>
         <description class="syncInstructionText">
-          &sync.flyout.setup.description6;
+          &sync.flyout.setup.description6_2;
         </description>
       </vbox>
 
       <vbox id="sync-manualsetup-container" collapsed="true">
-        <description>&sync.flyout.manualsetup.description1;</description>
+        <description>&sync.flyout.manualsetup.description1_2;</description>
         <separator/>
         <textbox id="sync-manualsetup-account"
                  placeholder="&sync.flyout.manualsetup.account.placeholder;"
@@ -614,9 +609,9 @@
           <spacer flex="1" />
         </hbox>
         <description>&sync.flyout.pairNewDevice.note1;</description>
-        <description>&sync.flyout.pairNewDevice.note2;</description>
+        <description>&sync.flyout.pairNewDevice.note2_2;</description>
         <description class="syncInstructionText">
-          &sync.flyout.pairNewDevice.note3;
+          &sync.flyout.pairNewDevice.note3_2;
         </description>
         <description class="syncInstructionText">
           &sync.flyout.pairNewDevice.note4;

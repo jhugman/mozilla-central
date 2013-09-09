@@ -1324,7 +1324,7 @@ add_task(function test_with_content_encoding()
     aResponse.setHeader("Content-Length",
                         "" + TEST_DATA_SHORT_GZIP_ENCODED.length, false);
 
-    let bos =  new BinaryOutputStream(aResponse.bodyOutputStream);
+    let bos = new BinaryOutputStream(aResponse.bodyOutputStream);
     bos.writeByteArray(TEST_DATA_SHORT_GZIP_ENCODED,
                        TEST_DATA_SHORT_GZIP_ENCODED.length);
   });
@@ -1337,6 +1337,46 @@ add_task(function test_with_content_encoding()
 
   // Ensure the content matches the decoded test data.
   yield promiseVerifyContents(download.target.path, TEST_DATA_SHORT);
+
+  cleanup();
+});
+
+/**
+ * Checks that the file is not decoded if the extension matches the encoding.
+ */
+add_task(function test_with_content_encoding_ignore_extension()
+{
+  let sourcePath = "/test_with_content_encoding_ignore_extension.gz";
+  let sourceUrl = httpUrl("test_with_content_encoding_ignore_extension.gz");
+
+  function cleanup() {
+    gHttpServer.registerPathHandler(sourcePath, null);
+  }
+  do_register_cleanup(cleanup);
+
+  gHttpServer.registerPathHandler(sourcePath, function (aRequest, aResponse) {
+    aResponse.setHeader("Content-Type", "text/plain", false);
+    aResponse.setHeader("Content-Encoding", "gzip", false);
+    aResponse.setHeader("Content-Length",
+                        "" + TEST_DATA_SHORT_GZIP_ENCODED.length, false);
+
+    let bos = new BinaryOutputStream(aResponse.bodyOutputStream);
+    bos.writeByteArray(TEST_DATA_SHORT_GZIP_ENCODED,
+                       TEST_DATA_SHORT_GZIP_ENCODED.length);
+  });
+
+  let download = yield promiseStartDownload(sourceUrl);
+  yield promiseDownloadStopped(download);
+
+  do_check_eq(download.progress, 100);
+  do_check_eq(download.totalBytes, TEST_DATA_SHORT_GZIP_ENCODED.length);
+
+  // Ensure the content matches the encoded test data.  We convert the data to a
+  // string before executing the content check.
+  yield promiseVerifyContents(download.target.path,
+        String.fromCharCode.apply(String, TEST_DATA_SHORT_GZIP_ENCODED));
+
+  cleanup();
 });
 
 /**
@@ -1582,4 +1622,57 @@ add_task(function test_contentType() {
   yield promiseDownloadStopped(download);
 
   do_check_eq("text/plain", download.contentType);
+});
+
+/**
+ * This test will call the platform specific operations within
+ * DownloadPlatform::DownloadDone. While there is no test to verify the
+ * specific behaviours, this at least ensures that there is no error or crash.
+ */
+add_task(function test_platform_integration()
+{
+  let downloadFiles = [];
+  function cleanup() {
+    for (let file of downloadFiles) {
+      file.remove(true);
+    }
+  }
+  do_register_cleanup(cleanup);
+
+  for (let isPrivate of [false, true]) {
+    DownloadIntegration.downloadDoneCalled = false;
+
+    // Some platform specific operations only operate on files outside the
+    // temporary directory or in the Downloads directory (such as setting
+    // the Windows searchable attribute, and the Mac Downloads icon bouncing),
+    // so use the system Downloads directory for the target file.
+    let targetFile = yield DownloadIntegration.getSystemDownloadsDirectory();
+    targetFile = targetFile.clone();
+    targetFile.append("test" + (Math.floor(Math.random() * 1000000)));
+    downloadFiles.push(targetFile);
+
+    let download;
+    if (gUseLegacySaver) {
+      download = yield promiseStartLegacyDownload(httpUrl("source.txt"),
+                                                  { targetFile: targetFile });
+    }
+    else {
+      download = yield Downloads.createDownload({
+        source: httpUrl("source.txt"),
+        target: targetFile,
+      });
+      download.start();
+    }
+
+    // Wait for the whenSucceeded promise to be resolved first.
+    // downloadDone should be called before the whenSucceeded promise is resolved.
+    yield download.whenSucceeded().then(function () {
+      do_check_true(DownloadIntegration.downloadDoneCalled);
+    });
+
+    // Then, wait for the promise returned by "start" to be resolved.
+    yield promiseDownloadStopped(download);
+
+    yield promiseVerifyContents(download.target.path, TEST_DATA_SHORT);
+  }
 });

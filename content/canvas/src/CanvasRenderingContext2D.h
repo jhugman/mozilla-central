@@ -16,11 +16,11 @@
 #include "CanvasUtils.h"
 #include "gfxFont.h"
 #include "mozilla/ErrorResult.h"
-#include "mozilla/dom/ImageData.h"
 #include "mozilla/dom/CanvasGradient.h"
 #include "mozilla/dom/CanvasRenderingContext2DBinding.h"
 #include "mozilla/dom/CanvasPattern.h"
 #include "mozilla/gfx/Rect.h"
+#include "imgIEncoder.h"
 
 class nsXULElement;
 
@@ -31,6 +31,7 @@ class SourceSurface;
 
 namespace dom {
 class HTMLImageElementOrHTMLCanvasElementOrHTMLVideoElement;
+class ImageData;
 class StringOrCanvasGradientOrCanvasPattern;
 class StringOrCanvasGradientOrCanvasPatternReturnValue;
 class TextMetrics;
@@ -367,6 +368,8 @@ public:
                            double h, const nsAString& bgColor, uint32_t flags,
                            mozilla::ErrorResult& error);
 
+  void Demote();
+
   nsresult Redraw();
 
   // nsICanvasRenderingContextInternal
@@ -445,6 +448,8 @@ public:
   }
 
   friend class CanvasRenderingContext2DUserData;
+
+  virtual void GetImageBuffer(uint8_t** aImageBuffer, int32_t* aFormat);
 
 protected:
   nsresult GetImageDataArray(JSContext* aCx, int32_t aX, int32_t aY,
@@ -567,13 +572,11 @@ protected:
   }
 
 #if USE_SKIA_GPU
-
-  // Recreate the DrawTarget in software mode
-  void Demote();
-
   static std::vector<CanvasRenderingContext2D*>& DemotableContexts();
   static void DemoteOldestContextIfNecessary();
+
   static void AddDemotableContext(CanvasRenderingContext2D* context);
+  static void RemoveDemotableContext(CanvasRenderingContext2D* context);
 
   // Do not use GL
   bool mForceSoftware;

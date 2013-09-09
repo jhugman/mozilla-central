@@ -25,12 +25,12 @@
 #endif
 
 namespace js {
-namespace ion {
+namespace jit {
 
 struct Register {
     typedef Registers Codes;
     typedef Codes::Code Code;
-    typedef js::ion::Registers::RegisterID RegisterID;
+    typedef js::jit::Registers::RegisterID RegisterID;
     Code code_;
 
     static Register FromCode(uint32_t i) {
@@ -85,6 +85,21 @@ struct FloatRegister {
     }
 };
 
+class RegisterDump
+{
+  protected: // Silence Clang warning.
+    uintptr_t regs_[Registers::Total];
+    double fpregs_[FloatRegisters::Total];
+
+  public:
+    static size_t offsetOfRegister(Register reg) {
+        return offsetof(RegisterDump, regs_) + reg.code() * sizeof(uintptr_t);
+    }
+    static size_t offsetOfRegister(FloatRegister reg) {
+        return offsetof(RegisterDump, fpregs_) + reg.code() * sizeof(double);
+    }
+};
+
 // Information needed to recover machine register state.
 class MachineState
 {
@@ -119,7 +134,7 @@ class MachineState
     }
 };
 
-} // namespace ion
+} // namespace jit
 } // namespace js
 
 #endif /* jit_Registers_h */

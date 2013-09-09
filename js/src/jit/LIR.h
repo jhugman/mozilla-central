@@ -24,7 +24,7 @@
 #include "jit/VMFunctions.h"
 
 namespace js {
-namespace ion {
+namespace jit {
 
 class LUse;
 class LGeneralReg;
@@ -985,6 +985,12 @@ class LSafepoint : public TempObject
     // The subset of liveRegs which contains gcthing pointers.
     GeneralRegisterSet gcRegs_;
 
+#ifdef CHECK_OSIPOINT_REGISTERS
+    // Temp regs of the current instruction. This set is never written to the
+    // safepoint; it's only used by assertions during compilation.
+    RegisterSet tempRegs_;
+#endif
+
     // Offset to a position in the safepoint stream, or
     // INVALID_SAFEPOINT_OFFSET.
     uint32_t safepointOffset_;
@@ -1029,6 +1035,14 @@ class LSafepoint : public TempObject
     const RegisterSet &liveRegs() const {
         return liveRegs_;
     }
+#ifdef CHECK_OSIPOINT_REGISTERS
+    void addTempRegister(AnyRegister reg) {
+        tempRegs_.addUnchecked(reg);
+    }
+    const RegisterSet &tempRegs() const {
+        return tempRegs_;
+    }
+#endif
     void addGcRegister(Register reg) {
         gcRegs_.addUnchecked(reg);
     }
@@ -1443,7 +1457,7 @@ LAllocation::toRegister() const
     return AnyRegister(toGeneralReg()->reg());
 }
 
-} // namespace ion
+} // namespace jit
 } // namespace js
 
 #define LIR_HEADER(opcode)                                                  \
@@ -1485,7 +1499,7 @@ LAllocation::toRegister() const
 #undef LIR_HEADER
 
 namespace js {
-namespace ion {
+namespace jit {
 
 #define LIROP(name)                                                         \
     L##name *LInstruction::to##name()                                       \
@@ -1554,7 +1568,7 @@ BaseOfNunboxSlot(LDefinition::Type type, unsigned slot)
 }
 #endif
 
-} // namespace ion
+} // namespace jit
 } // namespace js
 
 #endif /* jit_LIR_h */

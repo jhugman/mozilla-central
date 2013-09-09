@@ -22,7 +22,7 @@ function test() {
       aWindow.gBrowser.selectedBrowser.removeEventListener("load", onLoad, true);
 
       uri = aWindow.Services.io.newURI("https://localhost/img.png", null, null);
-      gSSService.processHeader(Ci.nsISiteSecurityService.HEADER_HSTA, uri,
+      gSSService.processHeader(Ci.nsISiteSecurityService.HEADER_HSTS, uri,
                                "max-age=1000", privacyFlags(aIsPrivateMode));
       ok(gSSService.isSecureHost(Ci.nsISiteSecurityService.HEADER_HSTS, "localhost", privacyFlags(aIsPrivateMode)), "checking sts host");
 
@@ -48,8 +48,7 @@ function test() {
       aWin.close();
     });
     uri = Services.io.newURI("http://localhost", null, null);
-    gSSService.removeState(Ci.nsISiteSecurityService.HEADER_HSTS, uri,
-                           privacyFlags(true));
+    gSSService.removeState(Ci.nsISiteSecurityService.HEADER_HSTS, uri, 0);
   });
 
   // test first when on private mode

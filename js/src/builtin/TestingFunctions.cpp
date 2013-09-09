@@ -893,6 +893,16 @@ DisableSPSProfiling(JSContext *cx, unsigned argc, jsval *vp)
 }
 
 static bool
+EnableOsiPointRegisterChecks(JSContext *, unsigned, jsval *vp)
+{
+#ifdef CHECK_OSIPOINT_REGISTERS
+    jit::js_IonOptions.checkOsiPointRegisters = true;
+#endif
+    JS_SET_RVAL(cx, vp, JSVAL_VOID);
+    return true;
+}
+
+static bool
 DisplayName(JSContext *cx, unsigned argc, jsval *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -918,15 +928,17 @@ js::testingFunc_inParallelSection(JSContext *cx, unsigned argc, jsval *vp)
     return true;
 }
 
-static JSObject *objectMetadataFunction = NULL;
+static const char *ObjectMetadataPropertyName = "__objectMetadataFunction__";
 
 static bool
 ShellObjectMetadataCallback(JSContext *cx, JSObject **pmetadata)
 {
-    Value thisv = UndefinedValue();
+    RootedValue fun(cx);
+    if (!JS_GetProperty(cx, cx->global(), ObjectMetadataPropertyName, &fun))
+        return false;
 
     RootedValue rval(cx);
-    if (!Invoke(cx, thisv, ObjectValue(*objectMetadataFunction), 0, NULL, &rval))
+    if (!Invoke(cx, UndefinedValue(), fun, 0, NULL, &rval))
         return false;
 
     if (rval.isObject())
@@ -943,17 +955,15 @@ SetObjectMetadataCallback(JSContext *cx, unsigned argc, jsval *vp)
     args.rval().setUndefined();
 
     if (argc == 0 || !args[0].isObject() || !args[0].toObject().is<JSFunction>()) {
-        if (objectMetadataFunction)
-            JS_RemoveObjectRoot(cx, &objectMetadataFunction);
-        objectMetadataFunction = NULL;
+        if (!JS_DeleteProperty(cx, cx->global(), ObjectMetadataPropertyName))
+            return false;
         js::SetObjectMetadataCallback(cx, NULL);
         return true;
     }
 
-    if (!objectMetadataFunction && !JS_AddObjectRoot(cx, &objectMetadataFunction))
+    if (!JS_DefineProperty(cx, cx->global(), ObjectMetadataPropertyName, args[0], NULL, NULL, 0))
         return false;
 
-    objectMetadataFunction = &args[0].toObject();
     js::SetObjectMetadataCallback(cx, ShellObjectMetadataCallback);
     return true;
 }
@@ -992,6 +1002,53 @@ js::testingFunc_bailout(JSContext *cx, unsigned argc, jsval *vp)
 {
     // NOP when not in IonMonkey
     JS_SET_RVAL(cx, vp, JSVAL_VOID);
+    return true;
+}
+
+static bool
+SetJitCompilerOption(JSContext *cx, unsigned argc, jsval *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    RootedObject callee(cx, &args.callee());
+
+    if (args.length() != 2) {
+        ReportUsageError(cx, callee, "Wrong number of arguments.");
+        return false;
+    }
+
+    if (!args[0].isString()) {
+        ReportUsageError(cx, callee, "First argument must be a String.");
+        return false;
+    }
+
+    if (!args[1].isInt32()) {
+        ReportUsageError(cx, callee, "Second argument must be an Int32.");
+        return false;
+    }
+
+    JSFlatString *strArg = JS_FlattenString(cx, args[0].toString());
+
+#define JIT_COMPILER_MATCH(key, string)                 \
+    else if (JS_FlatStringEqualsAscii(strArg, string))  \
+        opt = JSJITCOMPILER_ ## key;
+
+    JSJitCompilerOption opt = JSJITCOMPILER_NOT_AN_OPTION;
+    if (false) {}
+    JIT_COMPILER_OPTIONS(JIT_COMPILER_MATCH);
+#undef JIT_COMPILER_MATCH
+
+    if (opt == JSJITCOMPILER_NOT_AN_OPTION) {
+        ReportUsageError(cx, callee, "First argument does not name a valid option (see jsapi.h).");
+        return false;
+    }
+
+    int32_t number = args[1].toInt32();
+    if (number < 0)
+        number = -1;
+
+    JS_SetGlobalJitCompilerOption(cx, opt, uint32_t(number));
+
+    args.rval().setBoolean(true);
     return true;
 }
 
@@ -1136,6 +1193,11 @@ static const JSFunctionSpecWithHelp TestingFunctions[] = {
 "disableSPSProfiling()",
 "  Disables SPS instrumentation"),
 
+    JS_FN_HELP("enableOsiPointRegisterChecks", EnableOsiPointRegisterChecks, 0, 0,
+"enableOsiPointRegisterChecks()",
+"Emit extra code to verify live regs at the start of a VM call are not\n"
+"modified before its OsiPoint."),
+
     JS_FN_HELP("displayName", DisplayName, 1, 0,
 "displayName(fn)",
 "  Gets the display name for a function, which can possibly be a guessed or\n"
@@ -1176,6 +1238,10 @@ static const JSFunctionSpecWithHelp TestingFunctions[] = {
     JS_FN_HELP("bailout", testingFunc_bailout, 0, 0,
 "bailout()",
 "  Force a bailout out of ionmonkey (if running in ionmonkey)."),
+
+    JS_FN_HELP("setJitCompilerOption", SetJitCompilerOption, 2, 0,
+"setCompilerOption(<option>, <number>)",
+"  Set a compiler option indexed in JSCompileOption enum to a number.\n"),
 
     JS_FS_HELP_END
 };

@@ -118,7 +118,7 @@ class WakeLockListener MOZ_FINAL : public nsIDOMMozWakeLockListener {
 
 NS_IMPL_ISUPPORTS1(WakeLockListener, nsIDOMMozWakeLockListener)
 nsCOMPtr<nsIPowerManagerService> sPowerManagerService = nullptr;
-nsCOMPtr<nsIDOMMozWakeLockListener> sWakeLockListener = nullptr;
+StaticRefPtr<WakeLockListener> sWakeLockListener;
 
 nsAppShell::nsAppShell()
     : mQueueLock("nsAppShell.mQueueLock"),
@@ -180,8 +180,6 @@ nsAppShell::Init()
     if (!gWidgetLog)
         gWidgetLog = PR_NewLogModule("Widget");
 #endif
-
-    mObserversHash.Init();
 
     nsresult rv = nsBaseAppShell::Init();
     AndroidBridge* bridge = AndroidBridge::Bridge();
@@ -541,6 +539,10 @@ nsAppShell::ProcessNextNativeEvent(bool mayWait)
         mObserversHash.Remove(curEvent->Characters());
         break;
 
+    case AndroidGeckoEvent::ADD_OBSERVER:
+        AddObserver(curEvent->Characters(), curEvent->Observer());
+        break;
+
     case AndroidGeckoEvent::LOW_MEMORY:
         // TODO hook in memory-reduction stuff for different levels here
         if (curEvent->MetaState() >= AndroidGeckoEvent::MEMORY_PRESSURE_MEDIUM) {
@@ -563,6 +565,11 @@ nsAppShell::ProcessNextNativeEvent(bool mayWait)
         }
         break;
     }
+
+    case AndroidGeckoEvent::TELEMETRY_HISTOGRAM_ADD:
+        Telemetry::Accumulate(NS_ConvertUTF16toUTF8(curEvent->Characters()).get(),
+                              curEvent->Count());
+        break;
 
     case AndroidGeckoEvent::NOOP:
         break;

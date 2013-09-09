@@ -10,11 +10,37 @@
  * debugging global.
  */
 
-const Ci = Components.interfaces;
-const Cc = Components.classes;
-const CC = Components.Constructor;
-const Cu = Components.utils;
-const Cr = Components.results;
+// |this.require| is used to test if this file was loaded via the devtools
+// loader (as it is in DebuggerProcess.jsm) or via loadSubScript (as it is from
+// dbg-server.jsm).  Note that testing |require| is not safe in either
+// situation, as it causes a ReferenceError.
+var Ci, Cc, CC, Cu, Cr, Components;
+if (this.require) {
+  ({ Ci, Cc, CC, Cu, Cr, components: Components }) = require("chrome");
+} else {
+  ({
+    interfaces: Ci,
+    classes: Cc,
+    Constructor: CC,
+    utils: Cu,
+    results: Cr
+  }) = Components;
+}
+
+// On B2G, if |this.require| is undefined at this point, it remains undefined
+// later on when |DebuggerServer.registerModule| is called.  On desktop (and
+// perhaps other places), if |this.require| starts out undefined, it ends up
+// being set to some native code by the time we get to |registerModule|.  Here
+// we perform a test early on, and then cache the correct require function for
+// later use.
+var localRequire;
+if (this.require) {
+  localRequire = id => require(id);
+} else {
+  let { devtools } = Cu.import("resource://gre/modules/devtools/Loader.jsm", {});
+  localRequire = id => devtools.require(id);
+}
+
 const DBG_STRINGS_URI = "chrome://global/locale/devtools/debugger.properties";
 
 Cu.import("resource://gre/modules/Services.jsm");
@@ -25,7 +51,24 @@ const promptConnections = Services.prefs.getBoolPref("devtools.debugger.prompt-c
 Cu.import("resource://gre/modules/jsdebugger.jsm");
 addDebuggerToGlobal(this);
 
+function loadSubScript(aURL)
+{
+  try {
+    let loader = Cc["@mozilla.org/moz/jssubscript-loader;1"]
+      .getService(Ci.mozIJSSubScriptLoader);
+    loader.loadSubScript(aURL, this);
+  } catch(e) {
+    let errorStr = "Error loading: " + aURL + ": " + e + " - " + e.stack + "\n";
+    dump(errorStr);
+    Cu.reportError(errorStr);
+    throw e;
+  }
+}
+
+let loaderRequire = this.require;
+this.require = null;
 loadSubScript.call(this, "resource://gre/modules/commonjs/sdk/core/promise.js");
+this.require = loaderRequire;
 
 Cu.import("resource://gre/modules/devtools/SourceMap.jsm");
 
@@ -135,6 +178,19 @@ var DebuggerServer = {
   chromeWindowType: null,
 
   /**
+   * Set that to a function that will be called anytime a new connection
+   * is opened or one is closed.
+   */
+  onConnectionChange: null,
+
+  _fireConnectionChange: function(aWhat) {
+    if (this.onConnectionChange &&
+        typeof this.onConnectionChange === "function") {
+      this.onConnectionChange(aWhat);
+    }
+  },
+
+  /**
    * Prompt the user to accept or decline the incoming connection. This is the
    * default implementation that products embedding the debugger server may
    * choose to override.
@@ -232,6 +288,9 @@ var DebuggerServer = {
     delete this._allowConnection;
     this._transportInitialized = false;
     this._initialized = false;
+
+    this._fireConnectionChange("closed");
+
     dumpn("Debugger server is shut down.");
   },
 
@@ -259,9 +318,7 @@ var DebuggerServer = {
     }
 
     let moduleAPI = ModuleAPI();
-
-    let {devtools} = Cu.import("resource://gre/modules/devtools/Loader.jsm", {});
-    let mod = devtools.require(id);
+    let mod = localRequire(id);
     mod.register(moduleAPI);
     gRegisteredModules[id] = { module: mod, api: moduleAPI };
   },
@@ -303,6 +360,7 @@ var DebuggerServer = {
     this.addActors("resource://gre/modules/devtools/server/actors/webapps.js");
     this.registerModule("devtools/server/actors/inspector");
     this.registerModule("devtools/server/actors/tracer");
+    this.registerModule("devtools/server/actors/device");
   },
 
   /**
@@ -504,6 +562,7 @@ var DebuggerServer = {
     }
     aTransport.ready();
 
+    this._fireConnectionChange("opened");
     return conn;
   },
 
@@ -512,6 +571,7 @@ var DebuggerServer = {
    */
   _connectionClosed: function DS_connectionClosed(aConnection) {
     delete this._connections[aConnection.prefix];
+    this._fireConnectionChange("closed");
   },
 
   // DebuggerServer extension API.
@@ -606,6 +666,9 @@ var DebuggerServer = {
   }
 };
 
+if (this.exports) {
+  exports.DebuggerServer = DebuggerServer;
+}
 
 /**
  * Construct an ActorPool.
@@ -619,6 +682,10 @@ function ActorPool(aConnection)
   this.conn = aConnection;
   this._cleanups = {};
   this._actors = {};
+}
+
+if (this.exports) {
+  exports.ActorPool = ActorPool;
 }
 
 ActorPool.prototype = {
@@ -834,13 +901,12 @@ DebuggerServerConnection.prototype = {
   },
 
   _unknownError: function DSC__unknownError(aPrefix, aError) {
-    let errorString = safeErrorString(aError);
-    errorString += "\n" + aError.stack;
+    let errorString = aPrefix + ": " + safeErrorString(aError);
     Cu.reportError(errorString);
     dumpn(errorString);
     return {
       error: "unknownError",
-      message: (aPrefix + "': " + errorString)
+      message: errorString
     };
   },
 
@@ -902,7 +968,8 @@ DebuggerServerConnection.prototype = {
     let actor = this.getActor(aPacket.to);
     if (!actor) {
       this.transport.send({ from: aPacket.to ? aPacket.to : "root",
-                            error: "noSuchActor" });
+                            error: "noSuchActor",
+                            message: "No such actor for ID: " + aPacket.to });
       return;
     }
 

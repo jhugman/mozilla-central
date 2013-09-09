@@ -7,7 +7,6 @@
 #ifndef builtin_MapObject_h
 #define builtin_MapObject_h
 
-#include "jsapi.h"
 #include "jsobj.h"
 
 #include "vm/Runtime.h"
@@ -99,7 +98,7 @@ class MapObject : public JSObject {
     static void finalize(FreeOp *fop, JSObject *obj);
     static bool construct(JSContext *cx, unsigned argc, Value *vp);
 
-    static bool is(const Value &v);
+    static bool is(HandleValue v);
 
     static bool iterator_impl(JSContext *cx, CallArgs args, IteratorKind kind);
 
@@ -137,7 +136,7 @@ class SetObject : public JSObject {
     static void finalize(FreeOp *fop, JSObject *obj);
     static bool construct(JSContext *cx, unsigned argc, Value *vp);
 
-    static bool is(const Value &v);
+    static bool is(HandleValue v);
 
     static bool iterator_impl(JSContext *cx, CallArgs args, IteratorKind kind);
 

@@ -14,6 +14,7 @@
 #include "jscompartment.h"
 #include "jsgc.h"
 #include "jsobj.h"
+#include "jsproxy.h"
 #include "jswatchpoint.h"
 #include "jsweakmap.h"
 #include "jswrapper.h"
@@ -36,8 +37,8 @@ JS_STATIC_ASSERT(offsetof(JSRuntime, mainThread) ==
                  PerThreadDataFriendFields::RuntimeMainThreadOffset);
 
 PerThreadDataFriendFields::PerThreadDataFriendFields()
-  : nativeStackLimit(0)
 {
+    PodArrayZero(nativeStackLimit);
 #if defined(JSGC_ROOT_ANALYSIS) || defined(JSGC_USE_EXACT_ROOTING)
     PodArrayZero(thingGCRooters);
 #endif
@@ -277,7 +278,7 @@ JS_FRIEND_API(bool)
 JS_DefineFunctionsWithHelp(JSContext *cx, JSObject *objArg, const JSFunctionSpecWithHelp *fs)
 {
     RootedObject obj(cx, objArg);
-    JS_ASSERT(cx->compartment() != cx->runtime()->atomsCompartment);
+    JS_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
 
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, obj);
@@ -338,7 +339,15 @@ js::IsSystemZone(Zone *zone)
 JS_FRIEND_API(bool)
 js::IsAtomsCompartment(JSCompartment *comp)
 {
-    return comp == comp->runtimeFromAnyThread()->atomsCompartment;
+    return comp->runtimeFromAnyThread()->isAtomsCompartment(comp);
+}
+
+JS_FRIEND_API(bool)
+js::IsInNonStrictPropertySet(JSContext *cx)
+{
+    jsbytecode *pc;
+    JSScript *script = cx->currentScript(&pc, JSContext::ALLOW_CROSS_COMPARTMENT);
+    return script && !script->strict && (js_CodeSpec[*pc].format & JOF_SET);
 }
 
 JS_FRIEND_API(bool)
@@ -402,6 +411,12 @@ js::IsObjectInContextCompartment(JSObject *obj, const JSContext *cx)
 }
 
 JS_FRIEND_API(bool)
+js::RunningWithTrustedPrincipals(JSContext *cx)
+{
+    return cx->runningWithTrustedPrincipals();
+}
+
+JS_FRIEND_API(bool)
 js::IsOriginalScriptFunction(JSFunction *fun)
 {
     return fun->nonLazyScript()->function() == fun;
@@ -431,7 +446,7 @@ js::DefineFunctionWithReserved(JSContext *cx, JSObject *objArg, const char *name
                                unsigned nargs, unsigned attrs)
 {
     RootedObject obj(cx, objArg);
-    JS_THREADSAFE_ASSERT(cx->compartment() != cx->runtime()->atomsCompartment);
+    JS_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, obj);
     JSAtom *atom = Atomize(cx, name, strlen(name));
@@ -446,7 +461,7 @@ js::NewFunctionWithReserved(JSContext *cx, JSNative native, unsigned nargs, unsi
                             JSObject *parentArg, const char *name)
 {
     RootedObject parent(cx, parentArg);
-    JS_THREADSAFE_ASSERT(cx->compartment() != cx->runtime()->atomsCompartment);
+    JS_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
 
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, parent);
@@ -469,7 +484,7 @@ js::NewFunctionByIdWithReserved(JSContext *cx, JSNative native, unsigned nargs, 
 {
     RootedObject parent(cx, parentArg);
     JS_ASSERT(JSID_IS_STRING(id));
-    JS_THREADSAFE_ASSERT(cx->compartment() != cx->runtime()->atomsCompartment);
+    JS_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, parent);
 
@@ -508,6 +523,21 @@ js::SetFunctionNativeReserved(JSObject *fun, size_t which, const Value &val)
     fun->as<JSFunction>().setExtendedSlot(which, val);
 }
 
+JS_FRIEND_API(bool)
+js::GetObjectProto(JSContext *cx, JS::Handle<JSObject*> obj, JS::MutableHandle<JSObject*> proto)
+{
+    js::Class *clasp = GetObjectClass(obj);
+    if (clasp == js::ObjectProxyClassPtr ||
+        clasp == js::OuterWindowProxyClassPtr ||
+        clasp == js::FunctionProxyClassPtr)
+    {
+        return JS_GetPrototype(cx, obj, proto);
+    }
+
+    proto.set(reinterpret_cast<const shadow::Object*>(obj.get())->type->proto);
+    return true;
+}
+
 JS_FRIEND_API(void)
 js::SetReservedSlotWithBarrier(JSObject *obj, size_t slot, const js::Value &value)
 {
@@ -531,6 +561,12 @@ void
 js::SetPreserveWrapperCallback(JSRuntime *rt, PreserveWrapperCallback callback)
 {
     rt->preserveWrapperCallback = callback;
+}
+
+JS_FRIEND_API(JSErrorReport*)
+js::ErrorFromException(Value val)
+{
+    return js_ErrorFromException(val);
 }
 
 /*
@@ -591,10 +627,11 @@ js::GCThingTraceKind(void *thing)
 JS_FRIEND_API(void)
 js::VisitGrayWrapperTargets(Zone *zone, GCThingCallback callback, void *closure)
 {
+    JSRuntime *rt = zone->runtimeFromMainThread();
     for (CompartmentsInZoneIter comp(zone); !comp.done(); comp.next()) {
         for (JSCompartment::WrapperEnum e(comp); !e.empty(); e.popFront()) {
             gc::Cell *thing = e.front().key.wrapped;
-            if (thing->isMarked(gc::GRAY))
+            if (!IsInsideNursery(rt, thing) && thing->isMarked(gc::GRAY))
                 callback(closure, thing);
         }
     }
@@ -768,12 +805,6 @@ js::ContextHasOutstandingRequests(const JSContext *cx)
 }
 #endif
 
-JS_FRIEND_API(bool)
-js::HasUnrootedGlobal(const JSContext *cx)
-{
-    return cx->hasOption(JSOPTION_UNROOTED_GLOBAL);
-}
-
 JS_FRIEND_API(void)
 js::SetActivityCallback(JSRuntime *rt, ActivityCallback cb, void *arg)
 {
@@ -811,14 +842,6 @@ jschar *
 GCDescription::formatJSON(JSRuntime *rt, uint64_t timestamp) const
 {
     return rt->gcStats.formatJSON(timestamp);
-}
-
-JS_FRIEND_API(AnalysisPurgeCallback)
-js::SetAnalysisPurgeCallback(JSRuntime *rt, AnalysisPurgeCallback callback)
-{
-    AnalysisPurgeCallback old = rt->analysisPurgeCallback;
-    rt->analysisPurgeCallback = callback;
-    return old;
 }
 
 JS_FRIEND_API(void)
@@ -965,6 +988,18 @@ js::GetAnyCompartmentInZone(JS::Zone *zone)
     return comp.get();
 }
 
+bool
+JS::ObjectPtr::isAboutToBeFinalized()
+{
+    return JS_IsAboutToBeFinalized(&value);
+}
+
+void
+JS::ObjectPtr::trace(JSTracer *trc, const char *name)
+{
+    JS_CallHeapObjectTracer(trc, &value, name);
+}
+
 JS_FRIEND_API(JSObject *)
 js::GetTestingFunctions(JSContext *cx)
 {
@@ -985,24 +1020,6 @@ js::GetEnterCompartmentDepth(JSContext *cx)
   return cx->getEnterCompartmentDepth();
 }
 #endif
-
-JS_FRIEND_API(void)
-js::SetRuntimeProfilingStack(JSRuntime *rt, ProfileEntry *stack, uint32_t *size, uint32_t max)
-{
-    rt->spsProfiler.setProfilingStack(stack, size, max);
-}
-
-JS_FRIEND_API(void)
-js::EnableRuntimeProfilingStack(JSRuntime *rt, bool enabled)
-{
-    rt->spsProfiler.enable(enabled);
-}
-
-JS_FRIEND_API(jsbytecode*)
-js::ProfilingGetPC(JSRuntime *rt, JSScript *script, void *ip)
-{
-    return rt->spsProfiler.ipToPC(script, size_t(ip));
-}
 
 JS_FRIEND_API(void)
 js::SetDOMCallbacks(JSRuntime *rt, const DOMCallbacks *callbacks)
@@ -1045,6 +1062,12 @@ DOMProxyShadowsCheck
 js::GetDOMProxyShadowsCheck()
 {
     return gDOMProxyShadowsCheck;
+}
+
+bool
+js::detail::IdMatchesAtom(jsid id, JSAtom *atom)
+{
+    return id == INTERNED_STRING_TO_JSID(NULL, atom);
 }
 
 JS_FRIEND_API(void)

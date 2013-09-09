@@ -363,6 +363,17 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
   },
 
   /**
+   * Opens selected item in a new tab.
+   */
+  openRequestInTab: function() {
+    let win = Services.wm.getMostRecentWindow("navigator:browser");
+
+    let selected = this.selectedItem.attachment;
+
+    win.openUILinkIn(selected.url, "tab", { relatedToCurrent: true });
+  },
+
+  /**
    * Copy the request url from the currently selected item.
    */
   copyUrl: function() {
@@ -1790,7 +1801,7 @@ NetworkDetailsView.prototype = {
           aEditor.setText(aString);
         });
       }
-      window.emit("NetMonitor:ResponsePostParamsAvailable");
+      window.emit(EVENTS.REQUEST_POST_PARAMS_DISPLAYED);
     });
   },
 
@@ -1913,7 +1924,7 @@ NetworkDetailsView.prototype = {
           }
         });
       }
-      window.emit("NetMonitor:ResponseBodyAvailable");
+      window.emit(EVENTS.RESPONSE_BODY_DISPLAYED);
     });
   },
 

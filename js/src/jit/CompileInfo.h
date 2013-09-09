@@ -12,7 +12,7 @@
 #include "jit/Registers.h"
 
 namespace js {
-namespace ion {
+namespace jit {
 
 inline unsigned
 StartArgSlot(JSScript *script, JSFunction *fun)
@@ -30,11 +30,15 @@ CountArgSlots(JSScript *script, JSFunction *fun)
 
 enum ExecutionMode {
     // Normal JavaScript execution
-    SequentialExecution = 0,
+    SequentialExecution,
 
     // JavaScript code to be executed in parallel worker threads,
     // e.g. by ParallelArray
-    ParallelExecution
+    ParallelExecution,
+
+    // MIR analysis performed when invoking 'new' on a script, to determine
+    // definite properties
+    DefinitePropertiesAnalysis
 };
 
 // Not as part of the enum so we don't get warnings about unhandled enum
@@ -209,6 +213,28 @@ class CompileInfo
         return 2 + (hasArguments() ? 1 : 0) + nargs() + nlocals();
     }
 
+    bool isSlotAliased(uint32_t index) const {
+        if (fun() && index == thisSlot())
+            return false;
+
+        uint32_t arg = index - firstArgSlot();
+        if (arg < nargs()) {
+            if (script()->formalIsAliased(arg))
+                return true;
+            return false;
+        }
+
+        uint32_t var = index - firstLocalSlot();
+        if (var < nlocals()) {
+            if (script()->varIsAliased(var))
+                return true;
+            return false;
+        }
+
+        JS_ASSERT(index >= firstStackSlot());
+        return false;
+    }
+
     bool hasArguments() const {
         return script()->argumentsHasVarBinding();
     }
@@ -240,7 +266,7 @@ class CompileInfo
     ExecutionMode executionMode_;
 };
 
-} // namespace ion
+} // namespace jit
 } // namespace js
 
 #endif /* jit_CompileInfo_h */

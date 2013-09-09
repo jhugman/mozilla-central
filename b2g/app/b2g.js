@@ -4,7 +4,7 @@
 
 #filter substitution
 
-pref("toolkit.defaultChromeURI", "chrome://browser/content/shell.xul");
+pref("toolkit.defaultChromeURI", "chrome://browser/content/shell.html");
 pref("browser.chromeURL", "chrome://browser/content/");
 
 // Device pixel to CSS px ratio, in percent. Set to -1 to calculate based on display density.
@@ -257,7 +257,6 @@ pref("layers.async-pan-zoom.enabled", true);
 pref("notification.feature.enabled", true);
 
 // IndexedDB
-pref("indexedDB.feature.enabled", true);
 pref("dom.indexedDB.warningQuota", 5);
 
 // prevent video elements from preloading too much data
@@ -747,3 +746,12 @@ pref("disk_space_watcher.enabled", true);
 // Enable promise
 pref("dom.promise.enabled", false);
 
+// Allow ADB to run for this many hours before disabling
+// (only applies when marionette is disabled)
+// 0 disables the timer.
+pref("b2g.adb.timeout-hours", 12);
+
+// enable Skia/GL (OpenGL-accelerated 2D drawing) for large enough 2d canvases,
+// falling back to Skia/software for smaller canvases
+pref("gfx.canvas.azure.backends", "skia");
+pref("gfx.canvas.azure.accelerated", true);

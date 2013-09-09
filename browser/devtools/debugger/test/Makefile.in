@@ -2,14 +2,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH           = @DEPTH@
-topsrcdir       = @top_srcdir@
-srcdir          = @srcdir@
-VPATH           = @srcdir@
-relativesrcdir  = @relativesrcdir@
-
-include $(DEPTH)/config/autoconf.mk
-
 MOCHITEST_BROWSER_TESTS = \
 	browser_dbg_aaa_run_first_leaktest.js \
 	browser_dbg_blackboxing-01.js \
@@ -24,6 +16,7 @@ MOCHITEST_BROWSER_TESTS = \
 	browser_dbg_cmd_blackbox.js \
 	browser_dbg_cmd_break.js \
 	browser_dbg_debuggerstatement.js \
+	browser_dbg_listaddons.js \
 	browser_dbg_listtabs-01.js \
 	browser_dbg_listtabs-02.js \
 	browser_dbg_tabactor-01.js \
@@ -74,6 +67,7 @@ MOCHITEST_BROWSER_TESTS = \
 	browser_dbg_sources-cache.js \
 	browser_dbg_scripts-switching.js \
 	browser_dbg_scripts-switching-02.js \
+	browser_dbg_scripts-switching-03.js \
 	browser_dbg_scripts-sorting.js \
 	browser_dbg_scripts-searching-01.js \
 	browser_dbg_scripts-searching-02.js \
@@ -130,6 +124,8 @@ MOCHITEST_BROWSER_PAGES = \
 	testactors.js \
 	browser_dbg_tab1.html \
 	browser_dbg_tab2.html \
+	browser_dbg_addon1.xpi \
+	browser_dbg_addon2.xpi \
 	browser_dbg_debuggerstatement.html \
 	browser_dbg_stack.html \
 	browser_dbg_script-switching.html \
@@ -187,5 +183,3 @@ MOCHITEST_BROWSER_TESTS += \
 endif
 
 MOCHITEST_BROWSER_FILES_PARTS = MOCHITEST_BROWSER_TESTS MOCHITEST_BROWSER_PAGES
-
-include $(topsrcdir)/config/rules.mk

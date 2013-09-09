@@ -60,8 +60,9 @@ struct DeviceAttachmentsD3D11
 };
 
 CompositorD3D11::CompositorD3D11(nsIWidget* aWidget)
-  : mWidget(aWidget)
-  , mAttachments(nullptr)
+  : mAttachments(nullptr)
+  , mWidget(aWidget)
+  , mHwnd(nullptr)
 {
   sBackend = LAYERS_D3D11;
 }
@@ -107,6 +108,8 @@ CompositorD3D11::Initialize()
   if (!mContext) {
     return false;
   }
+
+  mHwnd = (HWND)mWidget->GetNativeData(NS_NATIVE_WINDOW);
 
   memset(&mVSConstants, 0, sizeof(VertexShaderConstants));
 
@@ -221,20 +224,22 @@ CompositorD3D11::Initialize()
       return false;
     }
 
-    D3D11_RENDER_TARGET_BLEND_DESC rtBlendComponent = {
-      TRUE,
-      D3D11_BLEND_ONE,
-      D3D11_BLEND_INV_SRC1_COLOR,
-      D3D11_BLEND_OP_ADD,
-      D3D11_BLEND_ONE,
-      D3D11_BLEND_INV_SRC_ALPHA,
-      D3D11_BLEND_OP_ADD,
-      D3D11_COLOR_WRITE_ENABLE_ALL
-    };
-    blendDesc.RenderTarget[0] = rtBlendComponent;
-    hr = mDevice->CreateBlendState(&blendDesc, byRef(mAttachments->mComponentBlendState));
-    if (FAILED(hr)) {
-      return false;
+    if (gfxPlatform::ComponentAlphaEnabled()) {
+      D3D11_RENDER_TARGET_BLEND_DESC rtBlendComponent = {
+        TRUE,
+        D3D11_BLEND_ONE,
+        D3D11_BLEND_INV_SRC1_COLOR,
+        D3D11_BLEND_OP_ADD,
+        D3D11_BLEND_ONE,
+        D3D11_BLEND_INV_SRC_ALPHA,
+        D3D11_BLEND_OP_ADD,
+        D3D11_COLOR_WRITE_ENABLE_ALL
+      };
+      blendDesc.RenderTarget[0] = rtBlendComponent;
+      hr = mDevice->CreateBlendState(&blendDesc, byRef(mAttachments->mComponentBlendState));
+      if (FAILED(hr)) {
+        return false;
+      }
     }
   }
 
@@ -300,7 +305,7 @@ CompositorD3D11::Initialize()
     swapDesc.SampleDesc.Quality = 0;
     swapDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     swapDesc.BufferCount = 1;
-    swapDesc.OutputWindow = (HWND)mWidget->GetNativeData(NS_NATIVE_WINDOW);
+    swapDesc.OutputWindow = mHwnd;
     swapDesc.Windowed = TRUE;
     // We don't really need this flag, however it seems on some NVidia hardware
     // smaller area windows do not present properly without this flag. This flag
@@ -369,6 +374,10 @@ CompositorD3D11::CreateRenderTarget(const gfx::IntRect& aRect,
 
   RefPtr<ID3D11Texture2D> texture;
   mDevice->CreateTexture2D(&desc, nullptr, byRef(texture));
+  NS_ASSERTION(texture, "Could not create texture");
+  if (!texture) {
+    return nullptr;
+  }
 
   RefPtr<CompositingRenderTargetD3D11> rt = new CompositingRenderTargetD3D11(texture);
   rt->SetSize(IntSize(aRect.width, aRect.height));
@@ -391,6 +400,10 @@ CompositorD3D11::CreateRenderTargetFromSource(const gfx::IntRect &aRect,
 
   RefPtr<ID3D11Texture2D> texture;
   mDevice->CreateTexture2D(&desc, nullptr, byRef(texture));
+  NS_ASSERTION(texture, "Could not create texture");
+  if (!texture) {
+    return nullptr;
+  }
 
   if (aSource) {
     const CompositingRenderTargetD3D11* sourceD3D11 =
@@ -576,6 +589,7 @@ CompositorD3D11::DrawQuad(const gfx::Rect& aRect,
   case EFFECT_COMPONENT_ALPHA:
     {
       MOZ_ASSERT(gfxPlatform::ComponentAlphaEnabled());
+      MOZ_ASSERT(mAttachments->mComponentBlendState);
       EffectComponentAlpha* effectComponentAlpha =
         static_cast<EffectComponentAlpha*>(aEffectChain.mPrimaryEffect.get());
       TextureSourceD3D11* sourceOnWhite = effectComponentAlpha->mOnWhite->AsSourceD3D11();
@@ -613,6 +627,15 @@ CompositorD3D11::BeginFrame(const Rect* aClipRectIn,
                             Rect* aClipRectOut,
                             Rect* aRenderBoundsOut)
 {
+  // Don't composite if we are minimised. Other than for the sake of efficency,
+  // this is important because resizing our buffers when mimised will fail and
+  // cause a crash when we're restored.
+  NS_ASSERTION(mHwnd, "Couldn't find an HWND when initialising?");
+  if (::IsIconic(mHwnd)) {
+    *aRenderBoundsOut = Rect();
+    return;
+  }
+
   UpdateRenderTarget();
 
   // Failed to create a render target.
@@ -808,7 +831,9 @@ CompositorD3D11::CreateShaders()
   LOAD_PIXEL_SHADER(RGBShader);
   LOAD_PIXEL_SHADER(RGBAShader);
   LOAD_PIXEL_SHADER(YCbCrShader);
-  LOAD_PIXEL_SHADER(ComponentAlphaShader);
+  if (gfxPlatform::ComponentAlphaEnabled()) {
+    LOAD_PIXEL_SHADER(ComponentAlphaShader);
+  }
 
 #undef LOAD_PIXEL_SHADER
 
@@ -847,6 +872,7 @@ CompositorD3D11::SetSamplerForFilter(Filter aFilter)
 {
   ID3D11SamplerState *sampler;
   switch (aFilter) {
+  default:
   case FILTER_LINEAR:
     sampler = mAttachments->mLinearSamplerState;
     break;

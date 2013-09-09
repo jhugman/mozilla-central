@@ -26,7 +26,8 @@ public:
   virtual ~HTMLOptionElement();
 
   static already_AddRefed<HTMLOptionElement>
-    Option(const GlobalObject& aGlobal, const Optional<nsAString>& aText,
+    Option(const GlobalObject& aGlobal,
+           const Optional<nsAString>& aText,
            const Optional<nsAString>& aValue,
            const Optional<bool>& aDefaultSelected,
            const Optional<bool>& aSelected, ErrorResult& aError);
@@ -112,12 +113,7 @@ public:
     aRv = SetText(aValue);
   }
 
-  int32_t GetIndex(ErrorResult& aRv)
-  {
-    int32_t id = 0;
-    aRv = GetIndex(&id);
-    return id;
-  }
+  int32_t Index();
 
 protected:
   virtual JSObject* WrapNode(JSContext* aCx,

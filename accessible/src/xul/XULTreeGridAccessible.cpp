@@ -267,11 +267,10 @@ XULTreeGridRowAccessible::
   XULTreeGridRowAccessible(nsIContent* aContent, DocAccessible* aDoc,
                            Accessible* aTreeAcc, nsITreeBoxObject* aTree,
                            nsITreeView* aTreeView, int32_t aRow) :
-  XULTreeItemAccessibleBase(aContent, aDoc, aTreeAcc, aTree, aTreeView, aRow)
+  XULTreeItemAccessibleBase(aContent, aDoc, aTreeAcc, aTree, aTreeView, aRow),
+  mAccessibleCache(kDefaultTreeCacheSize)
 {
   mGenericTypes |= eTableRow;
-
-  mAccessibleCache.Init(kDefaultTreeCacheSize);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -778,8 +777,6 @@ XULTreeGridCellAccessible::RelationByType(uint32_t aType)
 void
 XULTreeGridCellAccessible::CellInvalidated()
 {
-  if (!mTreeView)
-    return;
 
   nsAutoString textEquiv;
 
@@ -852,8 +849,6 @@ XULTreeGridCellAccessible::DispatchClickEvent(nsIContent* aContent,
 bool
 XULTreeGridCellAccessible::IsEditable() const
 {
-  if (!mTreeView)
-    return false;
 
   // XXX: logic corresponds to tree.xml, it's preferable to have interface
   // method to check it.

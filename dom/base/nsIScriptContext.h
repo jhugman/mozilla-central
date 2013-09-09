@@ -11,7 +11,6 @@
 #include "nsISupports.h"
 #include "nsCOMPtr.h"
 #include "nsIProgrammingLanguage.h"
-#include "jsfriendapi.h"
 #include "jspubtd.h"
 #include "js/GCAPI.h"
 
@@ -28,12 +27,14 @@ class nsIDOMWindow;
 class nsIURI;
 
 #define NS_ISCRIPTCONTEXT_IID \
-{ 0xfd05ba99, 0x2906, 0x4c51, \
-  { 0x89, 0xb3, 0xbc, 0xdf, 0xf6, 0x3b, 0xf2, 0xde } }
+{ 0xf3859ce7, 0x7551, 0x4760, \
+  { 0x84, 0x29, 0x64, 0x4f, 0x26, 0x1e, 0xdb, 0x91 } }
 
 /* This MUST match JSVERSION_DEFAULT.  This version stuff if we don't
    know what language we have is a little silly... */
 #define SCRIPTVERSION_DEFAULT JSVERSION_DEFAULT
+
+class nsIOffThreadScriptReceiver;
 
 /**
  * It is used by the application to initialize a runtime and run scripts.
@@ -103,12 +104,6 @@ public:
   virtual JSContext* GetNativeContext() = 0;
 
   /**
-   * Return the native global object for this context.
-   *
-   **/
-  virtual JSObject* GetNativeGlobal() = 0;
-
-  /**
    * Initialize the context generally. Does not create a global object.
    **/
   virtual nsresult InitContext() = 0;
@@ -129,27 +124,6 @@ public:
    * @return NS_OK if the method is successful
    */
   virtual void GC(JS::gcreason::Reason aReason) = 0;
-
-  /**
-   * Inform the context that a script was evaluated.
-   * A GC may be done if "necessary."
-   * This call is necessary if script evaluation is done
-   * without using the EvaluateScript method.
-   * @param aTerminated If true then do script termination handling. Within DOM
-   *     this will always be true, but outside  callers (such as xpconnect) who
-   *     may do script evaluations nested inside inside DOM script evaluations
-   *     can pass false to avoid premature termination handling.
-   * @return NS_OK if the method is successful
-   */
-  virtual void ScriptEvaluated(bool aTerminated) = 0;
-
-  virtual nsresult Serialize(nsIObjectOutputStream* aStream,
-                             JS::Handle<JSScript*> aScriptObject) = 0;
-  
-  /* Deserialize a script from a stream.
-   */
-  virtual nsresult Deserialize(nsIObjectInputStream* aStream,
-                               JS::MutableHandle<JSScript*> aResult) = 0;
 
   /**
    * Called to disable/enable script execution in this context.
@@ -185,9 +159,35 @@ public:
    * Tell the context we're done reinitializing it.
    */
   virtual void DidInitializeContext() = 0;
+
+  /**
+   * Access the Window Proxy. The setter should only be called by nsGlobalWindow.
+   */
+  virtual void SetWindowProxy(JS::Handle<JSObject*> aWindowProxy) = 0;
+  virtual JSObject* GetWindowProxy() = 0;
+  virtual JSObject* GetWindowProxyPreserveColor() = 0;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsIScriptContext, NS_ISCRIPTCONTEXT_IID)
+
+#define NS_IOFFTHREADSCRIPTRECEIVER_IID \
+{0x3a980010, 0x878d, 0x46a9,            \
+  {0x93, 0xad, 0xbc, 0xfd, 0xd3, 0x8e, 0xa0, 0xc2}}
+
+class nsIOffThreadScriptReceiver : public nsISupports
+{
+public:
+  NS_DECLARE_STATIC_IID_ACCESSOR(NS_IOFFTHREADSCRIPTRECEIVER_IID)
+
+  /**
+   * Notify this object that a previous CompileScript call specifying this as
+   * aOffThreadReceiver has completed. The script being passed in must be
+   * rooted before any call which could trigger GC.
+   */
+  NS_IMETHOD OnScriptCompileComplete(JSScript* aScript, nsresult aStatus) = 0;
+};
+
+NS_DEFINE_STATIC_IID_ACCESSOR(nsIOffThreadScriptReceiver, NS_IOFFTHREADSCRIPTRECEIVER_IID)
 
 #endif // nsIScriptContext_h__
 

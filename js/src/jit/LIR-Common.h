@@ -7,12 +7,13 @@
 #ifndef jit_LIR_Common_h
 #define jit_LIR_Common_h
 
+#include "jit/RangeAnalysis.h"
 #include "jit/shared/Assembler-shared.h"
 
 // This file declares LIR instructions that are common to every platform.
 
 namespace js {
-namespace ion {
+namespace jit {
 
 template <size_t Temps, size_t ExtraUses = 0>
 class LBinaryMath : public LInstructionHelper<1, 2 + ExtraUses, Temps>
@@ -217,23 +218,6 @@ class LCallee : public LInstructionHelper<1, 0, 0>
 {
   public:
     LIR_HEADER(Callee)
-};
-
-class LForceUseV : public LInstructionHelper<0, BOX_PIECES, 0>
-{
-  public:
-    LIR_HEADER(ForceUseV)
-};
-
-class LForceUseT : public LInstructionHelper<0, 1, 0>
-{
-  public:
-    LIR_HEADER(ForceUseT)
-
-    LForceUseT(const LAllocation &value)
-    {
-        setOperand(0, value);
-    }
 };
 
 // Base class for control instructions (goto, branch, etc.)
@@ -641,6 +625,29 @@ class LCheckOverRecursedPar : public LInstructionHelper<0, 1, 1>
 
     const LDefinition *getTempReg() {
         return getTemp(0);
+    }
+};
+
+// Alternative to LInterruptCheck which does not emit an explicit check of the
+// interrupt flag but relies on the loop backedge being patched via a signal
+// handler.
+class LInterruptCheckImplicit : public LInstructionHelper<0, 0, 0>
+{
+    Label *oolEntry_;
+
+  public:
+    LIR_HEADER(InterruptCheckImplicit)
+
+    LInterruptCheckImplicit()
+      : oolEntry_(NULL)
+    {}
+
+    Label *oolEntry() {
+        return oolEntry_;
+    }
+
+    void setOolEntry(Label *oolEntry) {
+        oolEntry_ = oolEntry;
     }
 };
 
@@ -1342,11 +1349,11 @@ class LTestOAndBranch : public LControlInstructionHelper<2, 1, 1>
         return getTemp(0);
     }
 
-    Label *ifTruthy() {
-        return getSuccessor(0)->lir()->label();
+    MBasicBlock *ifTruthy() {
+        return getSuccessor(0);
     }
-    Label *ifFalsy() {
-        return getSuccessor(1)->lir()->label();
+    MBasicBlock *ifFalsy() {
+        return getSuccessor(1);
     }
 
     MTest *mir() {
@@ -1388,11 +1395,11 @@ class LTestVAndBranch : public LControlInstructionHelper<2, BOX_PIECES, 3>
         return getTemp(2);
     }
 
-    Label *ifTruthy() {
-        return getSuccessor(0)->lir()->label();
+    MBasicBlock *ifTruthy() {
+        return getSuccessor(0);
     }
-    Label *ifFalsy() {
-        return getSuccessor(1)->lir()->label();
+    MBasicBlock *ifFalsy() {
+        return getSuccessor(1);
     }
 
     MTest *mir() const {
@@ -1438,26 +1445,6 @@ class LTypeObjectDispatch : public LInstructionHelper<0, 1, 1>
 
     MTypeObjectDispatch *mir() {
         return mir_->toTypeObjectDispatch();
-    }
-};
-
-class LPolyInlineDispatch : public LInstructionHelper<0, 1, 1>
-{
-  // Accesses function/block table from MIR instruction.
-  public:
-    LIR_HEADER(PolyInlineDispatch)
-
-    LPolyInlineDispatch(const LAllocation &in, const LDefinition &temp) {
-        setOperand(0, in);
-        setTemp(0, temp);
-    }
- 
-    const LDefinition *temp() {
-        return getTemp(0);
-    }
-
-    MPolyInlineDispatch *mir() {
-        return mir_->toPolyInlineDispatch();
     }
 };
 
@@ -4123,6 +4110,19 @@ class LCallDeleteProperty : public LCallInstructionHelper<1, BOX_PIECES, 0>
     }
 };
 
+class LCallDeleteElement : public LCallInstructionHelper<1, 2 * BOX_PIECES, 0>
+{
+  public:
+    LIR_HEADER(CallDeleteElement)
+
+    static const size_t Value = 0;
+    static const size_t Index = BOX_PIECES;
+
+    MDeleteElement *mir() const {
+        return mir_->toDeleteElement();
+    }
+};
+
 // Patchable jump to stubs generated for a SetProperty cache, which stores a
 // boxed value.
 class LSetPropertyCacheV : public LInstructionHelper<0, 1 + BOX_PIECES, 1>
@@ -4936,7 +4936,87 @@ class LAsmJSCheckOverRecursed : public LInstructionHelper<0, 0, 0>
     }
 };
 
-} // namespace ion
+class LAssertRangeI : public LInstructionHelper<0, 1, 0>
+{
+  public:
+    LIR_HEADER(AssertRangeI)
+
+    LAssertRangeI(const LAllocation &input) {
+        setOperand(0, input);
+    }
+
+    const LAllocation *input() {
+        return getOperand(0);
+    }
+
+    MAssertRange *mir() {
+        return mir_->toAssertRange();
+    }
+    Range *range() {
+        return mir()->range();
+    }
+};
+
+class LAssertRangeD : public LInstructionHelper<0, 1, 1>
+{
+  public:
+    LIR_HEADER(AssertRangeD)
+
+    LAssertRangeD(const LAllocation &input, const LDefinition &temp) {
+        setOperand(0, input);
+        setTemp(0, temp);
+    }
+
+    const LAllocation *input() {
+        return getOperand(0);
+    }
+
+    const LDefinition *temp() {
+        return getTemp(0);
+    }
+
+    MAssertRange *mir() {
+        return mir_->toAssertRange();
+    }
+    Range *range() {
+        return mir()->range();
+    }
+};
+
+class LAssertRangeV : public LInstructionHelper<0, BOX_PIECES, 3>
+{
+  public:
+    LIR_HEADER(AssertRangeV)
+
+    LAssertRangeV(const LDefinition &temp, const LDefinition &floatTemp1,
+                  const LDefinition &floatTemp2)
+    {
+        setTemp(0, temp);
+        setTemp(1, floatTemp1);
+        setTemp(2, floatTemp2);
+    }
+
+    static const size_t Input = 0;
+
+    const LDefinition *temp() {
+        return getTemp(0);
+    }
+    const LDefinition *floatTemp1() {
+        return getTemp(1);
+    }
+    const LDefinition *floatTemp2() {
+        return getTemp(2);
+    }
+
+    MAssertRange *mir() {
+        return mir_->toAssertRange();
+    }
+    Range *range() {
+        return mir()->range();
+    }
+};
+
+} // namespace jit
 } // namespace js
 
 #endif /* jit_LIR_Common_h */

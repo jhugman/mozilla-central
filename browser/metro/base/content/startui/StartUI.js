@@ -9,7 +9,7 @@ Cu.import("resource://gre/modules/Services.jsm");
 var StartUI = {
   get startUI() { return document.getElementById("start-container"); },
 
-  get maxResultsPerSection() { 
+  get maxResultsPerSection() {
     return Services.prefs.getIntPref("browser.display.startUI.maxresults");
   },
 
@@ -26,15 +26,12 @@ var StartUI = {
     document.getElementById("bcast_preciseInput").setAttribute("input",
       this.chromeWin.InputSourceHelper.isPrecise ? "precise" : "imprecise");
 
+    this._adjustDOMforViewState();
+
     TopSitesStartView.init();
     BookmarksStartView.init();
     HistoryStartView.init();
     RemoteTabsStartView.init();
-
-    TopSitesStartView.show();
-    BookmarksStartView.show();
-    HistoryStartView.show();
-    RemoteTabsStartView.show();
 
     this.chromeWin.addEventListener("MozPrecisePointer", this, true);
     this.chromeWin.addEventListener("MozImprecisePointer", this, true);
@@ -87,14 +84,6 @@ var StartUI = {
     section.setAttribute("expanded", "true");
   },
 
-  getScrollBoxObject: function () {
-    let startBox = document.getElementById("start-scrollbox");
-    if (!startBox._cachedSBO) {
-      startBox._cachedSBO = startBox.boxObject.QueryInterface(Ci.nsIScrollBoxObject);
-    }
-    return startBox._cachedSBO;
-  },
-
   handleEvent: function handleEvent(aEvent) {
     switch (aEvent.type) {
       case "MozPrecisePointer":
@@ -107,11 +96,11 @@ var StartUI = {
         this.onClick(aEvent);
         break;
       case "MozMousePixelScroll":
-        let scroller = this.getScrollBoxObject();
-        if (this.startUI.getAttribute("viewstate") == "snapped") {
-          scroller.scrollBy(0, aEvent.detail);
+        let viewstate = this.startUI.getAttribute("viewstate");
+        if (viewstate === "snapped" || viewstate === "portrait") {
+          window.scrollBy(0, aEvent.detail);
         } else {
-          scroller.scrollBy(aEvent.detail, 0);
+          window.scrollBy(aEvent.detail, 0);
         }
 
         aEvent.preventDefault();
@@ -120,10 +109,10 @@ var StartUI = {
     }
   },
 
-  _adjustDOMforViewState: function() {
-    if (this.chromeWin.MetroUtils.immersive) {
-      let currViewState = "";
-      switch (this.chromeWin.MetroUtils.snappedState) {
+  _adjustDOMforViewState: function(aState) {
+    let currViewState = aState;
+    if (!currViewState && Services.metro.immersive) {
+      switch (Services.metro.snappedState) {
         case Ci.nsIWinMetroUtils.fullScreenLandscape:
           currViewState = "landscape";
           break;
@@ -137,14 +126,20 @@ var StartUI = {
           currViewState = "snapped";
           break;
       }
-      document.getElementById("bcast_windowState").setAttribute("viewstate", currViewState);
+    }
+
+    document.getElementById("bcast_windowState").setAttribute("viewstate", currViewState);
+    if (currViewState == "snapped") {
+      document.getElementById("start-topsites-grid").removeAttribute("tiletype");
+    } else {
+      document.getElementById("start-topsites-grid").setAttribute("tiletype", "thumbnail");
     }
   },
 
   observe: function (aSubject, aTopic, aData) {
     switch (aTopic) {
       case "metro_viewstate_changed":
-        this._adjustDOMforViewState();
+        this._adjustDOMforViewState(aData);
         break;
     }
   }

@@ -5,7 +5,6 @@
 
 /* struct containing the input to nsIFrame::Reflow */
 
-#include "nsCOMPtr.h"
 #include "nsStyleConsts.h"
 #include "nsCSSAnonBoxes.h"
 #include "nsFrame.h"
@@ -20,12 +19,11 @@
 #include "nsImageFrame.h"
 #include "nsTableFrame.h"
 #include "nsTableCellFrame.h"
-#include "nsIServiceManager.h"
 #include "nsIPercentHeightObserver.h"
 #include "nsLayoutUtils.h"
 #include "mozilla/Preferences.h"
-#include "nsBidiUtils.h"
 #include "nsFontInflationData.h"
+#include "StickyScrollContainer.h"
 #include <algorithm>
 
 #ifdef DEBUG
@@ -35,6 +33,7 @@
 #endif
 
 using namespace mozilla;
+using namespace mozilla::css;
 using namespace mozilla::layout;
 
 enum eNormalLineHeightControl {
@@ -122,7 +121,7 @@ FontSizeInflationListMarginAdjustment(const nsIFrame* aFrame)
 
   return 0;
 }
-// Initialize a reflow state for a child frames reflow. Some state
+// Initialize a reflow state for a child frame's reflow. Some state
 // is copied from the parent reflow state; the remaining state is
 // computed.
 nsHTMLReflowState::nsHTMLReflowState(nsPresContext*           aPresContext,
@@ -845,6 +844,9 @@ nsHTMLReflowState::ApplyRelativePositioning(nsIFrame* aFrame,
   const nsStyleDisplay* display = aFrame->StyleDisplay();
   if (NS_STYLE_POSITION_RELATIVE == display->mPosition) {
     *aPosition += nsPoint(aComputedOffsets.left, aComputedOffsets.top);
+  } else if (NS_STYLE_POSITION_STICKY == display->mPosition) {
+    *aPosition = StickyScrollContainer::StickyScrollContainerForFrame(aFrame)->
+      ComputePosition(aFrame);
   }
 }
 
@@ -1943,8 +1945,11 @@ nsHTMLReflowState::InitConstraints(nsPresContext* aPresContext,
 
     // Compute our offsets if the element is relatively positioned.  We need
     // the correct containing block width and height here, which is why we need
-    // to do it after all the quirks-n-such above.
-    if (mStyleDisplay->IsRelativelyPositioned(frame)) {
+    // to do it after all the quirks-n-such above. (If the element is sticky
+    // positioned, we need to wait until the scroll container knows its size,
+    // so we compute offsets from StickyScrollContainer::UpdatePositions.)
+    if (mStyleDisplay->IsRelativelyPositioned(frame) &&
+        NS_STYLE_POSITION_RELATIVE == mStyleDisplay->mPosition) {
       uint8_t direction = NS_STYLE_DIRECTION_LTR;
       if (cbrs && NS_STYLE_DIRECTION_RTL == cbrs->mStyleVisibility->mDirection) {
         direction = NS_STYLE_DIRECTION_RTL;

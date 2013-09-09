@@ -451,6 +451,7 @@ SourcesView.prototype = Heritage.extend(WidgetMethods, {
 
     let checkbox = document.createElement("checkbox");
     checkbox.setAttribute("checked", "true");
+    checkbox.className = "dbg-breakpoint-checkbox";
 
     let lineNumberNode = document.createElement("label");
     lineNumberNode.className = "plain dbg-breakpoint-line";
@@ -466,7 +467,8 @@ SourcesView.prototype = Heritage.extend(WidgetMethods, {
 
     let container = document.createElement("hbox");
     container.id = "breakpoint-" + aOptions.actor;
-    container.className = "dbg-breakpoint side-menu-widget-item-other";
+    container.className = "dbg-breakpoint devtools-monospace" +
+                          " side-menu-widget-item-other";
     container.setAttribute("align", "center");
     container.setAttribute("flex", "1");
 
@@ -1429,7 +1431,7 @@ WatchExpressionsView.prototype = Heritage.extend(WidgetMethods, {
     arrowNode.className = "dbg-expression-arrow";
 
     let inputNode = document.createElement("textbox");
-    inputNode.className = "plain dbg-expression-input";
+    inputNode.className = "plain dbg-expression-input devtools-monospace";
     inputNode.setAttribute("value", aAttachment.initialExpression);
     inputNode.setAttribute("flex", "1");
 
@@ -2194,9 +2196,10 @@ LineResults.prototype = {
     let lineLength = 0;
     let firstMatch = null;
 
-    lineNumberNode.className = "plain dbg-results-line-number";
+    lineNumberNode.className = "plain dbg-results-line-number devtools-monospace";
     lineNumberNode.setAttribute("value", aLineNumber + 1);
-    lineContentsNode.className = "light list-widget-item dbg-results-line-contents";
+    lineContentsNode.className = "light list-widget-item devtools-monospace" +
+                                 " dbg-results-line-contents";
     lineContentsNode.setAttribute("flex", "1");
 
     for (let chunk of this._store) {

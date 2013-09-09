@@ -11,8 +11,8 @@
  * JS bytecode definitions.
  */
 
-#include "jsapi.h"
 #include "jsbytecode.h"
+#include "NamespaceImports.h"
 
 #include "frontend/SourceNotes.h"
 
@@ -451,8 +451,6 @@ class Sprinter
     char *stringAt(ptrdiff_t off) const;
     /* Returns the char at offset |off| */
     char &operator[](size_t off);
-    /* Test if this Sprinter is empty */
-    bool empty() const;
 
     /*
      * Attempt to reserve len + 1 space (for a trailing NULL byte). If the
@@ -460,8 +458,6 @@ class Sprinter
      * internal content. The caller *must* completely fill this space on success.
      */
     char *reserve(size_t len);
-    /* Like reserve, but memory is initialized to 0 */
-    char *reserveAndClear(size_t len);
 
     /*
      * Puts |len| characters from |s| at the current position and return an offset to
@@ -474,13 +470,7 @@ class Sprinter
     /* Prints a formatted string into the buffer */
     int printf(const char *fmt, ...);
 
-    /* Change the offset */
-    void setOffset(const char *end);
-    void setOffset(ptrdiff_t off);
-
-    /* Get the offset */
     ptrdiff_t getOffset() const;
-    ptrdiff_t getOffsetOf(const char *string) const;
 
     /*
      * Report that a string operation failed to get the memory it requested. The
@@ -795,9 +785,9 @@ js_DumpPCCounts(JSContext *cx, JS::Handle<JSScript*> script, js::Sprinter *sp);
 
 #ifdef JS_ION
 namespace js {
-namespace ion { struct IonScriptCounts; }
+namespace jit { struct IonScriptCounts; }
 void
-DumpIonScriptCounts(js::Sprinter *sp, ion::IonScriptCounts *ionCounts);
+DumpIonScriptCounts(js::Sprinter *sp, jit::IonScriptCounts *ionCounts);
 }
 #endif
 

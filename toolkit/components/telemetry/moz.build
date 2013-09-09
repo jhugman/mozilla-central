@@ -16,7 +16,6 @@ MODULE = 'telemetry'
 EXPORTS.mozilla += [
     'ProcessedStack.h',
     'Telemetry.h',
-    'TelemetryHistogramEnums.h',
 ]
 
 CPP_SOURCES += [
@@ -36,3 +35,12 @@ EXTRA_JS_MODULES += [
     'TelemetryStopwatch.jsm',
     'ThirdPartyCookieProbe.jsm',
 ]
+
+FAIL_ON_WARNINGS = True
+
+LIBXUL_LIBRARY = True
+
+MSVC_ENABLE_PGO = True
+
+LIBRARY_NAME = 'telemetry'
+

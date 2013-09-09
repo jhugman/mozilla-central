@@ -906,17 +906,6 @@ class Value
     Value(const Value& v) = default;
 #endif
 
-    /*
-     * clang 4.1 doesn't corectly create a default assignment operator
-     * for this class, so we need to explicitly declare one.
-     */
-#if defined(__clang__) && (__clang_major__ == 4) && (__clang_minor__ <= 1)
-    Value &operator=(const Value &r) {
-        data = r.data;
-        return *this;
-    }
-#endif
-
     /*** Mutators ***/
 
     void setNull() {
@@ -1905,6 +1894,24 @@ JSVAL_TO_PRIVATE(jsval v)
 {
     MOZ_ASSERT(JSVAL_IS_DOUBLE(v));
     return JSVAL_TO_PRIVATE_PTR_IMPL(JSVAL_TO_IMPL(v));
+}
+
+// JS constants. For efficiency, prefer predicates (e.g. v.isNull()) and
+// constructing values from scratch (e.g. Int32Value(0)).  These constants are
+// stored in memory and initialized at startup, so testing against them and
+// using them requires memory loads and will be correspondingly slow.
+extern JS_PUBLIC_DATA(const jsval) JSVAL_NULL;
+extern JS_PUBLIC_DATA(const jsval) JSVAL_ZERO;
+extern JS_PUBLIC_DATA(const jsval) JSVAL_ONE;
+extern JS_PUBLIC_DATA(const jsval) JSVAL_FALSE;
+extern JS_PUBLIC_DATA(const jsval) JSVAL_TRUE;
+extern JS_PUBLIC_DATA(const jsval) JSVAL_VOID;
+
+namespace JS {
+
+extern JS_PUBLIC_DATA(const Handle<Value>) NullHandleValue;
+extern JS_PUBLIC_DATA(const Handle<Value>) UndefinedHandleValue;
+
 }
 
 #undef JS_VALUE_IS_CONSTEXPR

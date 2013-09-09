@@ -9,8 +9,6 @@
 
 #include "nsIScriptSecurityManager.h"
 #include "nsIPrincipal.h"
-#include "jsapi.h"
-#include "jsdbgapi.h"
 #include "nsIXPCSecurityManager.h"
 #include "nsInterfaceHashtable.h"
 #include "nsHashtable.h"
@@ -20,6 +18,7 @@
 #include "pldhash.h"
 #include "plstr.h"
 #include "nsIScriptExternalNameSet.h"
+#include "js/TypeDecls.h"
 
 #include <stdint.h>
 
@@ -488,9 +487,6 @@ private:
     nsresult
     InitDomainPolicy(JSContext* cx, const char* aPolicyName,
                      DomainPolicy* aDomainPolicy);
-
-    // JS strings we need to clean up on shutdown
-    static jsid sEnabledID;
 
     inline void
     ScriptSecurityPrefChanged();

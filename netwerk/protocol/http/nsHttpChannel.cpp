@@ -401,6 +401,10 @@ nsHttpChannel::Connect()
     if (!net_IsValidHostName(nsDependentCString(mConnectionInfo->Host())))
         return NS_ERROR_UNKNOWN_HOST;
 
+    // Finalize ConnectionInfo flags before SpeculativeConnect
+    mConnectionInfo->SetAnonymous((mLoadFlags & LOAD_ANONYMOUS) != 0);
+    mConnectionInfo->SetPrivate(mPrivateBrowsing);
+
     // Consider opening a TCP connection right away
     RetrieveSSLOptions();
     SpeculativeConnect();
@@ -537,8 +541,6 @@ nsHttpChannel::SpeculativeConnect()
     if (!callbacks)
         return;
 
-    mConnectionInfo->SetAnonymous((mLoadFlags & LOAD_ANONYMOUS) != 0);
-    mConnectionInfo->SetPrivate(mPrivateBrowsing);
     gHttpHandler->SpeculativeConnect(
         mConnectionInfo, callbacks,
         mCaps & (NS_HTTP_ALLOW_RSA_FALSESTART | NS_HTTP_ALLOW_RC4_FALSESTART | NS_HTTP_DISALLOW_SPDY));
@@ -722,14 +724,17 @@ nsHttpChannel::RetrieveSSLOptions()
         return;
 
     uint32_t perm;
-    nsresult rv = permMgr->TestPermissionFromPrincipal(principal,
-                                                       "falsestart-rsa", &perm);
+    nsresult rv = permMgr->TestExactPermissionFromPrincipal(principal,
+                                                            "falsestart-rsa",
+                                                            &perm);
     if (NS_SUCCEEDED(rv) && perm == nsIPermissionManager::ALLOW_ACTION) {
         LOG(("nsHttpChannel::RetrieveSSLOptions [this=%p] "
              "falsestart-rsa permission found\n", this));
         mCaps |= NS_HTTP_ALLOW_RSA_FALSESTART;
     }
-    rv = permMgr->TestPermissionFromPrincipal(principal, "falsestart-rc4", &perm);
+    rv = permMgr->TestExactPermissionFromPrincipal(principal,
+                                                   "falsestart-rc4",
+                                                   &perm);
     if (NS_SUCCEEDED(rv) && perm == nsIPermissionManager::ALLOW_ACTION) {
         LOG(("nsHttpChannel::RetrieveSSLOptions [this=%p] "
              "falsestart-rc4 permission found\n", this));
@@ -886,9 +891,6 @@ nsHttpChannel::SetupTransaction()
     if (mTimingEnabled)
         mCaps |= NS_HTTP_TIMING_ENABLED;
 
-    mConnectionInfo->SetAnonymous((mLoadFlags & LOAD_ANONYMOUS) != 0);
-    mConnectionInfo->SetPrivate(mPrivateBrowsing);
-
     if (mUpgradeProtocolCallback) {
         mRequestHead.SetHeader(nsHttp::Upgrade, mUpgradeProtocol, false);
         mRequestHead.SetHeaderOnce(nsHttp::Connection,
@@ -1003,8 +1005,14 @@ nsHttpChannel::CallOnStartRequest()
     }
 
     LOG(("  calling mListener->OnStartRequest\n"));
-    nsresult rv = mListener->OnStartRequest(this, mListenerContext);
-    if (NS_FAILED(rv)) return rv;
+    nsresult rv;
+    if (mListener) {
+        nsresult rv = mListener->OnStartRequest(this, mListenerContext);
+        if (NS_FAILED(rv))
+            return rv;
+    } else {
+        NS_WARNING("OnStartRequest skipped because of null listener");
+    }
 
     // install stream converter if required
     rv = ApplyContentConversions();
@@ -5192,7 +5200,11 @@ nsHttpChannel::OnStopRequest(nsIRequest *request, nsISupports *ctxt, nsresult st
             MOZ_ASSERT(NS_FAILED(status), "should have a failure code here");
             // NOTE: since we have a failure status, we can ignore the return
             // value from onStartRequest.
-            mListener->OnStartRequest(this, mListenerContext);
+            if (mListener) {
+                mListener->OnStartRequest(this, mListenerContext);
+            } else {
+                NS_WARNING("OnStartRequest skipped because of null listener");
+            }
         }
 
         // if this transaction has been replaced, then bail.

@@ -6,11 +6,12 @@
 
 #include "AudioBufferSourceNode.h"
 #include "mozilla/dom/AudioBufferSourceNodeBinding.h"
+#include "mozilla/dom/AudioParam.h"
 #include "nsMathUtils.h"
 #include "AudioNodeEngine.h"
 #include "AudioNodeStream.h"
 #include "AudioDestinationNode.h"
-#include "PannerNode.h"
+#include "AudioParamTimeline.h"
 #include "speex/speex_resampler.h"
 #include <limits>
 

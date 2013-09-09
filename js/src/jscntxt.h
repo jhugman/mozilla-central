@@ -34,6 +34,8 @@ js_ReportOverRecursed(js::ThreadSafeContext *cx);
 
 namespace js {
 
+namespace jit { class IonContext; }
+
 struct CallsiteCloneKey {
     /* The original function that we are cloning. */
     JSFunction *original;
@@ -103,6 +105,8 @@ class ForkJoinSlice;
 class RegExpCompartment;
 class RegExpStatics;
 class ForkJoinSlice;
+
+namespace frontend { struct CompileError; }
 
 /*
  * Execution Context Overview:
@@ -257,14 +261,20 @@ struct ThreadSafeContext : ContextFriendFields,
         js_ReportAllocationOverflow(this);
     }
 
-    // Builtin atoms are immutable and may be accessed freely from any thread.
+    // Accessors for immutable runtime data.
     JSAtomState &names() { return runtime_->atomState; }
     StaticStrings &staticStrings() { return runtime_->staticStrings; }
     PropertyName *emptyString() { return runtime_->emptyString; }
+    FreeOp *defaultFreeOp() { return runtime_->defaultFreeOp(); }
+    bool useHelperThreads() { return runtime_->useHelperThreads(); }
+    size_t helperThreadCount() { return runtime_->helperThreadCount(); }
 
     // GCs cannot happen while non-main threads are running.
     uint64_t gcNumber() { return runtime_->gcNumber; }
+    size_t gcSystemPageSize() { return runtime_->gcSystemPageSize; }
     bool isHeapBusy() { return runtime_->isHeapBusy(); }
+    bool signalHandlersInstalled() const { return runtime_->signalHandlersInstalled(); }
+    bool jitSupportsFloatingPoint() const { return runtime_->jitSupportsFloatingPoint; }
 
     // Thread local data that may be accessed freely.
     DtoaState *dtoaState() {
@@ -277,11 +287,11 @@ struct WorkerThread;
 class ExclusiveContext : public ThreadSafeContext
 {
     friend class gc::ArenaLists;
-    friend class CompartmentChecker;
     friend class AutoCompartment;
     friend class AutoLockForExclusiveAccess;
     friend struct StackBaseShape;
     friend void JSScript::initCompartment(ExclusiveContext *cx);
+    friend class jit::IonContext;
 
     // The worker on which this context is running, if this is not a JSContext.
     WorkerThread *workerThread;
@@ -330,42 +340,54 @@ class ExclusiveContext : public ThreadSafeContext
     // If required, pause this thread until notified to continue by the main thread.
     inline void maybePause() const;
 
-    inline bool typeInferenceEnabled() const;
+    // Threads with an ExclusiveContext may freely access any data in their
+    // compartment and zone.
+    JSCompartment *compartment() const {
+        JS_ASSERT_IF(runtime_->isAtomsCompartment(compartment_),
+                     runtime_->currentThreadHasExclusiveAccess());
+        return compartment_;
+    }
+    JS::Zone *zone() const {
+        JS_ASSERT_IF(!compartment(), !zone_);
+        JS_ASSERT_IF(compartment(), js::GetCompartmentZone(compartment()) == zone_);
+        return zone_;
+    }
 
-    // Per compartment data that can be accessed freely from an ExclusiveContext.
-    inline RegExpCompartment &regExps();
-    inline RegExpStatics *regExpStatics();
-    inline PropertyTree &propertyTree();
-    inline BaseShapeSet &baseShapes();
-    inline InitialShapeSet &initialShapes();
-    inline DtoaCache &dtoaCache();
+    // Zone local methods that can be used freely from an ExclusiveContext.
+    inline bool typeInferenceEnabled() const;
     types::TypeObject *getNewType(Class *clasp, TaggedProto proto, JSFunction *fun = NULL);
+    types::TypeObject *getLazyType(Class *clasp, TaggedProto proto);
+    inline js::LifoAlloc &typeLifoAlloc();
 
     // Current global. This is only safe to use within the scope of the
     // AutoCompartment from which it's called.
     inline js::Handle<js::GlobalObject*> global() const;
 
-    // Methods to access runtime wide data that must be protected by locks.
-
+    // Methods to access runtime data that must be protected by locks.
     frontend::ParseMapPool &parseMapPool() {
-        JS_ASSERT(runtime_->currentThreadHasExclusiveAccess());
-        return runtime_->parseMapPool;
+        return runtime_->parseMapPool();
     }
-
     AtomSet &atoms() {
-        JS_ASSERT(runtime_->currentThreadHasExclusiveAccess());
-        return runtime_->atoms;
+        return runtime_->atoms();
     }
-
     JSCompartment *atomsCompartment() {
-        JS_ASSERT(runtime_->currentThreadHasExclusiveAccess());
-        return runtime_->atomsCompartment;
+        return runtime_->atomsCompartment();
+    }
+    ScriptDataTable &scriptDataTable() {
+        return runtime_->scriptDataTable();
     }
 
-    ScriptDataTable &scriptDataTable() {
-        JS_ASSERT(runtime_->currentThreadHasExclusiveAccess());
-        return runtime_->scriptDataTable;
+#ifdef JS_WORKER_THREADS
+    // Since JSRuntime::workerThreadState is necessarily initialized from the
+    // main thread before the first worker thread can access it, there is no
+    // possibility for a race read/writing it.
+    WorkerThreadState *workerThreadState() {
+        return runtime_->workerThreadState;
     }
+#endif
+
+    // Methods specific to any WorkerThread for the context.
+    frontend::CompileError &addPendingCompileError();
 };
 
 inline void
@@ -383,13 +405,6 @@ struct JSContext : public js::ExclusiveContext,
     ~JSContext();
 
     JSRuntime *runtime() const { return runtime_; }
-    JSCompartment *compartment() const { return compartment_; }
-
-    inline JS::Zone *zone() const {
-        JS_ASSERT_IF(!compartment(), !zone_);
-        JS_ASSERT_IF(compartment(), js::GetCompartmentZone(compartment()) == zone_);
-        return zone_;
-    }
     js::PerThreadData &mainThread() const { return runtime()->mainThread; }
 
     friend class js::ExclusiveContext;
@@ -434,7 +449,10 @@ struct JSContext : public js::ExclusiveContext,
   public:
     inline void setDefaultCompartmentObject(JSObject *obj);
     inline void setDefaultCompartmentObjectIfUnset(JSObject *obj);
-    JSObject *maybeDefaultCompartmentObject() const { return defaultCompartmentObject_; }
+    JSObject *maybeDefaultCompartmentObject() const {
+        JS_ASSERT(!hasOption(JSOPTION_NO_DEFAULT_COMPARTMENT_OBJECT));
+        return defaultCompartmentObject_;
+    }
 
     /* Wrap cx->exception for the current compartment. */
     void wrapPendingException();
@@ -478,7 +496,6 @@ struct JSContext : public js::ExclusiveContext,
 
     js::LifoAlloc &tempLifoAlloc() { return runtime()->tempLifoAlloc; }
     inline js::LifoAlloc &analysisLifoAlloc();
-    inline js::LifoAlloc &typeLifoAlloc();
 
 #ifdef JS_THREADSAFE
     unsigned            outstandingRequests;/* number of JS_BeginRequest calls
@@ -734,7 +751,7 @@ js_ReportErrorNumberUCArray(JSContext *cx, unsigned flags, JSErrorCallback callb
 #endif
 
 extern bool
-js_ExpandErrorArguments(JSContext *cx, JSErrorCallback callback,
+js_ExpandErrorArguments(js::ExclusiveContext *cx, JSErrorCallback callback,
                         void *userRef, const unsigned errorNumber,
                         char **message, JSErrorReport *reportp,
                         js::ErrorArgumentsType argumentsType, va_list ap);
@@ -799,6 +816,9 @@ js_ReportValueErrorFlags(JSContext *cx, unsigned flags, const unsigned errorNumb
                                     spindex, v, fallback, arg1, arg2))
 
 extern const JSErrorFormatString js_ErrorFormatString[JSErr_Limit];
+
+char *
+js_strdup(js::ExclusiveContext *cx, const char *s);
 
 #ifdef JS_THREADSAFE
 # define JS_ASSERT_REQUEST_DEPTH(cx)  JS_ASSERT((cx)->runtime()->requestDepth >= 1)
@@ -955,11 +975,11 @@ class AutoAssertNoException
  */
 class ContextAllocPolicy
 {
-    JSContext *const cx_;
+    ThreadSafeContext *const cx_;
 
   public:
-    ContextAllocPolicy(JSContext *cx) : cx_(cx) {}
-    JSContext *context() const { return cx_; }
+    ContextAllocPolicy(ThreadSafeContext *cx) : cx_(cx) {}
+    ThreadSafeContext *context() const { return cx_; }
     void *malloc_(size_t bytes) { return cx_->malloc_(bytes); }
     void *calloc_(size_t bytes) { return cx_->calloc_(bytes); }
     void *realloc_(void *p, size_t oldBytes, size_t bytes) { return cx_->realloc_(p, oldBytes, bytes); }

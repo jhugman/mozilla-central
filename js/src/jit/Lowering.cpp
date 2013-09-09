@@ -21,7 +21,7 @@
 #include "jit/shared/Lowering-shared-inl.h"
 
 using namespace js;
-using namespace ion;
+using namespace jit;
 
 bool
 LIRGenerator::visitParameter(MParameter *param)
@@ -56,20 +56,6 @@ bool
 LIRGenerator::visitCallee(MCallee *ins)
 {
     return define(new LCallee(), ins);
-}
-
-bool
-LIRGenerator::visitForceUse(MForceUse *ins)
-{
-    if (ins->input()->type() == MIRType_Value) {
-        LForceUseV *lir = new LForceUseV();
-        if (!useBox(lir, 0, ins->input()))
-            return false;
-        return add(lir);
-    }
-
-    LForceUseT *lir = new LForceUseT(useAnyOrConstant(ins->input()));
-    return add(lir);
 }
 
 bool
@@ -451,7 +437,7 @@ LIRGenerator::visitCall(MCall *call)
     // Call anything, using the most generic code.
     LCallGeneric *lir = new LCallGeneric(useFixed(call->getFunction(), CallTempReg0),
         argslot, tempFixed(ArgumentsRectifierReg), tempFixed(CallTempReg2));
-    return (assignSnapshot(lir) && defineReturn(lir, call) && assignSafepoint(lir, call));
+    return defineReturn(lir, call) && assignSafepoint(lir, call);
 }
 
 bool
@@ -573,9 +559,14 @@ ReorderCommutative(MDefinition **lhsp, MDefinition **rhsp)
     if (rhs->isConstant())
         return;
 
-    if (lhs->isConstant() ||
-        (rhs->defUseCount() == 1 && lhs->defUseCount() > 1))
-    {
+    // lhs and rhs are used by the commutative operator. If they have any
+    // *other* uses besides, try to reorder to avoid clobbering them. To
+    // be fully precise, we should check whether this is the *last* use,
+    // but checking hasOneDefUse() is a decent approximation which doesn't
+    // require any extra analysis.
+    JS_ASSERT(lhs->defUseCount() > 0);
+    JS_ASSERT(rhs->defUseCount() > 0);
+    if (lhs->isConstant() || (rhs->hasOneDefUse() && !lhs->hasOneDefUse())) {
         *rhsp = lhs;
         *lhsp = rhs;
     }
@@ -764,16 +755,6 @@ bool
 LIRGenerator::visitTypeObjectDispatch(MTypeObjectDispatch *ins)
 {
     LTypeObjectDispatch *lir = new LTypeObjectDispatch(useRegister(ins->input()), temp());
-    return add(lir, ins);
-}
-
-bool
-LIRGenerator::visitPolyInlineDispatch(MPolyInlineDispatch *ins)
-{
-    LDefinition tempDef = LDefinition::BogusTemp();
-    if (ins->propTable())
-        tempDef = temp();
-    LPolyInlineDispatch *lir = new LPolyInlineDispatch(useRegister(ins->input()), tempDef);
     return add(lir, ins);
 }
 
@@ -988,15 +969,19 @@ CanEmitBitAndAtUses(MInstruction *ins)
     if (ins->getOperand(0)->type() != MIRType_Int32 || ins->getOperand(1)->type() != MIRType_Int32)
         return false;
 
-    MUseDefIterator iter(ins);
-    if (!iter)
+    MUseIterator iter(ins->usesBegin());
+    if (iter == ins->usesEnd())
         return false;
 
-    if (!iter.def()->isTest())
+    MNode *node = iter->consumer();
+    if (!node->isDefinition())
+        return false;
+
+    if (!node->toDefinition()->isTest())
         return false;
 
     iter++;
-    return !iter;
+    return iter == ins->usesEnd();
 }
 
 bool
@@ -1138,7 +1123,7 @@ LIRGenerator::visitSqrt(MSqrt *ins)
     MDefinition *num = ins->num();
     JS_ASSERT(num->type() == MIRType_Double);
     LSqrtD *lir = new LSqrtD(useRegisterAtStart(num));
-    return defineReuseInput(lir, ins, 0);
+    return define(lir, ins);
 }
 
 bool
@@ -1775,6 +1760,23 @@ LIRGenerator::visitGuardThreadLocalObject(MGuardThreadLocalObject *ins)
 }
 
 bool
+LIRGenerator::visitInterruptCheck(MInterruptCheck *ins)
+{
+    // Implicit interrupt checks require asm.js signal handlers to be
+    // installed. ARM does not yet use implicit interrupt checks, see
+    // bug 864220.
+#ifndef JS_CPU_ARM
+    if (GetIonContext()->runtime->signalHandlersInstalled()) {
+        LInterruptCheckImplicit *lir = new LInterruptCheckImplicit();
+        return add(lir) && assignSafepoint(lir, ins);
+    }
+#endif
+
+    LInterruptCheck *lir = new LInterruptCheck();
+    return add(lir) && assignSafepoint(lir, ins);
+}
+
+bool
 LIRGenerator::visitCheckInterruptPar(MCheckInterruptPar *ins)
 {
     LCheckInterruptPar *lir =
@@ -2071,6 +2073,8 @@ LIRGenerator::visitLoadElementHole(MLoadElementHole *ins)
     LLoadElementHole *lir = new LLoadElementHole(useRegister(ins->elements()),
                                                  useRegisterOrConstant(ins->index()),
                                                  useRegister(ins->initLength()));
+    if (ins->needsNegativeIntCheck() && !assignSnapshot(lir))
+        return false;
     return defineBox(lir, ins);
 }
 
@@ -2215,7 +2219,7 @@ LIRGenerator::visitLoadTypedArrayElement(MLoadTypedArrayElement *ins)
 
     // We need a temp register for Uint32Array with known double result.
     LDefinition tempDef = LDefinition::BogusTemp();
-    if (ins->arrayType() == TypedArrayObject::TYPE_UINT32 && ins->type() == MIRType_Double)
+    if (ins->arrayType() == ScalarTypeRepresentation::TYPE_UINT32 && ins->type() == MIRType_Double)
         tempDef = temp();
 
     LLoadTypedArrayElement *lir = new LLoadTypedArrayElement(elements, index, tempDef);
@@ -2449,6 +2453,36 @@ LIRGenerator::visitGuardString(MGuardString *ins)
 }
 
 bool
+LIRGenerator::visitAssertRange(MAssertRange *ins)
+{
+    MDefinition *input = ins->input();
+    LInstruction *lir = NULL;
+
+    switch (input->type()) {
+      case MIRType_Int32:
+          lir = new LAssertRangeI(useRegisterAtStart(input));
+        break;
+
+      case MIRType_Double:
+        lir = new LAssertRangeD(useRegister(input), tempFloat());
+        break;
+
+      case MIRType_Value:
+        lir = new LAssertRangeV(tempToUnbox(), tempFloat(), tempFloat());
+        if (!useBox(lir, LAssertRangeV::Input, input))
+            return false;
+        break;
+
+      default:
+        MOZ_ASSUME_UNREACHABLE("Unexpected Range for MIRType");
+        break;
+    }
+
+    lir->setMir(ins);
+    return add(lir);
+}
+
+bool
 LIRGenerator::visitCallGetProperty(MCallGetProperty *ins)
 {
     LCallGetProperty *lir = new LCallGetProperty();
@@ -2489,6 +2523,17 @@ LIRGenerator::visitDeleteProperty(MDeleteProperty *ins)
 {
     LCallDeleteProperty *lir = new LCallDeleteProperty();
     if(!useBoxAtStart(lir, LCallDeleteProperty::Value, ins->value()))
+        return false;
+    return defineReturn(lir, ins) && assignSafepoint(lir, ins);
+}
+
+bool
+LIRGenerator::visitDeleteElement(MDeleteElement *ins)
+{
+    LCallDeleteElement *lir = new LCallDeleteElement();
+    if(!useBoxAtStart(lir, LCallDeleteElement::Value, ins->value()))
+        return false;
+    if(!useBoxAtStart(lir, LCallDeleteElement::Index, ins->index()))
         return false;
     return defineReturn(lir, ins) && assignSafepoint(lir, ins);
 }
@@ -2742,13 +2787,6 @@ LIRGenerator::visitHaveSameClass(MHaveSameClass *ins)
     JS_ASSERT(rhs->type() == MIRType_Object);
 
     return define(new LHaveSameClass(useRegister(lhs), useRegister(rhs), temp()), ins);
-}
-
-bool
-LIRGenerator::visitAsmJSLoadHeap(MAsmJSLoadHeap *ins)
-{
-    LAsmJSLoadHeap *lir = new LAsmJSLoadHeap(useRegisterAtStart(ins->ptr()));
-    return define(lir, ins);
 }
 
 bool

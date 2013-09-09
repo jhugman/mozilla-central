@@ -20,7 +20,7 @@
 #endif
 
 namespace js {
-namespace ion {
+namespace jit {
 
 class OutOfLineNewParallelArray;
 class OutOfLineTestObject;
@@ -29,6 +29,7 @@ class OutOfLineNewObject;
 class CheckOverRecursedFailure;
 class CheckOverRecursedFailurePar;
 class OutOfLineCheckInterruptPar;
+class OutOfLineInterruptCheckImplicit;
 class OutOfLineUnboxDouble;
 class OutOfLineStoreElementHole;
 class OutOfLineTypeOfV;
@@ -59,8 +60,6 @@ class CodeGenerator : public CodeGeneratorSpecific
     bool visitTableSwitchV(LTableSwitchV *ins);
     bool visitParameter(LParameter *lir);
     bool visitCallee(LCallee *lir);
-    bool visitForceUseV(LForceUseV *lir);
-    bool visitForceUseT(LForceUseT *lir);
     bool visitStart(LStart *lir);
     bool visitReturn(LReturn *ret);
     bool visitDefVar(LDefVar *lir);
@@ -78,7 +77,6 @@ class CodeGenerator : public CodeGeneratorSpecific
     bool visitTestVAndBranch(LTestVAndBranch *lir);
     bool visitFunctionDispatch(LFunctionDispatch *lir);
     bool visitTypeObjectDispatch(LTypeObjectDispatch *lir);
-    bool visitPolyInlineDispatch(LPolyInlineDispatch *lir);
     bool visitIntToString(LIntToString *lir);
     bool visitDoubleToString(LDoubleToString *lir);
     bool visitInteger(LInteger *lir);
@@ -234,6 +232,7 @@ class CodeGenerator : public CodeGeneratorSpecific
     bool visitRestPar(LRestPar *lir);
     bool visitCallSetProperty(LCallSetProperty *ins);
     bool visitCallDeleteProperty(LCallDeleteProperty *lir);
+    bool visitCallDeleteElement(LCallDeleteElement *lir);
     bool visitBitNotV(LBitNotV *lir);
     bool visitBitOpV(LBitOpV *lir);
     bool emitInstanceOf(LInstruction *ins, JSObject *prototypeObject);
@@ -264,6 +263,9 @@ class CodeGenerator : public CodeGeneratorSpecific
     bool visitCheckInterruptPar(LCheckInterruptPar *lir);
     bool visitOutOfLineCheckInterruptPar(OutOfLineCheckInterruptPar *ool);
 
+    bool visitInterruptCheckImplicit(LInterruptCheckImplicit *ins);
+    bool visitOutOfLineInterruptCheckImplicit(OutOfLineInterruptCheckImplicit *ins);
+
     bool visitUnboxDouble(LUnboxDouble *lir);
     bool visitOutOfLineUnboxDouble(OutOfLineUnboxDouble *ool);
     bool visitOutOfLineStoreElementHole(OutOfLineStoreElementHole *ool);
@@ -290,15 +292,19 @@ class CodeGenerator : public CodeGeneratorSpecific
     bool visitGetNameCache(LGetNameCache *ins);
     bool visitCallsiteCloneCache(LCallsiteCloneCache *ins);
 
-    bool visitGetPropertyIC(OutOfLineUpdateCache *ool, GetPropertyIC *ic);
-    bool visitGetPropertyParIC(OutOfLineUpdateCache *ool, GetPropertyParIC *ic);
-    bool visitSetPropertyIC(OutOfLineUpdateCache *ool, SetPropertyIC *ic);
-    bool visitGetElementIC(OutOfLineUpdateCache *ool, GetElementIC *ic);
-    bool visitGetElementParIC(OutOfLineUpdateCache *ool, GetElementParIC *ic);
-    bool visitSetElementIC(OutOfLineUpdateCache *ool, SetElementIC *ic);
-    bool visitBindNameIC(OutOfLineUpdateCache *ool, BindNameIC *ic);
-    bool visitNameIC(OutOfLineUpdateCache *ool, NameIC *ic);
-    bool visitCallsiteCloneIC(OutOfLineUpdateCache *ool, CallsiteCloneIC *ic);
+    bool visitGetPropertyIC(OutOfLineUpdateCache *ool, DataPtr<GetPropertyIC> &ic);
+    bool visitGetPropertyParIC(OutOfLineUpdateCache *ool, DataPtr<GetPropertyParIC> &ic);
+    bool visitSetPropertyIC(OutOfLineUpdateCache *ool, DataPtr<SetPropertyIC> &ic);
+    bool visitGetElementIC(OutOfLineUpdateCache *ool, DataPtr<GetElementIC> &ic);
+    bool visitGetElementParIC(OutOfLineUpdateCache *ool, DataPtr<GetElementParIC> &ic);
+    bool visitSetElementIC(OutOfLineUpdateCache *ool, DataPtr<SetElementIC> &ic);
+    bool visitBindNameIC(OutOfLineUpdateCache *ool, DataPtr<BindNameIC> &ic);
+    bool visitNameIC(OutOfLineUpdateCache *ool, DataPtr<NameIC> &ic);
+    bool visitCallsiteCloneIC(OutOfLineUpdateCache *ool, DataPtr<CallsiteCloneIC> &ic);
+
+    bool visitAssertRangeI(LAssertRangeI *ins);
+    bool visitAssertRangeD(LAssertRangeD *ins);
+    bool visitAssertRangeV(LAssertRangeV *ins);
 
     IonScriptCounts *extractUnassociatedScriptCounts() {
         IonScriptCounts *counts = unassociatedScriptCounts_;
@@ -343,16 +349,25 @@ class CodeGenerator : public CodeGeneratorSpecific
     void testObjectTruthy(Register objreg, Label *ifTruthy, Label *ifFalsy, Register scratch,
                           OutOfLineTestObject *ool);
 
+    // Get a label for the start of block which can be used for jumping, in
+    // place of jumpToBlock.
+    Label *getJumpLabelForBranch(MBasicBlock *block);
+
     // Bailout if an element about to be written to is a hole.
     bool emitStoreHoleCheck(Register elements, const LAllocation *index, LSnapshot *snapshot);
+
+    bool emitAssertRangeI(Range *r, Register input);
+    bool emitAssertRangeD(Range *r, FloatRegister input, FloatRegister temp);
 
     // Script counts created when compiling code with no associated JSScript.
     IonScriptCounts *unassociatedScriptCounts_;
 
+#if defined(JS_ION_PERF)
     PerfSpewer perfSpewer_;
+#endif
 };
 
-} // namespace ion
+} // namespace jit
 } // namespace js
 
 #endif /* jit_CodeGenerator_h */

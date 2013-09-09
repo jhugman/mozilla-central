@@ -18,6 +18,7 @@ Services.prefs.setBoolPref("devtools.debugger.remote-enabled", true);
 Cu.import("resource://gre/modules/devtools/dbg-server.jsm");
 Cu.import("resource://gre/modules/devtools/dbg-client.jsm");
 Cu.import("resource://gre/modules/devtools/Loader.jsm");
+Cu.import("resource://gre/modules/devtools/DevToolsUtils.jsm");
 
 function testExceptionHook(ex) {
   try {
@@ -102,7 +103,7 @@ function testGlobal(aName) {
     .createInstance(Ci.nsIPrincipal);
 
   let sandbox = Cu.Sandbox(systemPrincipal);
-  Cu.evalInSandbox("this.__name = '" + aName + "'", sandbox);
+  sandbox.__name = aName;
   return sandbox;
 }
 
@@ -200,8 +201,8 @@ function finishClient(aClient)
 /**
  * Takes a relative file path and returns the absolute file url for it.
  */
-function getFileUrl(aName) {
-  let file = do_get_file(aName);
+function getFileUrl(aName, aAllowMissing=false) {
+  let file = do_get_file(aName, aAllowMissing);
   return Services.io.newFileURI(file).spec;
 }
 
@@ -209,9 +210,9 @@ function getFileUrl(aName) {
  * Returns the full path of the file with the specified name in a
  * platform-independent and URL-like form.
  */
-function getFilePath(aName)
+function getFilePath(aName, aAllowMissing=false)
 {
-  let file = do_get_file(aName);
+  let file = do_get_file(aName, aAllowMissing);
   let path = Services.io.newFileURI(file).spec;
   let filePrePath = "file://";
   if ("nsILocalFileWin" in Ci &&
@@ -346,3 +347,9 @@ function StubTransport() { }
 StubTransport.prototype.ready = function () {};
 StubTransport.prototype.send  = function () {};
 StubTransport.prototype.close = function () {};
+
+function executeSoon(aFunc) {
+  Services.tm.mainThread.dispatch({
+    run: DevToolsUtils.makeInfallible(aFunc)
+  }, Ci.nsIThread.DISPATCH_NORMAL);
+}

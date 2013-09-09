@@ -8,6 +8,8 @@
 #include "MediaStreamGraphImpl.h"
 #include "AudioNodeEngine.h"
 #include "ThreeDPoint.h"
+#include "AudioChannelFormat.h"
+#include "AudioParamTimeline.h"
 
 using namespace mozilla::dom;
 
@@ -286,7 +288,7 @@ AudioNodeStream::ObtainInputBlock(AudioChunk& aTmpChunk, uint32_t aPortIndex)
     }
     AudioChunk* chunk = &a->mLastChunks[mInputs[i]->OutputNumber()];
     MOZ_ASSERT(chunk);
-    if (chunk->IsNull()) {
+    if (chunk->IsNull() || chunk->mChannelData.IsEmpty()) {
       continue;
     }
 

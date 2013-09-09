@@ -7,13 +7,14 @@
 #ifndef jit_RegisterSets_h
 #define jit_RegisterSets_h
 
+#include "mozilla/Alignment.h"
 #include "mozilla/MathAlgorithms.h"
 
 #include "jit/IonAllocPolicy.h"
 #include "jit/Registers.h"
 
 namespace js {
-namespace ion {
+namespace jit {
 
 struct AnyRegister {
     typedef uint32_t Code;
@@ -162,6 +163,15 @@ class TypedOrValueRegister
         return *data.value.addr();
     }
 
+    const AnyRegister &dataTyped() const {
+        JS_ASSERT(hasTyped());
+        return *data.typed.addr();
+    }
+    const ValueOperand &dataValue() const {
+        JS_ASSERT(hasValue());
+        return *data.value.addr();
+    }
+
   public:
 
     TypedOrValueRegister()
@@ -192,11 +202,11 @@ class TypedOrValueRegister
         return type() == MIRType_Value;
     }
 
-    AnyRegister typedReg() {
+    AnyRegister typedReg() const {
         return dataTyped();
     }
 
-    ValueOperand valueReg() {
+    ValueOperand valueReg() const {
         return dataValue();
     }
 
@@ -448,11 +458,7 @@ class TypedRegisterSet
         return bits_;
     }
     uint32_t size() const {
-        uint32_t sum2  = (bits_ & 0x55555555) + ((bits_ & 0xaaaaaaaa) >> 1);
-        uint32_t sum4  = (sum2  & 0x33333333) + ((sum2  & 0xcccccccc) >> 2);
-        uint32_t sum8  = (sum4  & 0x0f0f0f0f) + ((sum4  & 0xf0f0f0f0) >> 4);
-        uint32_t sum16 = (sum8  & 0x00ff00ff) + ((sum8  & 0xff00ff00) >> 8);
-        return sum16;
+        return mozilla::CountPopulation32(bits_);
     }
     bool operator ==(const TypedRegisterSet<T> &other) const {
         return other.bits_ == bits_;
@@ -791,18 +797,20 @@ class AsmJSHeapAccess
 #if defined(JS_CPU_X86) || defined(JS_CPU_X64)
     uint8_t opLength_;  // the length of the load/store instruction
     uint8_t isFloat32Load_;
-    ion::AnyRegister::Code loadedReg_ : 8;
+    jit::AnyRegister::Code loadedReg_ : 8;
 #endif
 
-    JS_STATIC_ASSERT(ion::AnyRegister::Total < UINT8_MAX);
+    JS_STATIC_ASSERT(jit::AnyRegister::Total < UINT8_MAX);
 
   public:
 #if defined(JS_CPU_X86) || defined(JS_CPU_X64)
+    // If 'cmp' equals 'offset' or if it is not supplied then the
+    // cmpDelta_ is zero indicating that there is no length to patch.
     AsmJSHeapAccess(uint32_t offset, uint32_t after, ArrayBufferView::ViewType vt,
                     AnyRegister loadedReg, uint32_t cmp = UINT32_MAX)
       : offset_(offset),
 # if defined(JS_CPU_X86)
-        cmpDelta_(offset - cmp),
+        cmpDelta_(cmp == UINT32_MAX ? 0 : offset - cmp),
 # endif
         opLength_(after - offset),
         isFloat32Load_(vt == ArrayBufferView::TYPE_FLOAT32),
@@ -811,7 +819,7 @@ class AsmJSHeapAccess
     AsmJSHeapAccess(uint32_t offset, uint8_t after, uint32_t cmp = UINT32_MAX)
       : offset_(offset),
 # if defined(JS_CPU_X86)
-        cmpDelta_(offset - cmp),
+        cmpDelta_(cmp == UINT32_MAX ? 0 : offset - cmp),
 # endif
         opLength_(after - offset),
         isFloat32Load_(false),
@@ -826,6 +834,7 @@ class AsmJSHeapAccess
     uint32_t offset() const { return offset_; }
     void setOffset(uint32_t offset) { offset_ = offset; }
 #if defined(JS_CPU_X86)
+    bool hasLengthCheck() const { return cmpDelta_ > 0; }
     void *patchLengthAt(uint8_t *code) const { return code + (offset_ - cmpDelta_); }
     void *patchOffsetAt(uint8_t *code) const { return code + (offset_ + opLength_); }
 #endif
@@ -833,13 +842,13 @@ class AsmJSHeapAccess
     unsigned opLength() const { return opLength_; }
     bool isLoad() const { return loadedReg_ != UINT8_MAX; }
     bool isFloat32Load() const { return isFloat32Load_; }
-    ion::AnyRegister loadedReg() const { return ion::AnyRegister::FromCode(loadedReg_); }
+    jit::AnyRegister loadedReg() const { return jit::AnyRegister::FromCode(loadedReg_); }
 #endif
 };
 
 typedef Vector<AsmJSHeapAccess, 0, IonAllocPolicy> AsmJSHeapAccessVector;
 
-} // namespace ion
+} // namespace jit
 } // namespace js
 
 #endif /* jit_RegisterSets_h */

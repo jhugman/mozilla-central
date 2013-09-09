@@ -297,6 +297,12 @@ public:
     UINT mCharCode;
     UINT mScanCode;
     bool mIsDeadKey;
+    bool mConsumed;
+
+    FakeCharMsg() :
+      mCharCode(0), mScanCode(0), mIsDeadKey(false), mConsumed(false)
+    {
+    }
 
     MSG GetCharMsg(HWND aWnd) const
     {
@@ -304,7 +310,7 @@ public:
       msg.hwnd = aWnd;
       msg.message = mIsDeadKey ? WM_DEADCHAR : WM_CHAR;
       msg.wParam = static_cast<WPARAM>(mCharCode);
-      msg.lParam = static_cast<LPARAM>(mScanCode);
+      msg.lParam = static_cast<LPARAM>(mScanCode << 16);
       msg.time = 0;
       msg.pt.x = msg.pt.y = 0;
       return msg;
@@ -314,7 +320,7 @@ public:
   NativeKey(nsWindowBase* aWidget,
             const MSG& aKeyOrCharMessage,
             const ModifierKeyState& aModKeyState,
-            const FakeCharMsg* aFakeCharMsg = nullptr);
+            nsTArray<FakeCharMsg>* aFakeCharMsgs = nullptr);
 
   /**
    * Handle WM_KEYDOWN message or WM_SYSKEYDOWN message.  The instance must be
@@ -322,8 +328,7 @@ public:
    * Returns true if dispatched keydown event or keypress event is consumed.
    * Otherwise, false.
    */
-  bool HandleKeyDownMessage(bool* aEventDispatched = nullptr,
-                            bool* aWasKeyDownDefaultPrevented = nullptr) const;
+  bool HandleKeyDownMessage(bool* aEventDispatched = nullptr) const;
 
   /**
    * Handles WM_CHAR message or WM_SYSCHAR message.  The instance must be
@@ -343,10 +348,6 @@ private:
   nsRefPtr<nsWindowBase> mWidget;
   HKL mKeyboardLayout;
   MSG mMsg;
-  // mCharMsg stores WM_*CHAR message following WM_*KEYDOWN message.
-  // If mMsg isn't WM_*KEYDOWN message or WM_*KEYDOWN but there is no following
-  // WM_*CHAR message, the message member is 0.
-  MSG mCharMsg;
 
   uint32_t mDOMKeyCode;
   KeyNameIndex mKeyNameIndex;
@@ -373,7 +374,8 @@ private:
   // Please note that the event may not cause any text input even if this
   // is true.  E.g., it might be dead key state or Ctrl key may be pressed.
   bool    mIsPrintableKey;
-  bool    mIsFakeCharMsg;
+
+  nsTArray<FakeCharMsg>* mFakeCharMsgs;
 
   NativeKey()
   {
@@ -402,12 +404,9 @@ private:
   {
     return (mMsg.message == WM_KEYDOWN || mMsg.message == WM_SYSKEYDOWN);
   }
-  bool IsFollowedByCharMessage() const
-  {
-    MOZ_ASSERT(mMsg.message == WM_KEYDOWN || mMsg.message == WM_SYSKEYDOWN);
-    return (mCharMsg.message != 0);
-  }
-  const MSG& RemoveFollowingCharMessage() const;
+  bool IsFollowedByCharMessage() const;
+  bool IsFollowedByDeadCharMessage() const;
+  MSG RemoveFollowingCharMessage() const;
 
   /**
    * Wraps MapVirtualKeyEx() with MAPVK_VSC_TO_VK.

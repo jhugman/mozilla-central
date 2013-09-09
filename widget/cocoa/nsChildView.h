@@ -22,7 +22,9 @@
 #include "TextInputHandler.h"
 #include "nsCocoaUtils.h"
 #include "gfxQuartzSurface.h"
-#include "GLContext.h"
+#include "GLContextTypes.h"
+#include "mozilla/Mutex.h"
+#include "nsRegion.h"
 
 #include "nsString.h"
 #include "nsIDragService.h"
@@ -286,8 +288,7 @@ typedef NSInteger NSEventGestureAxis;
 
 #ifdef __LP64__
   // Support for fluid swipe tracking.
-  BOOL* mCancelSwipeAnimation;
-  uint32_t mCurrentSwipeDir;
+  void (^mCancelSwipeAnimation)();
 #endif
 
   // Whether this uses off-main-thread compositing.
@@ -358,8 +359,7 @@ typedef NSInteger NSEventGestureAxis;
 // Support for fluid swipe tracking.
 #ifdef __LP64__
 - (void)maybeTrackScrollEventAsSwipe:(NSEvent *)anEvent
-                     scrollOverflowX:(double)overflowX
-                     scrollOverflowY:(double)overflowY;
+                      scrollOverflow:(double)overflow;
 #endif
 
 - (void)setUsingOMTCompositor:(BOOL)aUseOMTC;

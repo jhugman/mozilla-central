@@ -180,18 +180,12 @@ destroying the MediaDecoder object.
 
 #include "nsISupports.h"
 #include "nsCOMPtr.h"
-#include "nsIThread.h"
-#include "nsIChannel.h"
 #include "nsIObserver.h"
 #include "nsAutoPtr.h"
-#include "nsSize.h"
-#include "prlog.h"
-#include "gfxContext.h"
-#include "gfxRect.h"
 #include "MediaResource.h"
 #include "mozilla/ReentrantMonitor.h"
+#include "mozilla/TimeStamp.h"
 #include "MediaStreamGraph.h"
-#include "MediaDecoderOwner.h"
 #include "AudioChannelCommon.h"
 #include "AbstractMediaDecoder.h"
 
@@ -213,9 +207,7 @@ namespace layers {
 class Image;
 } //namespace layers
 
-class MediaByteRange;
 class VideoFrameContainer;
-class AudioStream;
 class MediaDecoderStateMachine;
 class MediaDecoderOwner;
 
@@ -691,7 +683,7 @@ public:
   // Call on the main thread only.
   void FirstFrameLoaded();
 
-  // Returns true if the resource has been loaded. Must be in monitor.
+  // Returns true if the resource has been loaded. Acquires the monitor.
   // Call from any thread.
   virtual bool IsDataCachedToEndOfResource();
 
@@ -945,13 +937,6 @@ public:
   double mInitialPlaybackRate;
   bool mInitialPreservesPitch;
 
-  // Position to seek to when the seek notification is received by the
-  // decode thread. Written by the main thread and read via the
-  // decode thread. Synchronised using mReentrantMonitor. If the
-  // value is negative then no seek has been requested. When a seek is
-  // started this is reset to negative.
-  double mRequestedSeekTime;
-
   // Duration of the media resource. Set to -1 if unknown.
   // Set when the metadata is loaded. Accessed on the main thread
   // only.
@@ -1034,6 +1019,10 @@ public:
   // Should be true only when PlayState is PLAY_STATE_LOADING.
   bool mIsDormant;
 
+  // True if this decoder is exiting from dormant state.
+  // Should be true only when PlayState is PLAY_STATE_LOADING.
+  bool mIsExitingDormant;
+
   // Set to one of the valid play states.
   // This can only be changed on the main thread while holding the decoder
   // monitor. Thus, it can be safely read while holding the decoder monitor
@@ -1049,6 +1038,15 @@ public:
   // Any change to the state must call NotifyAll on the monitor.
   // This can only be PLAY_STATE_PAUSED or PLAY_STATE_PLAYING.
   PlayState mNextState;
+
+  // Position to seek to when the seek notification is received by the
+  // decode thread.
+  // This can only be changed on the main thread while holding the decoder
+  // monitor. Thus, it can be safely read while holding the decoder monitor
+  // OR on the main thread.
+  // If the value is negative then no seek has been requested. When a seek is
+  // started this is reset to negative.
+  double mRequestedSeekTime;
 
   // True when we have fully loaded the resource and reported that
   // to the element (i.e. reached NETWORK_LOADED state).

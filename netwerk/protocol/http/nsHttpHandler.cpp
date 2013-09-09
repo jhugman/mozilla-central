@@ -257,11 +257,12 @@ nsHttpHandler::Init()
     if (NS_FAILED(rv))
         return rv;
 
-    mIOService = do_GetService(NS_IOSERVICE_CONTRACTID, &rv);
+    nsCOMPtr<nsIIOService> service = do_GetService(NS_IOSERVICE_CONTRACTID, &rv);
     if (NS_FAILED(rv)) {
         NS_WARNING("unable to continue without io service");
         return rv;
     }
+    mIOService = new nsMainThreadPtrHolder<nsIIOService>(service);
 
     if (IsNeckoChild())
         NeckoChild::InitNeckoChild();
@@ -341,7 +342,8 @@ nsHttpHandler::Init()
                                   static_cast<nsISupports*>(static_cast<void*>(this)),
                                   NS_HTTP_STARTUP_TOPIC);
 
-    mObserverService = services::GetObserverService();
+    nsCOMPtr<nsIObserverService> obsService = services::GetObserverService();
+    mObserverService = new nsMainThreadPtrHolder<nsIObserverService>(obsService);
     if (mObserverService) {
         mObserverService->AddObserver(this, "profile-change-net-teardown", true);
         mObserverService->AddObserver(this, "profile-change-net-restore", true);
@@ -475,8 +477,11 @@ nsHttpHandler::GetStreamConverterService(nsIStreamConverterService **result)
 {
     if (!mStreamConvSvc) {
         nsresult rv;
-        mStreamConvSvc = do_GetService(NS_STREAMCONVERTERSERVICE_CONTRACTID, &rv);
-        if (NS_FAILED(rv)) return rv;
+        nsCOMPtr<nsIStreamConverterService> service =
+            do_GetService(NS_STREAMCONVERTERSERVICE_CONTRACTID, &rv);
+        if (NS_FAILED(rv))
+            return rv;
+        mStreamConvSvc = new nsMainThreadPtrHolder<nsIStreamConverterService>(service);
     }
     *result = mStreamConvSvc;
     NS_ADDREF(*result);
@@ -486,16 +491,20 @@ nsHttpHandler::GetStreamConverterService(nsIStreamConverterService **result)
 nsISiteSecurityService*
 nsHttpHandler::GetSSService()
 {
-    if (!mSSService)
-      mSSService = do_GetService(NS_SSSERVICE_CONTRACTID);
+    if (!mSSService) {
+        nsCOMPtr<nsISiteSecurityService> service = do_GetService(NS_SSSERVICE_CONTRACTID);
+        mSSService = new nsMainThreadPtrHolder<nsISiteSecurityService>(service);
+    }
     return mSSService;
 }
 
 nsICookieService *
 nsHttpHandler::GetCookieService()
 {
-    if (!mCookieService)
-        mCookieService = do_GetService(NS_COOKIESERVICE_CONTRACTID);
+    if (!mCookieService) {
+        nsCOMPtr<nsICookieService> service = do_GetService(NS_COOKIESERVICE_CONTRACTID);
+        mCookieService = new nsMainThreadPtrHolder<nsICookieService>(service);
+    }
     return mCookieService;
 }
 
@@ -665,15 +674,13 @@ nsHttpHandler::InitUserAgentComponents()
     "Windows"
 #elif defined(XP_MACOSX)
     "Macintosh"
-#elif defined(MOZ_PLATFORM_MAEMO)
-    "Maemo"
 #elif defined(MOZ_X11)
     "X11"
 #endif
     );
 #endif
 
-#if defined(ANDROID) || defined(MOZ_PLATFORM_MAEMO) || defined(MOZ_B2G)
+#if defined(ANDROID) || defined(MOZ_B2G)
     nsCOMPtr<nsIPropertyBag2> infoService = do_GetService("@mozilla.org/system-info;1");
     MOZ_ASSERT(infoService, "Could not find a system info service");
 
@@ -1412,7 +1419,7 @@ PrepareAcceptLanguages(const char *i_AcceptLanguages, nsACString &o_AcceptLangua
     const char *comma;
     int32_t available;
 
-    o_Accept = nsCRT::strdup(i_AcceptLanguages);
+    o_Accept = strdup(i_AcceptLanguages);
     if (!o_Accept)
         return NS_ERROR_OUT_OF_MEMORY;
     for (p = o_Accept, n = size = 0; '\0' != *p; p++) {
@@ -1423,7 +1430,7 @@ PrepareAcceptLanguages(const char *i_AcceptLanguages, nsACString &o_AcceptLangua
     available = size + ++n * 11 + 1;
     q_Accept = new char[available];
     if (!q_Accept) {
-        nsCRT::free(o_Accept);
+        free(o_Accept);
         return NS_ERROR_OUT_OF_MEMORY;
     }
     *q_Accept = '\0';
@@ -1470,7 +1477,7 @@ PrepareAcceptLanguages(const char *i_AcceptLanguages, nsACString &o_AcceptLangua
             MOZ_ASSERT(available > 0, "allocated string not long enough");
         }
     }
-    nsCRT::free(o_Accept);
+    free(o_Accept);
 
     o_AcceptLanguages.Assign((const char *) q_Accept);
     delete [] q_Accept;

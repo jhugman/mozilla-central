@@ -16,6 +16,7 @@ var SelectionHandler = {
   // stored here are relative to the _contentWindow window.
   _cache: null,
   _activeType: 0, // TYPE_NONE
+  _ignoreSelectionChanges: false, // True while user drags text selection handles
 
   // The window that holds the selection (can be a sub-frame)
   get _contentWindow() {
@@ -74,13 +75,17 @@ var SelectionHandler = {
             this.copySelection();
           else
             this._closeSelection();
+        } else if (this._activeType == this.TYPE_CURSOR) {
+          // attachCaret() is called in the "Gesture:SingleTap" handler in BrowserEventHandler
+          // We're guaranteed to call this first, because this observer was added last
+          this._deactivate();
         }
         break;
       }
       case "Tab:Selected":
         this._closeSelection();
         break;
-  
+
       case "Window:Resize": {
         if (this._activeType == this.TYPE_SELECTION) {
           // Knowing when the page is done drawing is hard, so let's just cancel
@@ -98,9 +103,11 @@ var SelectionHandler = {
       }
       case "TextSelection:Move": {
         let data = JSON.parse(aData);
-        if (this._activeType == this.TYPE_SELECTION)
+        if (this._activeType == this.TYPE_SELECTION) {
+          // Ignore selectionChange notifications when handle movement starts
+          this._ignoreSelectionChanges = true;
           this._moveSelection(data.handleType == this.HANDLE_TYPE_START, data.x, data.y);
-        else if (this._activeType == this.TYPE_CURSOR) {
+        } else if (this._activeType == this.TYPE_CURSOR) {
           // Send a click event to the text box, which positions the caret
           this._sendMouseEvents(data.x, data.y);
 
@@ -111,6 +118,8 @@ var SelectionHandler = {
       }
       case "TextSelection:Position": {
         if (this._activeType == this.TYPE_SELECTION) {
+          // Ignore selectionChange notifications when handle movement starts
+          this._ignoreSelectionChanges = true;
           // Check to see if the handles should be reversed.
           let isStartHandle = JSON.parse(aData).handleType == this.HANDLE_TYPE_START;
           let selectionReversed = this._updateCacheForSelection(isStartHandle);
@@ -122,6 +131,8 @@ var SelectionHandler = {
             selection.collapse(selection.focusNode, selection.focusOffset);
             selection.extend(anchorNode, anchorOffset);
           }
+          // Act on selectionChange notifications after handle movement ends
+          this._ignoreSelectionChanges = false;
         }
         this._positionHandles();
         break;
@@ -148,7 +159,7 @@ var SelectionHandler = {
 
       case "compositionend":
         if (this._activeType == this.TYPE_CURSOR) {
-          this._closeSelection();
+          this._deactivate();
         }
         break;
     }
@@ -174,6 +185,25 @@ var SelectionHandler = {
     };
   },
 
+  notifySelectionChanged: function sh_notifySelectionChanged(aDocument, aSelection, aReason) {
+    // Ignore selectionChange notifications during handle movements
+    if (this._ignoreSelectionChanges) {
+      return;
+    }
+
+    // If the selection was collapsed to Start or to End, always close it
+    if ((aReason & Ci.nsISelectionListener.COLLAPSETOSTART_REASON) ||
+        (aReason & Ci.nsISelectionListener.COLLAPSETOEND_REASON)) {
+      this._closeSelection();
+      return;
+    }
+
+    // If selected text no longer exists, close
+    if (!aSelection.toString()) {
+      this._closeSelection();
+    }
+  },
+
   /*
    * Called from browser.js when the user long taps on text or chooses
    * the "Select Word" context menu item. Initializes SelectionHandler,
@@ -186,22 +216,25 @@ var SelectionHandler = {
     this._closeSelection();
 
     this._initTargetInfo(aElement);
-    this._activeType = this.TYPE_SELECTION;
 
     // Clear any existing selection from the document
     this._contentWindow.getSelection().removeAllRanges();
 
     if (!this._domWinUtils.selectAtPoint(aX, aY, Ci.nsIDOMWindowUtils.SELECT_WORDNOSPACE)) {
-      this._onFail("failed to set selection at point");
+      this._deactivate();
       return;
     }
 
     let selection = this._getSelection();
     // If the range didn't have any text, let's bail
-    if (!selection) {
-      this._onFail("no selection was present");
+    if (!selection || selection.rangeCount == 0) {
+      this._deactivate();
       return;
     }
+
+    // Add a listener to end the selection if it's removed programatically
+    selection.QueryInterface(Ci.nsISelectionPrivate).addSelectionListener(this);
+    this._activeType = this.TYPE_SELECTION;
 
     // Initialize the cache
     this._cache = { start: {}, end: {}};
@@ -447,18 +480,13 @@ var SelectionHandler = {
     let selectedText = this._getSelectedText();
     if (selectedText.length) {
       let req = Services.search.defaultEngine.getSubmission(selectedText);
-      BrowserApp.selectOrOpenTab(req.uri.spec);
+      let parent = BrowserApp.selectedTab;
+      let isPrivate = PrivateBrowsingUtils.isWindowPrivate(parent.browser.contentWindow);
+      // Set current tab as parent of new tab, and set new tab as private if the parent is.
+      BrowserApp.addTab(req.uri.spec, {parentId: parent.id,
+                                       selected: true,
+                                       isPrivate: isPrivate});
     }
-    this._closeSelection();
-  },
-
-  /*
-   * Called if for any reason we fail during the selection
-   * process. Cancels the selection.
-   */
-  _onFail: function sh_onFail(aDbgMessage) {
-    if (aDbgMessage && aDbgMessage.length > 0)
-      Cu.reportError("SelectionHandler - " + aDbgMessage);
     this._closeSelection();
   },
 
@@ -470,13 +498,23 @@ var SelectionHandler = {
     if (this._activeType == this.TYPE_NONE)
       return;
 
-    if (this._activeType == this.TYPE_SELECTION) {
-      let selection = this._getSelection();
-      if (selection) {
-        selection.removeAllRanges();
-      }
-    }
+    if (this._activeType == this.TYPE_SELECTION)
+      this._clearSelection();
 
+    this._deactivate();
+  },
+
+  _clearSelection: function sh_clearSelection() {
+    let selection = this._getSelection();
+    if (selection) {
+      // Remove our listener before we clear the selection
+      selection.QueryInterface(Ci.nsISelectionPrivate).removeSelectionListener(this);
+      // Clear selection without clearing the anchorNode or focusNode
+      selection.collapseToStart();
+    }
+  },
+
+  _deactivate: function sh_deactivate() {
     this._activeType = this.TYPE_NONE;
 
     sendMessageToJava({ type: "TextSelection:HideHandles" });
@@ -489,6 +527,7 @@ var SelectionHandler = {
     this._targetElement = null;
     this._isRTL = false;
     this._cache = null;
+    this._ignoreSelectionChanges = false;
   },
 
   _getViewOffset: function sh_getViewOffset() {

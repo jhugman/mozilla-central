@@ -10,12 +10,13 @@
 #include "mozilla/HashFunctions.h"
 #include "mozilla/PodOperations.h"
 
-#include "jsapi.h"
 #include "jsutil.h"
+#include "NamespaceImports.h"
 
 #include "js/RootingAPI.h"
 #include "vm/Unicode.h"
 
+class JSAutoByteString;
 class JSFlatString;
 class JSLinearString;
 class JSStableString;
@@ -223,9 +224,6 @@ StringHasPattern(const jschar *text, uint32_t textlen,
 
 extern size_t
 js_strlen(const jschar *s);
-
-extern jschar *
-js_strchr(const jschar *s, jschar c);
 
 extern jschar *
 js_strchr_limit(const jschar *s, jschar c, const jschar *limit);

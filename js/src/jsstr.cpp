@@ -37,7 +37,6 @@
 #include "jsopcode.h"
 #include "jstypes.h"
 #include "jsutil.h"
-#include "jsversion.h"
 
 #include "builtin/RegExp.h"
 #include "vm/GlobalObject.h"
@@ -460,7 +459,7 @@ ThisToStringForStringProto(JSContext *cx, CallReceiver call)
 }
 
 JS_ALWAYS_INLINE bool
-IsString(const Value &v)
+IsString(HandleValue v)
 {
     return v.isString() || (v.isObject() && v.toObject().is<StringObject>());
 }
@@ -1926,7 +1925,7 @@ js::str_match(JSContext *cx, unsigned argc, Value *vp)
     if (!g.normalizeRegExp(cx, false, 1, args))
         return false;
 
-    RegExpStatics *res = cx->regExpStatics();
+    RegExpStatics *res = cx->global()->getRegExpStatics();
     Rooted<JSLinearString*> linearStr(cx, str->ensureLinear(cx));
     if (!linearStr)
         return false;
@@ -1964,7 +1963,7 @@ js::str_search(JSContext *cx, unsigned argc, Value *vp)
 
     const jschar *chars = linearStr->chars();
     size_t length = linearStr->length();
-    RegExpStatics *res = cx->regExpStatics();
+    RegExpStatics *res = cx->global()->getRegExpStatics();
 
     /* Per ECMAv5 15.5.4.12 (5) The last index property is ignored and left unchanged. */
     size_t i = 0;
@@ -2627,13 +2626,13 @@ str_replace_regexp_remove(JSContext *cx, CallArgs args, HandleString str, RegExp
     /* If unmatched, return the input string. */
     if (!lastIndex) {
         if (startIndex > 0)
-            cx->regExpStatics()->updateLazily(cx, stableStr, &re, lazyIndex);
+            cx->global()->getRegExpStatics()->updateLazily(cx, stableStr, &re, lazyIndex);
         args.rval().setString(str);
         return true;
     }
 
     /* The last successful match updates the RegExpStatics. */
-    cx->regExpStatics()->updateLazily(cx, stableStr, &re, lazyIndex);
+    cx->global()->getRegExpStatics()->updateLazily(cx, stableStr, &re, lazyIndex);
 
     /* Include any remaining part of the string. */
     if (lastIndex < charsLen) {
@@ -2664,7 +2663,7 @@ str_replace_regexp(JSContext *cx, CallArgs args, ReplaceData &rdata)
     rdata.leftIndex = 0;
     rdata.calledBack = false;
 
-    RegExpStatics *res = cx->regExpStatics();
+    RegExpStatics *res = cx->global()->getRegExpStatics();
     RegExpShared &re = rdata.g.regExp();
 
     /* Optimize removal. */
@@ -3015,7 +3014,7 @@ SplitHelper(JSContext *cx, Handle<JSLinearString*> str, uint32_t limit, const Ma
 
         /* Step 13(c)(iii)(6-7). */
         if (Matcher::returnsCaptures) {
-            RegExpStatics *res = cx->regExpStatics();
+            RegExpStatics *res = cx->global()->getRegExpStatics();
             const MatchPairs &matches = res->getMatches();
             for (size_t i = 0; i < matches.parenCount(); i++) {
                 /* Steps 13(c)(iii)(7)(a-c). */
@@ -3196,7 +3195,7 @@ js::str_split(JSContext *cx, unsigned argc, Value *vp)
         SplitStringMatcher matcher(cx, sepstr);
         aobj = SplitHelper(cx, linearStr, limit, matcher, type);
     } else {
-        SplitRegExpMatcher matcher(*re, cx->regExpStatics());
+        SplitRegExpMatcher matcher(*re, cx->global()->getRegExpStatics());
         aobj = SplitHelper(cx, linearStr, limit, matcher, type);
     }
     if (!aobj)
@@ -3908,17 +3907,18 @@ js::ValueToSource(JSContext *cx, HandleValue v)
         return ToString<CanGC>(cx, v);
     }
 
-    RootedValue rval(cx, NullValue());
     RootedValue fval(cx);
     RootedObject obj(cx, &v.toObject());
     if (!JSObject::getProperty(cx, obj, obj, cx->names().toSource, &fval))
         return NULL;
     if (js_IsCallable(fval)) {
+        RootedValue rval(cx);
         if (!Invoke(cx, ObjectValue(*obj), fval, 0, NULL, &rval))
             return NULL;
+        return ToString<CanGC>(cx, rval);
     }
 
-    return ToString<CanGC>(cx, rval);
+    return ObjectToSource(cx, obj);
 }
 
 JSString *
@@ -4019,17 +4019,6 @@ js_strlen(const jschar *s)
     for (t = s; *t != 0; t++)
         continue;
     return (size_t)(t - s);
-}
-
-jschar *
-js_strchr(const jschar *s, jschar c)
-{
-    while (*s != 0) {
-        if (*s == c)
-            return (jschar *)s;
-        s++;
-    }
-    return NULL;
 }
 
 jschar *

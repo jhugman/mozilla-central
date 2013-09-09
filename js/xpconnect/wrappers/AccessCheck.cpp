@@ -14,7 +14,6 @@
 #include "nsIDOMWindow.h"
 #include "nsPIDOMWindow.h"
 #include "nsIDOMWindowCollection.h"
-#include "nsContentUtils.h"
 #include "nsJSUtils.h"
 
 #include "XPCWrapper.h"
@@ -25,6 +24,7 @@
 #include "mozilla/dom/BindingUtils.h"
 
 using namespace mozilla;
+using namespace JS;
 using namespace js;
 
 namespace xpc {
@@ -238,7 +238,7 @@ AccessCheck::isCrossOriginAccessPermitted(JSContext *cx, JSObject *wrapperArg, j
 
     const char *name;
     js::Class *clasp = js::GetObjectClass(obj);
-    NS_ASSERTION(Jsvalify(clasp) != &XrayUtils::HolderClass, "shouldn't have a holder here");
+    MOZ_ASSERT(Jsvalify(clasp) != &XrayUtils::HolderClass, "shouldn't have a holder here");
     if (clasp->ext.innerObject)
         name = "Window";
     else

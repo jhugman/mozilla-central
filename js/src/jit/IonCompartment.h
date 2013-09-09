@@ -16,11 +16,12 @@
 #include "jit/CompileInfo.h"
 #include "jit/IonCode.h"
 #include "jit/IonFrames.h"
+#include "jit/shared/Assembler-shared.h"
 #include "js/Value.h"
 #include "vm/Stack.h"
 
 namespace js {
-namespace ion {
+namespace jit {
 
 class FrameSizeClass;
 
@@ -120,12 +121,39 @@ struct FallbackICStubSpace : public ICStubSpace
     }
 };
 
+// Information about a loop backedge in the runtime, which can be set to
+// point to either the loop header or to an OOL interrupt checking stub,
+// if signal handlers are being used to implement interrupts.
+class PatchableBackedge : public InlineListNode<PatchableBackedge>
+{
+    friend class IonRuntime;
+
+    CodeLocationJump backedge;
+    CodeLocationLabel loopHeader;
+    CodeLocationLabel interruptCheck;
+
+  public:
+    PatchableBackedge(CodeLocationJump backedge,
+                      CodeLocationLabel loopHeader,
+                      CodeLocationLabel interruptCheck)
+      : backedge(backedge), loopHeader(loopHeader), interruptCheck(interruptCheck)
+    {}
+};
+
 class IonRuntime
 {
     friend class IonCompartment;
 
-    // Executable allocator.
+    // Executable allocator for all code except the main code in an IonScript.
+    // Shared with the runtime.
     JSC::ExecutableAllocator *execAlloc_;
+
+    // Executable allocator used for allocating the main code in an IonScript.
+    // All accesses on this allocator must be protected by the runtime's
+    // operation callback lock, as the executable memory may be protected()
+    // when triggering a callback to force a fault in the Ion code and avoid
+    // the neeed for explicit interrupt checks.
+    JSC::ExecutableAllocator *ionAlloc_;
 
     // Shared post-exception-handler tail
     IonCode *exceptionTail_;
@@ -175,6 +203,14 @@ class IonRuntime
     // Keep track of memoryregions that are going to be flushed.
     AutoFlushCache *flusher_;
 
+    // Whether all Ion code in the runtime is protected, and will fault if it
+    // is accessed.
+    bool ionCodeProtected_;
+
+    // If signal handlers are installed, this contains all loop backedges for
+    // IonScripts in the runtime.
+    InlineList<PatchableBackedge> backedgeList_;
+
   private:
     IonCode *generateExceptionTailStub(JSContext *cx);
     IonCode *generateBailoutTailStub(JSContext *cx);
@@ -186,6 +222,8 @@ class IonRuntime
     IonCode *generatePreBarrier(JSContext *cx, MIRType type);
     IonCode *generateDebugTrapHandler(JSContext *cx);
     IonCode *generateVMWrapper(JSContext *cx, const VMFunction &f);
+
+    JSC::ExecutableAllocator *createIonAlloc(JSContext *cx);
 
   public:
     IonRuntime();
@@ -204,6 +242,38 @@ class IonRuntime
         if (!flusher_ || !fl)
             flusher_ = fl;
     }
+
+    JSC::ExecutableAllocator *getIonAlloc(JSContext *cx) {
+        JS_ASSERT(cx->runtime()->currentThreadOwnsOperationCallbackLock());
+        return ionAlloc_ ? ionAlloc_ : createIonAlloc(cx);
+    }
+
+    JSC::ExecutableAllocator *ionAlloc(JSRuntime *rt) {
+        JS_ASSERT(rt->currentThreadOwnsOperationCallbackLock());
+        return ionAlloc_;
+    }
+
+    bool ionCodeProtected() {
+        return ionCodeProtected_;
+    }
+
+    void addPatchableBackedge(PatchableBackedge *backedge) {
+        backedgeList_.pushFront(backedge);
+    }
+    void removePatchableBackedge(PatchableBackedge *backedge) {
+        backedgeList_.remove(backedge);
+    }
+
+    enum BackedgeTarget {
+        BackedgeLoopHeader,
+        BackedgeInterruptCheck
+    };
+
+    void ensureIonCodeProtected(JSRuntime *rt);
+    void ensureIonCodeAccessible(JSRuntime *rt);
+    void patchIonBackedges(JSRuntime *rt, BackedgeTarget target);
+
+    bool handleAccessViolation(JSRuntime *rt, void *faultingAddress);
 
     IonCode *getVMWrapper(const VMFunction &f);
     IonCode *debugTrapHandler(JSContext *cx);
@@ -336,6 +406,8 @@ class IonCompartment
 
     void toggleBaselineStubBarriers(bool enabled);
 
+    JSC::ExecutableAllocator *createIonAlloc();
+
   public:
     IonCompartment(IonRuntime *rt);
     ~IonCompartment();
@@ -360,12 +432,6 @@ class IonCompartment
         }
     }
 
-    AutoFlushCache *flusher() {
-        return rt->flusher();
-    }
-    void setFlusher(AutoFlushCache *fl) {
-        rt->setFlusher(fl);
-    }
     OptimizedICStubSpace *optimizedStubSpace() {
         return &optimizedStubSpace_;
     }
@@ -375,7 +441,7 @@ class IonCompartment
 void InvalidateAll(FreeOp *fop, JS::Zone *zone);
 void FinishInvalidation(FreeOp *fop, JSScript *script);
 
-} // namespace ion
+} // namespace jit
 } // namespace js
 
 #endif // JS_ION

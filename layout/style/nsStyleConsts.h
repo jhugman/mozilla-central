@@ -531,6 +531,7 @@ static inline mozilla::css::Side operator++(mozilla::css::Side& side, int) {
 #define NS_STYLE_POSITION_RELATIVE              1
 #define NS_STYLE_POSITION_ABSOLUTE              2
 #define NS_STYLE_POSITION_FIXED                 3
+#define NS_STYLE_POSITION_STICKY                4
 
 // See nsStylePosition.mClip
 #define NS_STYLE_CLIP_AUTO                      0x00
@@ -634,6 +635,10 @@ static inline mozilla::css::Side operator++(mozilla::css::Side& side, int) {
 #define NS_STYLE_POINTER_EVENTS_STROKE          7
 #define NS_STYLE_POINTER_EVENTS_ALL             8
 #define NS_STYLE_POINTER_EVENTS_AUTO            9
+
+// See nsStyleVisibility.mImageOrientationType
+#define NS_STYLE_IMAGE_ORIENTATION_FLIP         0
+#define NS_STYLE_IMAGE_ORIENTATION_FROM_IMAGE   1
 
 // See nsStyleDisplay
 #define NS_STYLE_RESIZE_NONE                    0
@@ -748,6 +753,18 @@ static inline mozilla::css::Side operator++(mozilla::css::Side& side, int) {
 // See nsStyleText
 #define NS_STYLE_TEXT_SIZE_ADJUST_NONE          0
 #define NS_STYLE_TEXT_SIZE_ADJUST_AUTO          1
+
+// See nsStyleText
+#define NS_STYLE_TEXT_ORIENTATION_AUTO          0
+#define NS_STYLE_TEXT_ORIENTATION_UPRIGHT       1
+#define NS_STYLE_TEXT_ORIENTATION_SIDEWAYS      2
+
+// See nsStyleText
+#define NS_STYLE_TEXT_COMBINE_HORIZ_NONE        0
+#define NS_STYLE_TEXT_COMBINE_HORIZ_ALL         1
+#define NS_STYLE_TEXT_COMBINE_HORIZ_DIGITS_2    2
+#define NS_STYLE_TEXT_COMBINE_HORIZ_DIGITS_3    3
+#define NS_STYLE_TEXT_COMBINE_HORIZ_DIGITS_4    4
 
 // See nsStyleText
 #define NS_STYLE_LINE_HEIGHT_BLOCK_HEIGHT       0

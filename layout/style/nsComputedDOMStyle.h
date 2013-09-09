@@ -30,6 +30,7 @@ class nsIPresShell;
 class nsDOMCSSValueList;
 class nsROCSSPrimitiveValue;
 class nsStyleContext;
+class gfx3DMatrix;
 
 class nsComputedDOMStyle MOZ_FINAL : public nsDOMCSSDeclaration
 {
@@ -123,6 +124,8 @@ private:
   mozilla::dom::CSSValue* GetAbsoluteOffset(mozilla::css::Side aSide);
 
   mozilla::dom::CSSValue* GetRelativeOffset(mozilla::css::Side aSide);
+
+  mozilla::dom::CSSValue* GetStickyOffset(mozilla::css::Side aSide);
 
   mozilla::dom::CSSValue* GetStaticOffset(mozilla::css::Side aSide);
 
@@ -307,11 +310,13 @@ private:
   mozilla::dom::CSSValue* DoGetLineHeight();
   mozilla::dom::CSSValue* DoGetTextAlign();
   mozilla::dom::CSSValue* DoGetTextAlignLast();
+  mozilla::dom::CSSValue* DoGetTextCombineHorizontal();
   mozilla::dom::CSSValue* DoGetTextDecoration();
   mozilla::dom::CSSValue* DoGetTextDecorationColor();
   mozilla::dom::CSSValue* DoGetTextDecorationLine();
   mozilla::dom::CSSValue* DoGetTextDecorationStyle();
   mozilla::dom::CSSValue* DoGetTextIndent();
+  mozilla::dom::CSSValue* DoGetTextOrientation();
   mozilla::dom::CSSValue* DoGetTextOverflow();
   mozilla::dom::CSSValue* DoGetTextTransform();
   mozilla::dom::CSSValue* DoGetTextShadow();
@@ -341,6 +346,7 @@ private:
   mozilla::dom::CSSValue* DoGetDisplay();
   mozilla::dom::CSSValue* DoGetPosition();
   mozilla::dom::CSSValue* DoGetClip();
+  mozilla::dom::CSSValue* DoGetImageOrientation();
   mozilla::dom::CSSValue* DoGetOverflow();
   mozilla::dom::CSSValue* DoGetOverflowX();
   mozilla::dom::CSSValue* DoGetOverflowY();
@@ -487,6 +493,8 @@ private:
 
   bool GetCBContentWidth(nscoord& aWidth);
   bool GetCBContentHeight(nscoord& aWidth);
+  bool GetScrollFrameContentWidth(nscoord& aWidth);
+  bool GetScrollFrameContentHeight(nscoord& aHeight);
   bool GetFrameBoundsWidthForTransform(nscoord &aWidth);
   bool GetFrameBoundsHeightForTransform(nscoord &aHeight);
   bool GetFrameBorderRectWidth(nscoord& aWidth);

@@ -40,7 +40,8 @@ using namespace mozilla::a11y;
 XULTreeAccessible::
   XULTreeAccessible(nsIContent* aContent, DocAccessible* aDoc,
                     nsTreeBodyFrame* aTreeFrame) :
-  AccessibleWrap(aContent, aDoc)
+  AccessibleWrap(aContent, aDoc),
+  mAccessibleCache(kDefaultTreeCacheSize)
 {
   mType = eXULTreeType;
   mGenericTypes |= eSelect;
@@ -58,8 +59,6 @@ XULTreeAccessible::
     if (autoCompletePopupElm)
       mGenericTypes |= eAutoCompletePopup;
   }
-
-  mAccessibleCache.Init(kDefaultTreeCacheSize);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -779,7 +778,7 @@ XULTreeItemAccessibleBase::GetBounds(int32_t* aX, int32_t* aY,
 NS_IMETHODIMP
 XULTreeItemAccessibleBase::SetSelected(bool aSelect)
 {
-  if (IsDefunct() || !mTreeView)
+  if (IsDefunct())
     return NS_ERROR_FAILURE;
 
   nsCOMPtr<nsITreeSelection> selection;
@@ -797,7 +796,7 @@ XULTreeItemAccessibleBase::SetSelected(bool aSelect)
 NS_IMETHODIMP
 XULTreeItemAccessibleBase::TakeFocus()
 {
-  if (IsDefunct() || !mTreeView)
+  if (IsDefunct())
     return NS_ERROR_FAILURE;
 
   nsCOMPtr<nsITreeSelection> selection;
@@ -812,8 +811,6 @@ XULTreeItemAccessibleBase::TakeFocus()
 Relation
 XULTreeItemAccessibleBase::RelationByType(uint32_t aType)
 {
-  if (!mTreeView)
-    return Relation();
 
   switch (aType) {
     case nsIAccessibleRelation::RELATION_NODE_CHILD_OF: {
@@ -956,8 +953,6 @@ XULTreeItemAccessibleBase::GroupPosition()
 uint64_t
 XULTreeItemAccessibleBase::NativeState()
 {
-  if (!mTreeView)
-    return states::DEFUNCT;
 
   // focusable and selectable states
   uint64_t state = NativeInteractiveState();
@@ -1062,8 +1057,6 @@ XULTreeItemAccessibleBase::GetSiblingAtOffset(int32_t aOffset,
 bool
 XULTreeItemAccessibleBase::IsExpandable()
 {
-  if (!mTreeView)
-    return false;
 
   bool isContainer = false;
   mTreeView->IsContainer(mRow, &isContainer);
@@ -1089,8 +1082,6 @@ XULTreeItemAccessibleBase::IsExpandable()
 void
 XULTreeItemAccessibleBase::GetCellName(nsITreeColumn* aColumn, nsAString& aName)
 {
-  if (!mTreeView)
-    return;
 
   mTreeView->GetCellText(mRow, aColumn, aName);
 

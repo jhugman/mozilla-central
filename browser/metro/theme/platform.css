@@ -447,8 +447,27 @@ notification {
   min-height: 64px;
 }
 
+notificationbox[count="0"] .notification-layer,
+notificationbox[count="1"] .notification-layer,
+notificationbox[count="2"] .notification-layer[anonid="layer2"] {
+  visibility: collapse;
+}
+
+notificationbox[count="2"] .notification-layer[anonid="layer1"],
+notificationbox[count="3"] .notification-layer[anonid="layer1"],
+notificationbox[count="3"] .notification-layer[anonid="layer2"] {
+  visibility: visible;
+}
+
+.notification-layer {
+  border: @metro_border_thin@ solid @field_disabled_foreground_color@;
+  border-bottom: none;
+  height:5px
+}
+
 .notification-inner {
   border-style: none;
+  border: @metro_border_thin@ solid @field_disabled_foreground_color@;
 }
 
 .notification-button {
@@ -498,6 +517,55 @@ notification {
   -moz-box-flex: 9999;
 }
 
+/* ensure the notification children pick up snapped-view box property overrides */
+.notification-button.box-inherit {
+  -moz-margin-start: inherit;
+  -moz-margin-end: inherit;
+  width: inherit;
+  display: inherit;
+  overflow: inherit;
+}
+
+@media (max-width: 330px) {
+  /* notifications need layout tweaks in narrow viewport
+   */
+  .notification-button {
+      display: block;
+      width: calc(100% - 40px);
+      overflow: visible;
+      -moz-margin-start: 40px;
+      -moz-margin-end: 0;
+  }
+
+  .notification-inner {
+    display: block;
+    padding: @metro_spacing_xnormal@;
+  }
+  .notification-inner > [anonid="details"] {
+    display: inline-block;
+    width: calc(100% - 48px);
+  }
+
+  .notification-inner > .messageCloseButton {
+    display: inline-block;
+    vertical-align: top;
+    -moz-margin-start: 8px;
+    -moz-margin-end: 0;
+  }
+  .notification-inner > [anonid="details"] > .messageImage {
+    display: inline;
+    vertical-align: top;
+    -moz-margin-start: 0;
+    -moz-margin-end: 8px;
+  }
+  .notification-inner > [anonid="details"] > .messageText {
+    display: inline-block;
+    width: calc(100% - 40px);
+    overflow: visible;
+  }
+
+}
+
 /* Prompts ----------------------------------------------------------------- */
 
 .mainContainer {
@@ -516,7 +584,7 @@ notification {
 
 .buttonContainer {
   background-color: transparent;
-  padding: none;
+  padding: 0;
   border: none;
 }
 
@@ -575,24 +643,10 @@ arrowbox {
 }
 
 .meta-section-title {
+  margin: @metro_spacing_normal@ @tile_side_margin@;
   font-size: @metro_font_large@;
   font-weight: 100;
   cursor: default;
-}
-
-#start-container[viewstate="snapped"] {
-  padding-top: 0;
-}
-
-#start-container[viewstate="snapped"] .meta-section-title,
-#start-container[viewstate="snapped"] richgrid {
-  margin-top: @metro_spacing_xnormal@;
-  padding: 0;
-}
-
-#start-container:not([viewstate="snapped"]) .meta-section-title.narrow-title,
-#start-container[viewstate="snapped"] .meta-section-title.wide-title {
-  display: none;
 }
 
 .meta-section:not([expanded]) > .meta-section-title.narrow-title:-moz-locale-dir(ltr):after {
@@ -648,6 +702,10 @@ appbar toolbar toolbarbutton {
   padding: 0;
   /* Don't inherit background-color from toolbarbutton[checked="true"] */
   background-color: transparent;
+}
+
+appbar[viewstate="snapped"] toolbar toolbarbutton {
+  margin: 0 @toolbar_snapped_horizontal_spacing@;
 }
 
 appbar toolbar toolbarbutton[disabled] {
@@ -752,4 +810,9 @@ appbar toolbar[labelled] toolbarbutton > .toolbarbutton-text {
 
 .appbar-secondary {
   list-style-image: url(chrome://browser/skin/images/appbar-icons.png);
+}
+
+.flyout-narrow description,
+.flyout-narrow label {
+  max-width: 266px; /* Accounts for a 40px padding on each side of the flyout */
 }

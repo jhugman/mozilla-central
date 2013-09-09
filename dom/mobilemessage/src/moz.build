@@ -78,3 +78,12 @@ IPDL_SOURCES += [
     'ipc/PSmsRequest.ipdl',
     'ipc/SmsTypes.ipdlh',
 ]
+
+FAIL_ON_WARNINGS = True
+
+LIBXUL_LIBRARY = True
+
+MSVC_ENABLE_PGO = True
+
+LIBRARY_NAME = 'dom_mobilemessage_s'
+

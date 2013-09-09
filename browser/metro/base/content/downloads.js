@@ -54,6 +54,7 @@ var Downloads = {
     Services.obs.addObserver(this, "dl-done", true);
     Services.obs.addObserver(this, "dl-run", true);
     Services.obs.addObserver(this, "dl-failed", true);
+    Services.obs.addObserver(this, "dl-request", true);
 
     this._notificationBox = Browser.getNotificationBox();
 
@@ -69,6 +70,7 @@ var Downloads = {
       Services.obs.removeObserver(this, "dl-done");
       Services.obs.removeObserver(this, "dl-run");
       Services.obs.removeObserver(this, "dl-failed");
+      Services.obs.removeObserver(this, "dl-request");
     }
   },
 
@@ -82,7 +84,7 @@ var Downloads = {
 
     let file = this._getLocalFile(fileURI);
     try {
-      file && MetroUtils.launchInDesktop(aDownload.target.spec, "");
+      file && Services.metro.launchInDesktop(aDownload.target.spec, "");
     } catch (ex) {
       Util.dumpLn("Failed to open download, with id: "+id+", download target URI spec: " + fileURI.spec);
       Util.dumpLn("Failed download source:"+(aDownload.source && aDownload.source.spec));
@@ -152,7 +154,7 @@ var Downloads = {
     let download = this.manager.getDownload(id);
     let uri = this._getReferrerOrSource(download);
     if (uri)
-      BrowserUI.newTab(uri, Browser.selectedTab);
+      BrowserUI.addAndShowTab(uri, Browser.selectedTab);
   },
 
   showAlert: function dh_showAlert(aName, aMessage, aTitle, aIcon, aObserver) {
@@ -193,7 +195,6 @@ var Downloads = {
         accessKey: "",
         callback: function() {
           Downloads.manager.retryDownload(aDownload.id);
-          Downloads._downloadProgressIndicator.reset();
         }
       },
       {
@@ -201,7 +202,6 @@ var Downloads = {
         accessKey: "",
         callback: function() {
           Downloads.cancelDownload(aDownload);
-          Downloads._downloadProgressIndicator.reset();
         }
       }
     ];
@@ -221,7 +221,6 @@ var Downloads = {
           let fileURI = aDownload.target;
           let file = Downloads._getLocalFile(fileURI);
           file.reveal();
-          Downloads._downloadProgressIndicator.reset();
         }
       }
     ];
@@ -242,7 +241,6 @@ var Downloads = {
         accessKey: "",
         callback: function() {
           Downloads.openDownload(aDownload);
-          Downloads._downloadProgressIndicator.reset();
         }
       });
     }
@@ -376,7 +374,6 @@ var Downloads = {
           accessKey: "",
           callback: function() {
             Downloads.cancelDownloads();
-            Downloads._downloadProgressIndicator.reset();
           }
         }
       ];
@@ -434,6 +431,7 @@ var Downloads = {
             this._showDownloadCompleteToast(download);
             this._showDownloadCompleteNotification(download);
           }
+          this._downloadProgressIndicator.reset();
           this._progressNotificationInfo.clear();
           this._downloadCount = 0;
           this._notificationBox.removeNotification(this._progressNotification);
@@ -443,6 +441,12 @@ var Downloads = {
       case "dl-failed":
         download = aSubject.QueryInterface(Ci.nsIDownload);
         this._showDownloadFailedNotification(download);
+        this._downloadProgressIndicator.reset();
+        break;
+      case "dl-request":
+        setTimeout(function() {
+          ContextUI.displayNavbar();
+        }, 1000);
         break;
     }
   },

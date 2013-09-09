@@ -10,10 +10,6 @@
 #include "mozilla/Casting.h"
 #include "mozilla/DebugOnly.h"
 
-#include "jsopcode.h"
-
-#include "jit/IonCaches.h"
-#include "jit/IonFrames.h"
 #if defined(JS_CPU_X86)
 # include "jit/x86/Assembler-x86.h"
 #elif defined(JS_CPU_X64)
@@ -21,7 +17,7 @@
 #endif
 
 namespace js {
-namespace ion {
+namespace jit {
 
 class MacroAssemblerX86Shared : public Assembler
 {
@@ -510,7 +506,7 @@ class MacroAssemblerX86Shared : public Assembler
     }
 };
 
-} // namespace ion
+} // namespace jit
 } // namespace js
 
 #endif /* jit_shared_MacroAssembler_x86_shared_h */

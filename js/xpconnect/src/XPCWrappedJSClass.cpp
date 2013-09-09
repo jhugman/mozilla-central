@@ -8,6 +8,7 @@
 /* Sharable code and data for wrapper around JSObjects. */
 
 #include "xpcprivate.h"
+#include "jsprf.h"
 #include "nsArrayEnumerator.h"
 #include "nsContentUtils.h"
 #include "nsWrapperCache.h"
@@ -15,6 +16,9 @@
 #include "AccessCheck.h"
 #include "nsJSUtils.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/dom/BindingUtils.h"
+#include "mozilla/dom/DOMException.h"
+#include "mozilla/dom/DOMExceptionBinding.h"
 
 #include "jsapi.h"
 #include "jsfriendapi.h"
@@ -71,22 +75,6 @@ AutoScriptEvaluate::~AutoScriptEvaluate()
         JS_ClearPendingException(mJSContext);
 
     JS_EndRequest(mJSContext);
-
-    // If this is a JSContext that has a private context that provides a
-    // nsIXPCScriptNotify interface, then notify the object the script has
-    // been executed.
-    //
-    // Note: We rely on the rule that if any JSContext in our JSRuntime has
-    // private data that points to an nsISupports subclass, it has also set
-    // the JSOPTION_PRIVATE_IS_NSISUPPORTS option.
-
-    if (JS_GetOptions(mJSContext) & JSOPTION_PRIVATE_IS_NSISUPPORTS) {
-        nsCOMPtr<nsIXPCScriptNotify> scriptNotify =
-            do_QueryInterface(static_cast<nsISupports*>
-                                         (JS_GetContextPrivate(mJSContext)));
-        if (scriptNotify)
-            scriptNotify->ScriptExecuted();
-    }
 
     if (mErrorReporterSet)
         JS_SetErrorReporter(mJSContext, NULL);
@@ -266,8 +254,8 @@ nsXPCWrappedJSClass::CallQueryInterfaceOnJSObject(JSContext* cx,
         JS_SetOptions(cx, oldOpts);
 
         if (!success) {
-            NS_ASSERTION(JS_IsExceptionPending(cx),
-                         "JS failed without setting an exception!");
+            MOZ_ASSERT(JS_IsExceptionPending(cx),
+                       "JS failed without setting an exception!");
 
             RootedValue jsexception(cx, NullValue());
 
@@ -276,21 +264,14 @@ nsXPCWrappedJSClass::CallQueryInterfaceOnJSObject(JSContext* cx,
                 if (jsexception.isObject()) {
                     // XPConnect may have constructed an object to represent a
                     // C++ QI failure. See if that is the case.
-                    nsCOMPtr<nsIXPConnectWrappedNative> wrapper;
+                    using namespace mozilla::dom;
+                    Exception *e = nullptr;
+                    UNWRAP_OBJECT(Exception, cx, &jsexception.toObject(), e);
 
-                    nsXPConnect::XPConnect()->
-                        GetWrappedNativeOfJSObject(cx,
-                                                   &jsexception.toObject(),
-                                                   getter_AddRefs(wrapper));
-
-                    if (wrapper) {
-                        nsCOMPtr<nsIException> exception =
-                            do_QueryWrappedNative(wrapper);
-                        if (exception &&
-                            NS_SUCCEEDED(exception->GetResult(&rv)) &&
-                            rv == NS_NOINTERFACE) {
-                            JS_ClearPendingException(cx);
-                        }
+                    if (e &&
+                        NS_SUCCEEDED(e->GetResult(&rv)) &&
+                        rv == NS_NOINTERFACE) {
+                        JS_ClearPendingException(cx);
                     }
                 } else if (JSVAL_IS_NUMBER(jsexception)) {
                     // JS often throws an nsresult.
@@ -588,6 +569,22 @@ nsXPCWrappedJSClass::DelegatedQueryInterface(nsXPCWrappedJS* self,
                                              REFNSIID aIID,
                                              void** aInstancePtr)
 {
+    if (MOZ_UNLIKELY(!NS_IsMainThread())) {
+        printf("Uh oh! DelegatedQueryInterface called off-main-thread!\n");
+        printf("Name: %s\n", GetInterfaceName());
+        JSCompartment *c = js::GetObjectCompartment(self->GetJSObjectPreserveColor());
+        char *origin = nullptr;
+        nsresult rv = xpc::GetCompartmentPrincipal(c)->GetOrigin(&origin);
+        if (NS_SUCCEEDED(rv)) {
+            printf("Principal origin: %s\n", origin);
+            NS_Free(origin);
+        } else {
+            printf("Unable to get origin from principal :-(\n");
+        }
+        nsAutoCString loc(EnsureCompartmentPrivate(c)->GetLocation());
+        printf("Global's Location: %s\n", loc.get());
+        MOZ_CRASH();
+    }
     if (aIID.Equals(NS_GET_IID(nsIXPConnectJSObjectHolder))) {
         NS_ADDREF(self);
         *aInstancePtr = (void*) static_cast<nsIXPConnectJSObjectHolder*>(self);
@@ -843,8 +840,8 @@ nsXPCWrappedJSClass::GetArraySizeFromParam(JSContext* cx,
 
     // This should be enforced by the xpidl compiler, but it's not.
     // See bug 695235.
-    NS_ABORT_IF_FALSE(arg_param.GetType().TagPart() == nsXPTType::T_U32,
-                      "size_is references parameter of invalid type.");
+    MOZ_ASSERT(arg_param.GetType().TagPart() == nsXPTType::T_U32,
+               "size_is references parameter of invalid type.");
 
     if (arg_param.IsIndirect())
         *result = *(uint32_t*)nativeParams[argnum].val.p;
@@ -923,7 +920,7 @@ void
 nsXPCWrappedJSClass::CleanupPointerTypeObject(const nsXPTType& type,
                                               void** pp)
 {
-    NS_ASSERTION(pp,"null pointer");
+    MOZ_ASSERT(pp,"null pointer");
     if (type.IsInterfacePointer()) {
         nsISupports* p = *((nsISupports**)pp);
         if (p) p->Release();
@@ -1151,7 +1148,7 @@ nsXPCWrappedJSClass::CallMethod(nsXPCWrappedJS* wrapper, uint16_t methodIndex,
         return retval;
 
     XPCContext *xpcc = ccx.GetXPCContext();
-    JSContext *cx = xpc_UnmarkGrayContext(ccx.GetJSContext());
+    JSContext *cx = ccx.GetJSContext();
 
     if (!cx || !xpcc || !IsReflectable(methodIndex))
         return NS_ERROR_FAILURE;
@@ -1491,7 +1488,7 @@ pre_call_clean_up:
     foundDependentParam = false;
     for (i = 0; i < paramCount; i++) {
         const nsXPTParamInfo& param = info->params[i];
-        NS_ABORT_IF_FALSE(!param.IsShared(), "[shared] implies [noscript]!");
+        MOZ_ASSERT(!param.IsShared(), "[shared] implies [noscript]!");
         if (!param.IsOut() && !param.IsDipper())
             continue;
 

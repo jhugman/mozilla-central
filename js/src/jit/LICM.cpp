@@ -15,7 +15,7 @@
 #include "jit/MIRGraph.h"
 
 using namespace js;
-using namespace js::ion;
+using namespace js::jit;
 
 namespace {
 
@@ -64,7 +64,6 @@ class Loop
     bool isInLoop(MDefinition *ins);
     bool isBeforeLoop(MDefinition *ins);
     bool isLoopInvariant(MInstruction *ins);
-    bool isLoopInvariant(MDefinition *ins);
 
     // This method determines if this block hot within a loop.  That is, if it's
     // always or usually run when the loop executes
@@ -351,15 +350,6 @@ Loop::isLoopInvariant(MInstruction *ins)
     }
 
     return true;
-}
-
-bool
-Loop::isLoopInvariant(MDefinition *ins)
-{
-    if (!isInLoop(ins))
-        return true;
-
-    return ins->isInstruction() && isLoopInvariant(ins->toInstruction());
 }
 
 bool

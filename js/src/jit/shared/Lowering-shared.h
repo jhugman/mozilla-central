@@ -14,7 +14,7 @@
 #include "jit/LIR.h"
 
 namespace js {
-namespace ion {
+namespace jit {
 
 class MBasicBlock;
 class MTableSwitch;
@@ -86,6 +86,7 @@ class LIRGeneratorShared : public MInstructionVisitorWithDefaults
     inline LAllocation useKeepaliveOrConstant(MDefinition *mir);
     inline LAllocation useRegisterOrConstant(MDefinition *mir);
     inline LAllocation useRegisterOrConstantAtStart(MDefinition *mir);
+    inline LAllocation useRegisterOrNonNegativeConstantAtStart(MDefinition *mir);
     inline LAllocation useRegisterOrNonDoubleConstant(MDefinition *mir);
 
 #ifdef JS_NUNBOX32
@@ -182,7 +183,7 @@ class LIRGeneratorShared : public MInstructionVisitorWithDefaults
     }
 };
 
-} // namespace ion
+} // namespace jit
 } // namespace js
 
 #endif /* jit_shared_Lowering_shared_h */

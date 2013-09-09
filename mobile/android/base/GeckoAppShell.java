@@ -698,8 +698,8 @@ public class GeckoAppShell
         createShortcut(aTitle, aURI, aURI, aIconData, aType);
     }
 
-    // internal, for non-webapps
-    static void createShortcut(String aTitle, String aURI, Bitmap aBitmap, String aType) {
+    // for non-webapps
+    public static void createShortcut(String aTitle, String aURI, Bitmap aBitmap, String aType) {
         createShortcut(aTitle, aURI, aURI, aBitmap, aType);
     }
 
@@ -1070,12 +1070,12 @@ public class GeckoAppShell
      * @param title the title to use in <code>ACTION_SEND</code> intents.
      * @return true if the activity started successfully; false otherwise.
      */
-    static boolean openUriExternal(String targetURI,
-                                   String mimeType,
-                                   String packageName,
-                                   String className,
-                                   String action,
-                                   String title) {
+    public static boolean openUriExternal(String targetURI,
+                                          String mimeType,
+                                          String packageName,
+                                          String className,
+                                          String action,
+                                          String title) {
         final Context context = getContext();
         final Intent intent = getOpenURIIntent(context, targetURI,
                                                mimeType, action, title);
@@ -1776,11 +1776,11 @@ public class GeckoAppShell
     }
 
     public static void addPluginView(View view,
-                                     int x, int y,
-                                     int w, int h,
+                                     float x, float y,
+                                     float w, float h,
                                      boolean isFullScreen) {
         if (getGeckoInterface() != null)
-             getGeckoInterface().addPluginView(view, new Rect(x, y, x + w, y + h), isFullScreen);
+             getGeckoInterface().addPluginView(view, new RectF(x, y, x + w, y + h), isFullScreen);
     }
 
     public static void removePluginView(View view, boolean isFullScreen) {
@@ -2029,7 +2029,7 @@ public class GeckoAppShell
         public SensorEventListener getSensorEventListener();
         public void doRestart();
         public void setFullScreen(boolean fullscreen);
-        public void addPluginView(View view, final Rect rect, final boolean isFullScreen);
+        public void addPluginView(View view, final RectF rect, final boolean isFullScreen);
         public void removePluginView(final View view, final boolean isFullScreen);
         public void enableCameraView();
         public void disableCameraView();

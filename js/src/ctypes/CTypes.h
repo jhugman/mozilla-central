@@ -7,7 +7,6 @@
 #define ctypes_CTypes_h
 
 #include "ffi.h"
-#include "jsapi.h"
 #include "jscntxt.h"
 #include "prlink.h"
 
@@ -217,7 +216,7 @@ struct FieldInfo
 };
 
 // Hash policy for FieldInfos.
-struct FieldHashPolicy
+struct FieldHashPolicy : DefaultHasher<JSFlatString*>
 {
   typedef JSFlatString* Key;
   typedef Key Lookup;
@@ -298,8 +297,7 @@ struct ClosureInfo
   ~ClosureInfo() {
     if (closure)
       ffi_closure_free(closure);
-    if (errResult)
-      js_free(errResult);
+    js_free(errResult);
   }
 };
 

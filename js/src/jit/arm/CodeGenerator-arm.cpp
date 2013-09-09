@@ -17,7 +17,6 @@
 #include "jit/IonFrames.h"
 #include "jit/MIR.h"
 #include "jit/MIRGraph.h"
-#include "jit/PerfSpewer.h"
 #include "vm/Shape.h"
 
 #include "jsscriptinlines.h"
@@ -26,7 +25,7 @@
 #include "vm/Shape-inl.h"
 
 using namespace js;
-using namespace js::ion;
+using namespace js::jit;
 
 using mozilla::FloorLog2;
 
@@ -78,15 +77,11 @@ CodeGeneratorARM::generateEpilogue()
 void
 CodeGeneratorARM::emitBranch(Assembler::Condition cond, MBasicBlock *mirTrue, MBasicBlock *mirFalse)
 {
-    LBlock *ifTrue = mirTrue->lir();
-    LBlock *ifFalse = mirFalse->lir();
-    if (isNextBlock(ifFalse)) {
-        masm.ma_b(ifTrue->label(), cond);
+    if (isNextBlock(mirFalse->lir())) {
+        jumpToBlock(mirTrue, cond);
     } else {
-        masm.ma_b(ifFalse->label(), Assembler::InvertCondition(cond));
-        if (!isNextBlock(ifTrue)) {
-            masm.ma_b(ifTrue->label());
-        }
+        jumpToBlock(mirFalse, Assembler::InvertCondition(cond));
+        jumpToBlock(mirTrue);
     }
 }
 
@@ -101,19 +96,19 @@ bool
 CodeGeneratorARM::visitTestIAndBranch(LTestIAndBranch *test)
 {
     const LAllocation *opd = test->getOperand(0);
-    LBlock *ifTrue = test->ifTrue()->lir();
-    LBlock *ifFalse = test->ifFalse()->lir();
+    MBasicBlock *ifTrue = test->ifTrue();
+    MBasicBlock *ifFalse = test->ifFalse();
 
     // Test the operand
     masm.ma_cmp(ToRegister(opd), Imm32(0));
 
-    if (isNextBlock(ifFalse)) {
-        masm.ma_b(ifTrue->label(), Assembler::NonZero);
-    } else if (isNextBlock(ifTrue)) {
-        masm.ma_b(ifFalse->label(), Assembler::Zero);
+    if (isNextBlock(ifFalse->lir())) {
+        jumpToBlock(ifTrue, Assembler::NonZero);
+    } else if (isNextBlock(ifTrue->lir())) {
+        jumpToBlock(ifFalse, Assembler::Zero);
     } else {
-        masm.ma_b(ifFalse->label(), Assembler::Zero);
-        masm.ma_b(ifTrue->label());
+        jumpToBlock(ifFalse, Assembler::Zero);
+        jumpToBlock(ifTrue);
     }
     return true;
 }
@@ -347,8 +342,8 @@ bool
 CodeGeneratorARM::visitSqrtD(LSqrtD *ins)
 {
     FloatRegister input = ToFloatRegister(ins->input());
-    JS_ASSERT(input == ToFloatRegister(ins->output()));
-    masm.ma_vsqrt(input, input);
+    FloatRegister output = ToFloatRegister(ins->output());
+    masm.ma_vsqrt(input, output);
     return true;
 }
 
@@ -1009,7 +1004,7 @@ CodeGeneratorARM::toMoveOperand(const LAllocation *a) const
     return MoveOperand(StackPointer, offset);
 }
 
-class js::ion::OutOfLineTableSwitch : public OutOfLineCodeBase<CodeGeneratorARM>
+class js::jit::OutOfLineTableSwitch : public OutOfLineCodeBase<CodeGeneratorARM>
 {
     MTableSwitch *mir_;
     Vector<CodeLabel, 8, IonAllocPolicy> codeLabels_;
@@ -1321,16 +1316,15 @@ CodeGeneratorARM::visitTestDAndBranch(LTestDAndBranch *test)
     masm.ma_vcmpz(ToFloatRegister(opd));
     masm.as_vmrs(pc);
 
-    LBlock *ifTrue = test->ifTrue()->lir();
-    LBlock *ifFalse = test->ifFalse()->lir();
+    MBasicBlock *ifTrue = test->ifTrue();
+    MBasicBlock *ifFalse = test->ifFalse();
     // If the compare set the  0 bit, then the result
     // is definately false.
-    masm.ma_b(ifFalse->label(), Assembler::Zero);
+    jumpToBlock(ifFalse, Assembler::Zero);
     // it is also false if one of the operands is NAN, which is
     // shown as Overflow.
-    masm.ma_b(ifFalse->label(), Assembler::Overflow);
-    if (!isNextBlock(ifTrue))
-        masm.ma_b(ifTrue->label());
+    jumpToBlock(ifFalse, Assembler::Overflow);
+    jumpToBlock(ifTrue);
     return true;
 }
 
@@ -1398,10 +1392,8 @@ CodeGeneratorARM::visitCompareBAndBranch(LCompareBAndBranch *lir)
 
     JS_ASSERT(mir->jsop() == JSOP_STRICTEQ || mir->jsop() == JSOP_STRICTNE);
 
-    if (mir->jsop() == JSOP_STRICTEQ)
-        masm.branchTestBoolean(Assembler::NotEqual, lhs, lir->ifFalse()->lir()->label());
-    else
-        masm.branchTestBoolean(Assembler::NotEqual, lhs, lir->ifTrue()->lir()->label());
+    Assembler::Condition cond = masm.testBoolean(Assembler::NotEqual, lhs);
+    jumpToBlock((mir->jsop() == JSOP_STRICTEQ) ? lir->ifFalse() : lir->ifTrue(), cond);
 
     if (rhs->isConstant())
         masm.cmp32(lhs.payloadReg(), Imm32(rhs->toConstant()->toBoolean()));
@@ -1451,14 +1443,10 @@ CodeGeneratorARM::visitCompareVAndBranch(LCompareVAndBranch *lir)
     JS_ASSERT(mir->jsop() == JSOP_EQ || mir->jsop() == JSOP_STRICTEQ ||
               mir->jsop() == JSOP_NE || mir->jsop() == JSOP_STRICTNE);
 
-    Label *notEqual;
-    if (cond == Assembler::Equal)
-        notEqual = lir->ifFalse()->lir()->label();
-    else
-        notEqual = lir->ifTrue()->lir()->label();
+    MBasicBlock *notEqual = (cond == Assembler::Equal) ? lir->ifFalse() : lir->ifTrue();
 
     masm.cmp32(lhs.typeReg(), rhs.typeReg());
-    masm.j(Assembler::NotEqual, notEqual);
+    jumpToBlock(notEqual, Assembler::NotEqual);
     masm.cmp32(lhs.payloadReg(), rhs.payloadReg());
     emitBranch(cond, lir->ifTrue(), lir->ifFalse());
 
@@ -1712,9 +1700,6 @@ CodeGeneratorARM::visitImplicitThis(LImplicitThis *lir)
     return true;
 }
 
-typedef bool (*InterruptCheckFn)(JSContext *);
-static const VMFunction InterruptCheckInfo = FunctionInfo<InterruptCheckFn>(InterruptCheck);
-
 bool
 CodeGeneratorARM::visitInterruptCheck(LInterruptCheck *lir)
 {
@@ -1794,34 +1779,71 @@ CodeGeneratorARM::visitAsmJSLoadHeap(LAsmJSLoadHeap *ins)
     int size;
     bool isFloat = false;
     switch (mir->viewType()) {
-      case ArrayBufferView::TYPE_INT8:    isSigned = true; size = 8; break;
-      case ArrayBufferView::TYPE_UINT8:   isSigned = false; size = 8; break;
-      case ArrayBufferView::TYPE_INT16:   isSigned = true; size = 16; break;
+      case ArrayBufferView::TYPE_INT8:    isSigned = true;  size =  8; break;
+      case ArrayBufferView::TYPE_UINT8:   isSigned = false; size =  8; break;
+      case ArrayBufferView::TYPE_INT16:   isSigned = true;  size = 16; break;
       case ArrayBufferView::TYPE_UINT16:  isSigned = false; size = 16; break;
       case ArrayBufferView::TYPE_INT32:
       case ArrayBufferView::TYPE_UINT32:  isSigned = true;  size = 32; break;
       case ArrayBufferView::TYPE_FLOAT64: isFloat = true;   size = 64; break;
-      case ArrayBufferView::TYPE_FLOAT32:
-        isFloat = true;
-        size = 32;
-        break;
+      case ArrayBufferView::TYPE_FLOAT32: isFloat = true;   size = 32; break;
       default: MOZ_ASSUME_UNREACHABLE("unexpected array type");
     }
-    Register index = ToRegister(ins->ptr());
-    BufferOffset bo = masm.ma_BoundsCheck(index);
-    if (isFloat) {
-        VFPRegister vd(ToFloatRegister(ins->output()));
-        if (size == 32) {
-            masm.ma_vldr(vd.singleOverlay(), HeapReg, index, 0, Assembler::Zero);
-            masm.as_vcvt(vd, vd.singleOverlay(), false, Assembler::Zero);
-        } else {
-            masm.ma_vldr(vd, HeapReg, index, 0, Assembler::Zero);
+
+    const LAllocation *ptr = ins->ptr();
+
+    if (ptr->isConstant()) {
+        JS_ASSERT(mir->skipBoundsCheck());
+        int32_t ptrImm = ptr->toConstant()->toInt32();
+        JS_ASSERT(ptrImm >= 0);
+        if (isFloat) {
+            VFPRegister vd(ToFloatRegister(ins->output()));
+            if (size == 32) {
+                masm.ma_vldr(Operand(HeapReg, ptrImm), vd.singleOverlay(), Assembler::Always);
+                masm.as_vcvt(vd, vd.singleOverlay(), false, Assembler::Always);
+            } else {
+                masm.ma_vldr(Operand(HeapReg, ptrImm), vd, Assembler::Always);
+            }
+        }  else {
+            masm.ma_dataTransferN(IsLoad, size, isSigned, HeapReg, Imm32(ptrImm),
+                                  ToRegister(ins->output()), Offset, Assembler::Always);
         }
-        masm.ma_vmov(NANReg, ToFloatRegister(ins->output()), Assembler::NonZero);
-    }  else {
-        masm.ma_dataTransferN(IsLoad, size, isSigned, HeapReg, index,
-                              ToRegister(ins->output()), Offset, Assembler::Zero);
-        masm.ma_mov(Imm32(0), ToRegister(ins->output()), NoSetCond, Assembler::NonZero);
+        return true;
+    }
+
+    Register ptrReg = ToRegister(ptr);
+
+    if (mir->skipBoundsCheck()) {
+        if (isFloat) {
+            VFPRegister vd(ToFloatRegister(ins->output()));
+            if (size == 32) {
+                masm.ma_vldr(vd.singleOverlay(), HeapReg, ptrReg, 0, Assembler::Always);
+                masm.as_vcvt(vd, vd.singleOverlay(), false, Assembler::Always);
+            } else {
+                masm.ma_vldr(vd, HeapReg, ptrReg, 0, Assembler::Always);
+            }
+        } else {
+            masm.ma_dataTransferN(IsLoad, size, isSigned, HeapReg, ptrReg,
+                                  ToRegister(ins->output()), Offset, Assembler::Always);
+        }
+        return true;
+    }
+
+    BufferOffset bo = masm.ma_BoundsCheck(ptrReg);
+    if (isFloat) {
+        FloatRegister dst = ToFloatRegister(ins->output());
+        masm.ma_vmov(NANReg, dst, Assembler::AboveOrEqual);
+        VFPRegister vd(dst);
+        if (size == 32) {
+            masm.ma_vldr(vd.singleOverlay(), HeapReg, ptrReg, 0, Assembler::Below);
+            masm.as_vcvt(vd, vd.singleOverlay(), false, Assembler::Below);
+        } else {
+            masm.ma_vldr(vd, HeapReg, ptrReg, 0, Assembler::Below);
+        }
+    } else {
+        Register d = ToRegister(ins->output());
+        masm.ma_mov(Imm32(0), d, NoSetCond, Assembler::AboveOrEqual);
+        masm.ma_dataTransferN(IsLoad, size, isSigned, HeapReg, ptrReg, d, Offset, Assembler::Below);
     }
     return gen->noteHeapAccess(AsmJSHeapAccess(bo.getOffset()));
 }
@@ -1840,26 +1862,57 @@ CodeGeneratorARM::visitAsmJSStoreHeap(LAsmJSStoreHeap *ins)
       case ArrayBufferView::TYPE_UINT16:  isSigned = false; size = 16; break;
       case ArrayBufferView::TYPE_INT32:
       case ArrayBufferView::TYPE_UINT32:  isSigned = true;  size = 32; break;
-      case ArrayBufferView::TYPE_FLOAT64: isFloat = true;   size = 64; break;
-      case ArrayBufferView::TYPE_FLOAT32:
-        isFloat = true;
-        size = 32;
-        break;
+      case ArrayBufferView::TYPE_FLOAT64: isFloat  = true;  size = 64; break;
+      case ArrayBufferView::TYPE_FLOAT32: isFloat = true;   size = 32; break;
       default: MOZ_ASSUME_UNREACHABLE("unexpected array type");
     }
-    Register index = ToRegister(ins->ptr());
+    const LAllocation *ptr = ins->ptr();
+    if (ptr->isConstant()) {
+        JS_ASSERT(mir->skipBoundsCheck());
+        int32_t ptrImm = ptr->toConstant()->toInt32();
+        JS_ASSERT(ptrImm >= 0);
+        if (isFloat) {
+            VFPRegister vd(ToFloatRegister(ins->value()));
+            if (size == 32) {
+                masm.as_vcvt(VFPRegister(ScratchFloatReg).singleOverlay(), vd, false, Assembler::Always);
+                masm.ma_vstr(VFPRegister(ScratchFloatReg).singleOverlay(), Operand(HeapReg, ptrImm), Assembler::Always);
+            } else {
+                masm.ma_vstr(vd, Operand(HeapReg, ptrImm), Assembler::Always);
+            }
+        } else {
+            masm.ma_dataTransferN(IsStore, size, isSigned, HeapReg, Imm32(ptrImm),
+                                  ToRegister(ins->value()), Offset, Assembler::Always);
+        }
+        return true;
+    }
 
-    BufferOffset bo = masm.ma_BoundsCheck(index);
+    Register ptrReg = ToRegister(ptr);
+
+    if (mir->skipBoundsCheck()) {
+        Register ptrReg = ToRegister(ptr);
+        if (isFloat) {
+            VFPRegister vd(ToFloatRegister(ins->value()));
+            if (size == 32)
+                masm.storeFloat(vd, HeapReg, ptrReg, Assembler::Always);
+            else
+                masm.ma_vstr(vd, HeapReg, ptrReg, 0, Assembler::Always);
+        } else {
+            masm.ma_dataTransferN(IsStore, size, isSigned, HeapReg, ptrReg,
+                                  ToRegister(ins->value()), Offset, Assembler::Always);
+        }
+        return true;
+    }
+
+    BufferOffset bo = masm.ma_BoundsCheck(ptrReg);
     if (isFloat) {
         VFPRegister vd(ToFloatRegister(ins->value()));
-        if (size == 32) {
-            masm.storeFloat(vd, HeapReg, index, Assembler::Zero);
-        } else {
-            masm.ma_vstr(vd, HeapReg, index, 0, Assembler::Zero);
-        }
-    }  else {
-        masm.ma_dataTransferN(IsStore, size, isSigned, HeapReg, index,
-                              ToRegister(ins->value()), Offset, Assembler::Zero);
+        if (size == 32)
+            masm.storeFloat(vd, HeapReg, ptrReg, Assembler::Below);
+        else
+            masm.ma_vstr(vd, HeapReg, ptrReg, 0, Assembler::Below);
+    } else {
+        masm.ma_dataTransferN(IsStore, size, isSigned, HeapReg, ptrReg,
+                              ToRegister(ins->value()), Offset, Assembler::Below);
     }
     return gen->noteHeapAccess(AsmJSHeapAccess(bo.getOffset()));
 }
@@ -1924,9 +1977,9 @@ CodeGeneratorARM::visitSoftUDivOrMod(LSoftUDivOrMod *ins)
     JS_ASSERT(lhs == r0);
     JS_ASSERT(rhs == r1);
     JS_ASSERT(ins->mirRaw()->isDiv() || ins->mirRaw()->isAsmJSUDiv() ||
-              ins->mirRaw()->isAsmJSUMod());
+              ins->mirRaw()->isMod() || ins->mirRaw()->isAsmJSUMod());
     JS_ASSERT_IF(ins->mirRaw()->isDiv() || ins->mirRaw()->isAsmJSUDiv(), output == r0);
-    JS_ASSERT_IF(ins->mirRaw()->isAsmJSUMod(), output == r1);
+    JS_ASSERT_IF(ins->mirRaw()->isMod() || ins->mirRaw()->isAsmJSUMod(), output == r1);
 
     Label afterDiv;
 

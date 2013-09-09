@@ -778,6 +778,12 @@ public class GeckoLayerClient implements LayerView.Listener, PanZoomTarget
 
     /** Implementation of PanZoomTarget */
     @Override
+    public RectF getMaxMargins() {
+        return mMarginsAnimator.getMaxMargins();
+    }
+
+    /** Implementation of PanZoomTarget */
+    @Override
     public void setAnimationTarget(ImmutableViewportMetrics metrics) {
         if (mGeckoIsReady) {
             // We know what the final viewport of the animation is going to be, so
@@ -912,6 +918,19 @@ public class GeckoLayerClient implements LayerView.Listener, PanZoomTarget
     public boolean post(Runnable action) {
         return mView.post(action);
     }
+
+    /** Implementation of PanZoomTarget */
+    @Override
+    public void postRenderTask(RenderTask task) {
+        mView.postRenderTask(task);
+    }
+
+    /** Implementation of PanZoomTarget */
+    @Override
+    public void removeRenderTask(RenderTask task) {
+        mView.removeRenderTask(task);
+    }
+
 
     /** Implementation of PanZoomTarget */
     @Override

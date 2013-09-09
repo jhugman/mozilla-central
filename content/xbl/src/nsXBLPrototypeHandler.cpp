@@ -356,7 +356,7 @@ nsXBLPrototypeHandler::EnsureEventHandler(nsIScriptGlobalObject* aGlobal,
   if (pWindow) {
     JS::Rooted<JSObject*> cachedHandler(cx, pWindow->GetCachedXBLPrototypeHandler(this));
     if (cachedHandler) {
-      xpc_UnmarkGrayObject(cachedHandler);
+      JS::ExposeObjectToActiveJS(cachedHandler);
       aHandler.set(cachedHandler);
       NS_ENSURE_TRUE(aHandler, NS_ERROR_FAILURE);
       return NS_OK;
@@ -902,7 +902,7 @@ nsXBLPrototypeHandler::ReportKeyConflict(const PRUnichar* aKey, const PRUnichar*
 
   const PRUnichar* params[] = { aKey, aModifiers };
   nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
-                                  "XBL Prototype Handler", doc,
+                                  NS_LITERAL_CSTRING("XBL Prototype Handler"), doc,
                                   nsContentUtils::eXBL_PROPERTIES,
                                   aMessageName,
                                   params, ArrayLength(params),

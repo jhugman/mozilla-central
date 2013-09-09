@@ -9,6 +9,7 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/GuardObjects.h"
+#include "mozilla/Maybe.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/TemplateLib.h"
 
@@ -91,8 +92,6 @@
  * called a BaseShape that holds some of a Shape's data.  Many shapes can share
  * a single BaseShape.
  */
-
-class JSObject;
 
 namespace js {
 
@@ -230,12 +229,17 @@ class Shape;
 class UnownedBaseShape;
 struct StackBaseShape;
 
+namespace gc {
+void MergeCompartments(JSCompartment *source, JSCompartment *target);
+}
+
 class BaseShape : public js::gc::Cell
 {
   public:
     friend class Shape;
     friend struct StackBaseShape;
     friend struct StackShape;
+    friend void gc::MergeCompartments(JSCompartment *source, JSCompartment *target);
 
     enum Flag {
         /* Owned by the referring shape. */
@@ -967,6 +971,7 @@ struct InitialShapeEntry
 
     static inline HashNumber hash(const Lookup &lookup);
     static inline bool match(const InitialShapeEntry &key, const Lookup &lookup);
+    static void rekey(InitialShapeEntry &k, const InitialShapeEntry& newKey) { k = newKey; }
 };
 
 typedef HashSet<InitialShapeEntry, InitialShapeEntry, SystemAllocPolicy> InitialShapeSet;

@@ -10,7 +10,7 @@
 #include "jit/shared/Lowering-shared.h"
 
 namespace js {
-namespace ion {
+namespace jit {
 
 class LIRGeneratorARM : public LIRGeneratorShared
 {
@@ -78,15 +78,15 @@ class LIRGeneratorARM : public LIRGeneratorShared
     bool visitStoreTypedArrayElement(MStoreTypedArrayElement *ins);
     bool visitStoreTypedArrayElementHole(MStoreTypedArrayElementHole *ins);
     bool visitAsmJSUnsignedToDouble(MAsmJSUnsignedToDouble *ins);
+    bool visitAsmJSLoadHeap(MAsmJSLoadHeap *ins);
     bool visitAsmJSStoreHeap(MAsmJSStoreHeap *ins);
     bool visitAsmJSLoadFuncPtr(MAsmJSLoadFuncPtr *ins);
-    bool visitInterruptCheck(MInterruptCheck *ins);
     bool visitStoreTypedArrayElementStatic(MStoreTypedArrayElementStatic *ins);
 };
 
 typedef LIRGeneratorARM LIRGeneratorSpecific;
 
-} // namespace ion
+} // namespace jit
 } // namespace js
 
 #endif /* jit_arm_Lowering_arm_h */

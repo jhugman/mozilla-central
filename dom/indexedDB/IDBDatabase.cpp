@@ -14,8 +14,6 @@
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/quota/Client.h"
 #include "mozilla/dom/quota/QuotaManager.h"
-#include "nsContentUtils.h"
-#include "nsDOMClassInfo.h"
 #include "nsDOMLists.h"
 #include "nsJSUtils.h"
 #include "nsProxyRelease.h"
@@ -704,7 +702,7 @@ IDBDatabase::MozCreateFileHandle(const nsAString& aName,
     return nullptr;
   }
 
-  nsRefPtr<IDBRequest> request = IDBRequest::Create(nullptr, this, nullptr);
+  nsRefPtr<IDBRequest> request = IDBRequest::Create(this, nullptr);
 
   nsRefPtr<CreateFileHelper> helper =
     new CreateFileHelper(this, request, aName,

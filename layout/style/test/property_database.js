@@ -4253,6 +4253,24 @@ if (SpecialPowers.getBoolPref("layout.css.vertical-text.enabled")) {
 			initial_values: [ "horizontal-tb" ],
 			other_values: [ "vertical-lr", "vertical-rl" ],
 			invalid_values: [ "10px", "30%", "justify", "auto", "1em" ]
+		},
+		"text-orientation": {
+			domProp: "textOrientation",
+			inherited: true,
+			type: CSS_TYPE_LONGHAND,
+			initial_values: [ "auto" ],
+			other_values: [ "upright", "sideways" ],
+			invalid_values: [ "none", "3em" ]
+		},
+		"text-combine-horizontal": {
+			domProp: "textCombineHorizontal",
+			inherited: true,
+			type: CSS_TYPE_LONGHAND,
+			initial_values: [ "none" ],
+			other_values: [ "all", "digits", "digits 2", "digits 3", "digits 4", "digits     3" ],
+			invalid_values: [ "auto", "all 2", "none all", "digits -3", "digits 0",
+			                  "digits 12", "none 3", "digits 3.1415", "digits3", "digits 1",
+			                  "digits 3 all", "digits foo", "digits all", "digits 3.0" ]
 		}
 	};
 	for (var prop in verticalTextProperties) {
@@ -4636,6 +4654,81 @@ if (SpecialPowers.getBoolPref("layout.css.filters.enabled")) {
 	};
 }
 
+if (SpecialPowers.getBoolPref("layout.css.image-orientation.enabled")) {
+	gCSSProperties["image-orientation"] = {
+		domProp: "imageOrientation",
+		inherited: true,
+		type: CSS_TYPE_LONGHAND,
+		initial_values: [
+			"0deg",
+			"0grad",
+			"0rad",
+			"0turn",
+
+			// Rounded initial values.
+			"-90deg",
+			"15deg",
+			"360deg",
+		],
+		other_values: [
+			"0deg flip",
+			"90deg",
+			"90deg flip",
+			"180deg",
+			"180deg flip",
+			"270deg",
+			"270deg flip",
+			"flip",
+			"from-image",
+
+			// Grad units.
+			"0grad flip",
+			"100grad",
+			"100grad flip",
+			"200grad",
+			"200grad flip",
+			"300grad",
+			"300grad flip",
+
+			// Radian units.
+			"0rad flip",
+			"1.57079633rad",
+			"1.57079633rad flip",
+			"3.14159265rad",
+			"3.14159265rad flip",
+			"4.71238898rad",
+			"4.71238898rad flip",
+
+			// Turn units.
+			"0turn flip",
+			"0.25turn",
+			"0.25turn flip",
+			"0.5turn",
+			"0.5turn flip",
+			"0.75turn",
+			"0.75turn flip",
+
+			// Rounded values.
+			"-45deg flip",
+			"65deg flip",
+			"400deg flip",
+		],
+		invalid_values: [
+			"none",
+			"0deg none",
+			"flip 0deg",
+			"flip 0deg",
+			"0",
+			"0 flip",
+			"flip 0",
+			"0deg from-image",
+			"from-image 0deg",
+			"flip from-image",
+			"from-image flip",
+		]
+	};
+}
+
 if (SpecialPowers.getBoolPref("layout.css.osx-font-smoothing.enabled")) {
 	gCSSProperties["-moz-osx-font-smoothing"] = {
 		domProp: "MozOSXFontSmoothing",
@@ -4645,6 +4738,10 @@ if (SpecialPowers.getBoolPref("layout.css.osx-font-smoothing.enabled")) {
 		other_values: [ "grayscale" ],
 		invalid_values: [ "none", "subpixel-antialiased", "antialiased" ]
 	};
+}
+
+if (SpecialPowers.getBoolPref("layout.css.sticky.enabled")) {
+	gCSSProperties["position"].other_values.push("sticky");
 }
 
 if (SpecialPowers.getBoolPref("layout.css.mix-blend-mode.enabled")) {

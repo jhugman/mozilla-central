@@ -352,6 +352,7 @@ InplaceEditor.prototype = {
 
     this.input.value = newValue.value;
     this.input.setSelectionRange(newValue.start, newValue.end);
+    this.warning.hidden = this.validate(this.input.value);
 
     return true;
   },
@@ -794,7 +795,6 @@ InplaceEditor.prototype = {
       let direction = FOCUS_FORWARD;
       if (aEvent.keyCode === Ci.nsIDOMKeyEvent.DOM_VK_TAB &&
           aEvent.shiftKey) {
-        this.cancelled = true;
         direction = FOCUS_BACKWARD;
       }
       if (this.stopOnReturn && aEvent.keyCode === Ci.nsIDOMKeyEvent.DOM_VK_RETURN) {
@@ -858,7 +858,6 @@ InplaceEditor.prototype = {
     // Validate the entered value.
     this.warning.hidden = this.validate(this.input.value);
     this._applied = false;
-    this._onBlur(null, true);
   },
 
   /**

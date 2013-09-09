@@ -7,11 +7,12 @@
 #include "WorkerScope.h"
 
 #include "jsapi.h"
-#include "jsdbgapi.h"
+#include "js/OldDebugAPI.h"
 #include "mozilla/Util.h"
 #include "mozilla/dom/DOMJSClass.h"
 #include "mozilla/dom/EventTargetBinding.h"
 #include "mozilla/dom/BindingUtils.h"
+#include "mozilla/dom/DOMExceptionBinding.h"
 #include "mozilla/dom/FileReaderSyncBinding.h"
 #include "mozilla/dom/ImageData.h"
 #include "mozilla/dom/ImageDataBinding.h"
@@ -23,6 +24,7 @@
 #include "mozilla/dom/WorkerLocationBinding.h"
 #include "mozilla/dom/WorkerNavigatorBinding.h"
 #include "mozilla/OSFileConstants.h"
+#include "nsIGlobalObject.h"
 #include "nsTraceRefcnt.h"
 #include "xpcpublic.h"
 
@@ -34,7 +36,6 @@
 #include "Events.h"
 #include "EventListenerManager.h"
 #include "EventTarget.h"
-#include "Exceptions.h"
 #include "File.h"
 #include "FileReaderSync.h"
 #include "Location.h"
@@ -59,7 +60,8 @@ USING_WORKERS_NAMESPACE
 
 namespace {
 
-class WorkerGlobalScope : public workers::EventTarget
+class WorkerGlobalScope : public workers::EventTarget,
+                          public nsIGlobalObject
 {
   static JSClass sClass;
   static const JSPropertySpec sProperties[];
@@ -125,6 +127,15 @@ protected:
   ~WorkerGlobalScope()
   {
     MOZ_COUNT_DTOR(mozilla::dom::workers::WorkerGlobalScope);
+  }
+
+  NS_DECL_ISUPPORTS_INHERITED
+
+  // nsIGlobalObject
+  virtual JSObject* GetGlobalJSObject() MOZ_OVERRIDE
+  {
+    mWorker->AssertIsOnWorkerThread();
+    return GetJSObject();
   }
 
   virtual void
@@ -400,7 +411,12 @@ private:
       return false;
     }
 
-    return scope->mWorker->CloseInternal(aCx);
+    if (!scope->mWorker->CloseInternal(aCx)) {
+      return false;
+    }
+
+    JS_RVAL(aCx, aVp).setUndefined();
+    return true;
   }
 
   static bool
@@ -420,6 +436,7 @@ private:
       return false;
     }
 
+    JS_RVAL(aCx, aVp).setUndefined();
     return true;
   }
 
@@ -462,7 +479,12 @@ private:
       return false;
     }
 
-    return scope->mWorker->ClearTimeout(aCx, id);
+    if (!scope->mWorker->ClearTimeout(aCx, id)) {
+      return false;
+    }
+
+    JS_RVAL(aCx, aVp).setUndefined();
+    return true;
   }
 
   static bool
@@ -504,7 +526,12 @@ private:
       return false;
     }
 
-    return scope->mWorker->ClearTimeout(aCx, id);
+    if (!scope->mWorker->ClearTimeout(aCx, id)) {
+      return false;
+    }
+
+    JS_RVAL(aCx, aVp).setUndefined();
+    return true;
   }
 
   static bool
@@ -537,6 +564,7 @@ private:
       fflush(stdout);
     }
 
+    JS_RVAL(aCx, aVp).setUndefined();
     return true;
   }
 
@@ -592,6 +620,14 @@ private:
     return true;
   }
 };
+
+NS_IMPL_ADDREF_INHERITED(WorkerGlobalScope, workers::EventTarget)
+NS_IMPL_RELEASE_INHERITED(WorkerGlobalScope, workers::EventTarget)
+
+NS_INTERFACE_MAP_BEGIN(WorkerGlobalScope)
+  NS_INTERFACE_MAP_ENTRY(nsIGlobalObject)
+  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, DOMBindingBase)
+NS_INTERFACE_MAP_END
 
 JSClass WorkerGlobalScope::sClass = {
   "WorkerGlobalScope",
@@ -853,7 +889,12 @@ private:
       return false;
     }
 
-    return scope->mWorker->PostMessageToParent(aCx, message, transferable);
+    if (!scope->mWorker->PostMessageToParent(aCx, message, transferable)) {
+      return false;
+    }
+
+    JS_RVAL(aCx, aVp).setUndefined();
+    return true;
   }
 };
 
@@ -863,7 +904,7 @@ DOMJSClass DedicatedWorkerGlobalScope::sClass = {
     // have an Xray wrapper to a worker global scope.
     "DedicatedWorkerGlobalScope",
     JSCLASS_DOM_GLOBAL | JSCLASS_IS_DOMJSCLASS | JSCLASS_IMPLEMENTS_BARRIERS |
-    JSCLASS_GLOBAL_FLAGS_WITH_SLOTS(3) | JSCLASS_NEW_RESOLVE,
+    JSCLASS_GLOBAL_FLAGS_WITH_SLOTS(DOM_GLOBAL_SLOTS) | JSCLASS_NEW_RESOLVE,
     JS_PropertyStub, JS_DeletePropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
     JS_EnumerateStub, reinterpret_cast<JSResolveOp>(Resolve), JS_ConvertStub,
     Finalize, NULL, NULL, NULL, NULL, Trace
@@ -1012,16 +1053,16 @@ CreateDedicatedWorkerGlobalScope(JSContext* aCx)
 
   // Init other classes we care about.
   if (!events::InitClasses(aCx, global, false) ||
-      !file::InitClasses(aCx, global) ||
-      !exceptions::InitClasses(aCx, global)) {
+      !file::InitClasses(aCx, global)) {
     return NULL;
   }
 
   // Init other paris-bindings.
-  if (!FileReaderSyncBinding_workers::GetConstructorObject(aCx, global) ||
+  if (!DOMExceptionBinding::GetConstructorObject(aCx, global) ||
+      !FileReaderSyncBinding_workers::GetConstructorObject(aCx, global) ||
       !ImageDataBinding::GetConstructorObject(aCx, global) ||
-      !TextDecoderBinding_workers::GetConstructorObject(aCx, global) ||
-      !TextEncoderBinding_workers::GetConstructorObject(aCx, global) ||
+      !TextDecoderBinding::GetConstructorObject(aCx, global) ||
+      !TextEncoderBinding::GetConstructorObject(aCx, global) ||
       !XMLHttpRequestBinding_workers::GetConstructorObject(aCx, global) ||
       !XMLHttpRequestUploadBinding_workers::GetConstructorObject(aCx, global) ||
       !URLBinding_workers::GetConstructorObject(aCx, global) ||

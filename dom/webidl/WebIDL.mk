@@ -33,6 +33,10 @@ webidl_files = \
   BeforeUnloadEvent.webidl \
   BiquadFilterNode.webidl \
   Blob.webidl \
+  BrowserElementDictionaries.webidl \
+  CallEvent.webidl \
+  CallsList.webidl \
+  CameraControl.webidl \
   CameraManager.webidl \
   CanvasRenderingContext2D.webidl \
   CaretPosition.webidl \
@@ -65,6 +69,7 @@ webidl_files = \
   DocumentType.webidl \
   DOMCursor.webidl \
   DOMError.webidl \
+  DOMException.webidl \
   DOMImplementation.webidl \
   DOMMMIError.webidl \
   DOMParser.webidl \
@@ -193,7 +198,9 @@ webidl_files = \
   MediaStreamAudioSourceNode.webidl \
   MediaStreamEvent.webidl \
   MediaStreamTrack.webidl \
+  MessageChannel.webidl \
   MessageEvent.webidl \
+  MessagePort.webidl \
   MimeType.webidl \
   MimeTypeArray.webidl \
   MobileMessageManager.webidl \
@@ -216,6 +223,7 @@ webidl_files = \
   OfflineAudioCompletionEvent.webidl \
   OfflineAudioContext.webidl \
   OfflineResourceList.webidl \
+  OscillatorNode.webidl \
   PaintRequest.webidl \
   PaintRequestList.webidl \
   PannerNode.webidl \
@@ -354,11 +362,13 @@ webidl_files = \
   SVGViewElement.webidl \
   SVGZoomAndPan.webidl \
   SVGZoomEvent.webidl \
+  Telephony.webidl \
+  TelephonyCall.webidl \
+  TelephonyCallGroup.webidl \
   Text.webidl \
   TextDecoder.webidl \
   TextEncoder.webidl \
   TextTrack.webidl \
-  TextTrackCue.webidl \
   TextTrackCueList.webidl \
   TextTrackList.webidl \
   TimeEvent.webidl \
@@ -374,6 +384,7 @@ webidl_files = \
   URL.webidl \
   URLUtils.webidl \
   URLUtilsReadOnly.webidl \
+  VTTCue.webidl \
   ValidityState.webidl \
   VideoPlaybackQuality.webidl \
   VideoStreamTrack.webidl \
@@ -381,6 +392,7 @@ webidl_files = \
   WebComponents.webidl \
   WebSocket.webidl \
   WheelEvent.webidl \
+  WifiOptions.webidl \
   Window.webidl \
   WorkerLocation.webidl \
   WorkerNavigator.webidl \
@@ -439,10 +451,8 @@ endif
 
 ifdef MOZ_B2G_RIL
 webidl_files += \
-  CallsList.webidl \
   MozStkCommandEvent.webidl \
-  Telephony.webidl \
-  TelephonyCall.webidl \
+  MozVoicemail.webidl \
   $(NULL)
 endif
 
@@ -487,11 +497,13 @@ endif
 
 ifdef MOZ_B2G_RIL
 webidl_files += \
-  CallEvent.webidl \
   CFStateChangeEvent.webidl \
   DataErrorEvent.webidl \
   IccCardLockErrorEvent.webidl \
+  MozCellBroadcast.webidl \
   MozCellBroadcastEvent.webidl \
+  MozEmergencyCbModeEvent.webidl \
+  MozOtaStatusEvent.webidl \
   MozVoicemailEvent.webidl \
   MozWifiConnectionInfoEvent.webidl \
   MozWifiStatusChangeEvent.webidl \
@@ -514,6 +526,10 @@ webidl_files += \
   $(NULL)
 endif
 
+ifdef MOZ_B2G_FM
+webidl_files += FMRadio.webidl
+endif
+
 ifdef ENABLE_TESTS
 test_webidl_files := \
   TestCodeGen.webidl \
@@ -527,3 +543,8 @@ else
 test_webidl_files := $(NULL)
 endif
 
+ifdef MOZ_B2G
+webidl_files += \
+  InputMethod.webidl \
+  $(NULL)
+endif

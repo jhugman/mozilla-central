@@ -9,14 +9,15 @@
 
 #include "mozilla/MemoryReporting.h"
 
-#include "jsautooplen.h"
-#include "jsdbgapi.h"
 #include "jsfun.h"
 #include "jsscript.h"
 
 #include "jit/IonFrameIterator.h"
+#ifdef CHECK_OSIPOINT_REGISTERS
+#include "jit/Registers.h" // for RegisterDump
+#endif
+#include "js/OldDebugAPI.h"
 
-struct JSContext;
 struct JSCompartment;
 struct JSGenerator;
 
@@ -79,7 +80,7 @@ CheckLocalUnaliased(MaybeCheckAliasing checkAliasing, JSScript *script,
                     StaticBlockObject *maybeBlock, unsigned i);
 #endif
 
-namespace ion {
+namespace jit {
     class BaselineFrame;
 }
 
@@ -99,7 +100,7 @@ class AbstractFramePtr
         JS_ASSERT((uintptr_t(fp) & 1) == 0);
     }
 
-    AbstractFramePtr(ion::BaselineFrame *fp)
+    AbstractFramePtr(jit::BaselineFrame *fp)
       : ptr_(uintptr_t(fp))
     {
         JS_ASSERT((uintptr_t(fp) & 1) == 0);
@@ -122,9 +123,9 @@ class AbstractFramePtr
     bool isBaselineFrame() const {
         return ptr_ && !isStackFrame();
     }
-    ion::BaselineFrame *asBaselineFrame() const {
+    jit::BaselineFrame *asBaselineFrame() const {
         JS_ASSERT(isBaselineFrame());
-        ion::BaselineFrame *res = (ion::BaselineFrame *)ptr_;
+        jit::BaselineFrame *res = (jit::BaselineFrame *)ptr_;
         JS_ASSERT(res);
         return res;
     }
@@ -1018,12 +1019,7 @@ class FrameRegs
         fp_ = &fp;
     }
 
-    void setToEndOfScript() {
-        JSScript *script = fp()->script();
-        sp = fp()->base();
-        pc = script->code + script->length - JSOP_STOP_LENGTH;
-        JS_ASSERT(*pc == JSOP_STOP);
-    }
+    void setToEndOfScript();
 
     MutableHandleValue stackHandleAt(int i) {
         return MutableHandleValue::fromMarkedLocation(&sp[i]);
@@ -1046,6 +1042,7 @@ class InterpreterStack
 
     // Number of interpreter frames on the stack, for over-recursion checks.
     static const size_t MAX_FRAMES = 50 * 1000;
+    static const size_t MAX_FRAMES_TRUSTED = MAX_FRAMES + 1000;
     size_t frameCount_;
 
     inline uint8_t *allocateFrame(JSContext *cx, size_t size);
@@ -1153,7 +1150,7 @@ struct DefaultHasher<AbstractFramePtr> {
 
 class InterpreterActivation;
 
-namespace ion {
+namespace jit {
     class JitActivation;
 };
 
@@ -1198,9 +1195,9 @@ class Activation
         JS_ASSERT(isInterpreter());
         return (InterpreterActivation *)this;
     }
-    ion::JitActivation *asJit() const {
+    jit::JitActivation *asJit() const {
         JS_ASSERT(isJit());
-        return (ion::JitActivation *)this;
+        return (jit::JitActivation *)this;
     }
 
     void saveFrameChain() {
@@ -1219,6 +1216,11 @@ class Activation
     void operator=(const Activation &other) MOZ_DELETE;
 };
 
+// The value to assign to InterpreterActivation's *switchMask_ to enable
+// interrupts. This value is greater than the greatest opcode, and is chosen
+// such that the bitwise or of this value with any opcode is this value.
+static const jsbytecode EnableInterruptsPseudoOpcode = -1;
+
 class InterpreterFrameIterator;
 
 class InterpreterActivation : public Activation
@@ -1226,15 +1228,16 @@ class InterpreterActivation : public Activation
     friend class js::InterpreterFrameIterator;
 
     StackFrame *const entry_; // Entry frame for this activation.
-    StackFrame *current_;     // The most recent frame.
     FrameRegs &regs_;
+    jsbytecode *const switchMask_; // For debugger interrupts, see js::Interpret.
 
 #ifdef DEBUG
     size_t oldFrameCount_;
 #endif
 
   public:
-    inline InterpreterActivation(JSContext *cx, StackFrame *entry, FrameRegs &regs);
+    inline InterpreterActivation(JSContext *cx, StackFrame *entry, FrameRegs &regs,
+                                 jsbytecode *const switchMask);
     inline ~InterpreterActivation();
 
     inline bool pushInlineFrame(const CallArgs &args, HandleScript script,
@@ -1242,11 +1245,19 @@ class InterpreterActivation : public Activation
     inline void popInlineFrame(StackFrame *frame);
 
     StackFrame *current() const {
-        JS_ASSERT(current_);
-        return current_;
+        return regs_.fp();
     }
     FrameRegs &regs() const {
         return regs_;
+    }
+
+    // If this js::Interpret frame is running |script|, enable interrupts.
+    void enableInterruptsIfRunning(JSScript *script) {
+        if (regs_.fp()->script() == script)
+            enableInterruptsUnconditionally();
+    }
+    void enableInterruptsUnconditionally() {
+        *switchMask_ = EnableInterruptsPseudoOpcode;
     }
 };
 
@@ -1278,7 +1289,7 @@ class ActivationIterator
     }
 };
 
-namespace ion {
+namespace jit {
 
 // A JitActivation is used for frames running in Baseline or Ion.
 class JitActivation : public Activation
@@ -1287,6 +1298,14 @@ class JitActivation : public Activation
     JSContext *prevIonJSContext_;
     bool firstFrameIsConstructing_;
     bool active_;
+
+#ifdef CHECK_OSIPOINT_REGISTERS
+  protected:
+    // Used to verify that live registers don't change between a VM call and
+    // the OsiPoint that follows it. Protected to silence Clang warning.
+    uint32_t checkRegs_;
+    RegisterDump regs_;
+#endif
 
   public:
     JitActivation(JSContext *cx, bool firstFrameIsConstructing, bool active = true);
@@ -1306,6 +1325,18 @@ class JitActivation : public Activation
     bool firstFrameIsConstructing() const {
         return firstFrameIsConstructing_;
     }
+
+#ifdef CHECK_OSIPOINT_REGISTERS
+    void setCheckRegs(bool check) {
+        checkRegs_ = check;
+    }
+    static size_t offsetOfCheckRegs() {
+        return offsetof(JitActivation, checkRegs_);
+    }
+    static size_t offsetOfRegs() {
+        return offsetof(JitActivation, regs_);
+    }
+#endif
 };
 
 // A filtering of the ActivationIterator to only stop at JitActivations.
@@ -1333,7 +1364,7 @@ class JitActivationIterator : public ActivationIterator
     void jitStackRange(uintptr_t *&min, uintptr_t *&end);
 };
 
-} // namespace ion
+} // namespace jit
 
 // Iterates over the frames of a single InterpreterActivation.
 class InterpreterFrameIterator
@@ -1421,7 +1452,7 @@ class ScriptFrameIter
         ActivationIterator activations_;
 
 #ifdef JS_ION
-        ion::IonFrameIterator ionFrames_;
+        jit::IonFrameIterator ionFrames_;
 #endif
 
         Data(JSContext *cx, PerThreadData *perThread, SavedOption savedOption,
@@ -1433,7 +1464,7 @@ class ScriptFrameIter
   private:
     Data data_;
 #ifdef JS_ION
-    ion::InlineFrameIterator ionInlineFrames_;
+    jit::InlineFrameIterator ionInlineFrames_;
 #endif
 
     void popActivation();

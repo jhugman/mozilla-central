@@ -6,25 +6,34 @@
 #ifndef MOZILLA_GFX_TEXTURECLIENT_H
 #define MOZILLA_GFX_TEXTURECLIENT_H
 
-#include "mozilla/layers/LayersSurfaces.h"
-#include "gfxASurface.h"
-#include "mozilla/layers/CompositorTypes.h" // for TextureInfo
-#include "mozilla/RefPtr.h"
-#include "ImageContainer.h" // for PlanarYCbCrImage::Data
+#include <stddef.h>                     // for size_t
+#include <stdint.h>                     // for uint32_t, uint8_t, uint64_t
+#include "GLContextTypes.h"             // for GLContext (ptr only), etc
+#include "GLTextureImage.h"             // for TextureImage
+#include "ImageContainer.h"             // for PlanarYCbCrImage, etc
+#include "ImageTypes.h"                 // for StereoMode
+#include "gfxASurface.h"                // for gfxASurface, etc
+#include "gfxImageSurface.h"            // for gfxImageSurface
+#include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc
+#include "mozilla/Attributes.h"         // for MOZ_OVERRIDE
+#include "mozilla/RefPtr.h"             // for RefPtr, RefCounted
+#include "mozilla/gfx/2D.h"             // for DrawTarget
+#include "mozilla/gfx/Point.h"          // for IntSize
+#include "mozilla/gfx/Types.h"          // for SurfaceFormat
+#include "mozilla/ipc/Shmem.h"          // for Shmem
+#include "mozilla/layers/CompositorTypes.h"  // for TextureFlags, etc
+#include "mozilla/layers/LayersSurfaces.h"  // for SurfaceDescriptor
+#include "mozilla/mozalloc.h"           // for operator delete
+#include "nsAutoPtr.h"                  // for nsRefPtr
+#include "nsCOMPtr.h"                   // for already_AddRefed
+#include "nsISupportsImpl.h"            // for TextureImage::AddRef, etc
 
 class gfxReusableSurfaceWrapper;
 
 namespace mozilla {
-
-namespace gl {
-class GLContext;
-}
-
 namespace layers {
 
 class ContentClient;
-class PlanarYCbCrImage;
-class Image;
 class CompositableForwarder;
 class ISurfaceAllocator;
 class CompositableClient;
@@ -32,7 +41,7 @@ class CompositableClient;
 /**
  * TextureClient is the abstraction that allows us to share data between the
  * content and the compositor side.
- * TextureClient can also provide with some more more "producer" facing APIs
+ * TextureClient can also provide with some more "producer" facing APIs
  * such as TextureClientSurface and TextureClientYCbCr, that can be queried
  * using AsTextureCLientSurface(), etc.
  */
@@ -72,19 +81,19 @@ public:
  * - Use it to serialize image data that is not IPC-friendly (most likely
  * involving a copy into shared memory)
  * - preallocate it and paint directly into it, which avoids copy but requires
- * the painting code to be aware of TextureClient (or at least the underlying 
- * shared memory)
+ * the painting code to be aware of TextureClient (or at least the underlying
+ * shared memory).
  *
  * There is always one and only one TextureClient per TextureHost, and the
  * TextureClient/Host pair only owns one buffer of image data through its
- * lifetime. This means that to the lifetime of the underlying shared data
+ * lifetime. This means that the lifetime of the underlying shared data
  * matches the lifetime of the TextureClient/Host pair. It also means
  * TextureClient/Host do not implement double buffering, which is the
  * responsibility of the compositable (which would use two Texture pairs).
  * In order to send several different buffers to the compositor side, use
  * several TextureClients.
  */
-class TextureClient : public RefCounted<TextureClient>
+class TextureClient : public AtomicRefCounted<TextureClient>
 {
 public:
   TextureClient(TextureFlags aFlags = TEXTURE_FLAGS_DEFAULT);
@@ -97,30 +106,36 @@ public:
 
   virtual bool Lock(OpenMode aMode)
   {
-    return true;
+    return IsValid();
   }
 
   virtual void Unlock() {}
 
+  /**
+   * Returns true if this texture has a lock/unlock mechanism.
+   * Textures that do not implement locking should be immutable or should
+   * use immediate uploads (see TextureFlags in CompositorTypes.h)
+   */
+  virtual bool ImplementsLocking() const
+  {
+    return false;
+  }
+
   void SetID(uint64_t aID)
   {
-    MOZ_ASSERT(mID == 0 || aID == 0);
+    MOZ_ASSERT(mID == 0 && aID != 0);
     mID = aID;
+    mShared = true;
+  }
+  void ClearID()
+  {
+    MOZ_ASSERT(mID != 0);
+    mID = 0;
   }
 
   uint64_t GetID() const
   {
     return mID;
-  }
-
-  void SetNextSibling(TextureClient* aNext)
-  {
-    mNextSibling = aNext;
-  }
-
-  TextureClient* GetNextSibling()
-  {
-    return mNextSibling;
   }
 
   virtual bool IsAllocated() const = 0;
@@ -132,7 +147,7 @@ public:
   TextureFlags GetFlags() const { return mFlags; }
 
   /**
-   * After being shared ith the compositor side, an immutable texture is never
+   * After being shared with the compositor side, an immutable texture is never
    * modified, it can only be read. It is safe to not Lock/Unlock immutable
    * textures.
    */
@@ -140,9 +155,18 @@ public:
 
   void MarkImmutable() { AddFlags(TEXTURE_IMMUTABLE); }
 
-  bool IsSharedWithCompositor() const { return GetID() != 0; }
+  bool IsSharedWithCompositor() const { return mShared; }
 
   bool ShouldDeallocateInDestructor() const;
+
+  /**
+   * If this method returns false users of TextureClient are not allowed
+   * to access the shared data.
+   */
+  bool IsValid() const { return mValid; }
+
+  void MarkInvalid() { mValid = false; }
+
 protected:
   void AddFlags(TextureFlags  aFlags)
   {
@@ -158,8 +182,9 @@ protected:
   }
 
   uint64_t mID;
-  RefPtr<TextureClient> mNextSibling;
   TextureFlags mFlags;
+  bool mShared;
+  bool mValid;
 };
 
 /**
@@ -181,11 +206,7 @@ public:
 
   virtual bool ToSurfaceDescriptor(SurfaceDescriptor& aDescriptor) = 0;
 
-  virtual bool Allocate(uint32_t aSize) = 0;
-
   virtual uint8_t* GetBuffer() const = 0;
-
-  virtual size_t GetBufferSize() const = 0;
 
   virtual gfx::IntSize GetSize() const { return mSize; }
 
@@ -210,6 +231,14 @@ public:
                                 StereoMode aStereoMode) MOZ_OVERRIDE;
 
   gfx::SurfaceFormat GetFormat() const { return mFormat; }
+
+  // XXX - Bug 908196 - Make Allocate(uint32_t) and GetBufferSize() protected.
+  // these two methods should only be called by methods of BufferTextureClient
+  // that are overridden in GrallocTextureClient (which does not implement the
+  // two methods below)
+  virtual bool Allocate(uint32_t aSize) = 0;
+
+  virtual size_t GetBufferSize() const = 0;
 
 protected:
   CompositableClient* mCompositable;
@@ -276,7 +305,6 @@ protected:
   uint8_t* mBuffer;
   size_t mBufSize;
 };
-
 
 struct TextureClientAutoUnlock
 {
@@ -485,7 +513,8 @@ class DeprecatedTextureClientTile : public DeprecatedTextureClient
 public:
   DeprecatedTextureClientTile(const DeprecatedTextureClientTile& aOther);
   DeprecatedTextureClientTile(CompositableForwarder* aForwarder,
-                    const TextureInfo& aTextureInfo);
+                              const TextureInfo& aTextureInfo,
+                              gfxReusableSurfaceWrapper* aSurface = nullptr);
   ~DeprecatedTextureClientTile();
 
   virtual bool EnsureAllocated(gfx::IntSize aSize,

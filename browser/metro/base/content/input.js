@@ -94,6 +94,7 @@ var TouchModule = {
     // capture phase events
     window.addEventListener("CancelTouchSequence", this, true);
     window.addEventListener("dblclick", this, true);
+    window.addEventListener("keydown", this, true);
 
     // bubble phase
     window.addEventListener("contextmenu", this, false);
@@ -156,8 +157,38 @@ var TouchModule = {
               }, 50);
             }
             break;
+          case "keydown":
+            this._handleKeyDown(aEvent);
+            break;
         }
       }
+    }
+  },
+
+  _handleKeyDown: function _handleKeyDown(aEvent) {
+    const TABKEY = 9;
+    if (aEvent.keyCode == TABKEY && !InputSourceHelper.isPrecise) {
+      if (Util.isEditable(aEvent.target) &&
+          aEvent.target.selectionStart != aEvent.target.selectionEnd) {
+        SelectionHelperUI.closeEditSession(false);
+      }
+      setTimeout(function() {
+        let element = Browser.selectedBrowser.contentDocument.activeElement;
+        // We only want to attach monocles if we have an input, text area,
+        // there is selection, and the target element changed.
+        // Sometimes the target element won't change even though selection is
+        // cleared because of focus outside the browser.
+        if (Util.isEditable(element) &&
+            !SelectionHelperUI.isActive &&
+            element.selectionStart != element.selectionEnd &&
+            // not e10s friendly
+            aEvent.target != element) {
+              let rect = element.getBoundingClientRect();
+              SelectionHelperUI.attachEditSession(Browser.selectedBrowser,
+                                                  rect.left + rect.width / 2,
+                                                  rect.top + rect.height / 2);
+        }
+      }, 50);
     }
   },
 
@@ -448,9 +479,8 @@ var ScrollUtils = {
     let scrollbox = null;
     let qinterface = null;
 
-    // if element is content (but not the startui page), get the browser scroll interface
-    if (!BrowserUI.isStartTabVisible &&
-        elem.ownerDocument == Browser.selectedBrowser.contentDocument) {
+    // if element is content or the startui page, get the browser scroll interface
+    if (elem.ownerDocument == Browser.selectedBrowser.contentDocument) {
       elem = Browser.selectedBrowser;
     }
     for (; elem; elem = elem.parentNode) {
@@ -989,11 +1019,6 @@ var GestureModule = {
 
   init: function init() {
     window.addEventListener("MozSwipeGesture", this, true);
-    /*
-    window.addEventListener("MozMagnifyGestureStart", this, true);
-    window.addEventListener("MozMagnifyGestureUpdate", this, true);
-    window.addEventListener("MozMagnifyGesture", this, true);
-    */
     window.addEventListener("CancelTouchSequence", this, true);
   },
 
@@ -1027,21 +1052,6 @@ var GestureModule = {
             aEvent.target.dispatchEvent(event);
           }
           break;
-
-        // Magnify currently doesn't work for Win8 (bug 593168)
-        /*
-        case "MozMagnifyGestureStart":
-          this._pinchStart(aEvent);
-          break;
-
-        case "MozMagnifyGestureUpdate":
-          this._pinchUpdate(aEvent);
-          break;
-
-        case "MozMagnifyGesture":
-          this._pinchEnd(aEvent);
-          break;
-        */
 
         case "CancelTouchSequence":
           this.cancelPending();

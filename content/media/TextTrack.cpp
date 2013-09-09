@@ -6,14 +6,16 @@
 
 #include "mozilla/dom/TextTrack.h"
 #include "mozilla/dom/TextTrackBinding.h"
+#include "mozilla/dom/TextTrackCueList.h"
 
 namespace mozilla {
 namespace dom {
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_3(TextTrack,
-                                        mParent,
-                                        mCueList,
-                                        mActiveCueList)
+NS_IMPL_CYCLE_COLLECTION_INHERITED_3(TextTrack,
+                                     nsDOMEventTargetHelper,
+                                     mParent,
+                                     mCueList,
+                                     mActiveCueList)
 
 NS_IMPL_ADDREF_INHERITED(TextTrack, nsDOMEventTargetHelper)
 NS_IMPL_RELEASE_INHERITED(TextTrack, nsDOMEventTargetHelper)

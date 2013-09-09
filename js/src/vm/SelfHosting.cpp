@@ -35,9 +35,6 @@ namespace js {
  */
 struct SelfHostedClass
 {
-    /* The head of the linked list. */
-    static SelfHostedClass *head;
-
     /* Next class in the list. */
     SelfHostedClass *next;
 
@@ -50,14 +47,12 @@ struct SelfHostedClass
      */
     static JSObject *newPrototype(JSContext *cx, uint32_t numSlots);
 
-    static bool is(Class *clasp);
+    static bool is(JSContext *cx, Class *clasp);
 
     SelfHostedClass(const char *name, uint32_t numSlots);
 };
 
 } /* namespace js */
-
-SelfHostedClass *SelfHostedClass::head = NULL;
 
 JSObject *
 SelfHostedClass::newPrototype(JSContext *cx, uint32_t numSlots)
@@ -66,8 +61,7 @@ SelfHostedClass::newPrototype(JSContext *cx, uint32_t numSlots)
     SelfHostedClass *shClass = cx->new_<SelfHostedClass>("Self-hosted Class", numSlots);
     if (!shClass)
         return NULL;
-    shClass->next = head;
-    head = shClass;
+    cx->runtime()->addSelfHostedClass(shClass);
 
     Rooted<GlobalObject *> global(cx, cx->global());
     RootedObject proto(cx, global->createBlankPrototype(cx, &shClass->class_));
@@ -78,9 +72,9 @@ SelfHostedClass::newPrototype(JSContext *cx, uint32_t numSlots)
 }
 
 bool
-SelfHostedClass::is(Class *clasp)
+SelfHostedClass::is(JSContext *cx, Class *clasp)
 {
-    SelfHostedClass *shClass = head;
+    SelfHostedClass *shClass = cx->runtime()->selfHostedClasses();
     while (shClass) {
         if (clasp == &shClass->class_)
             return true;
@@ -688,12 +682,17 @@ bool
 JSRuntime::initSelfHosting(JSContext *cx)
 {
     JS_ASSERT(!selfHostingGlobal_);
-    RootedObject savedGlobal(cx, js::DefaultObjectForContextOrNull(cx));
+
+    bool receivesDefaultObject = !cx->hasOption(JSOPTION_NO_DEFAULT_COMPARTMENT_OBJECT);
+    RootedObject savedGlobal(cx, receivesDefaultObject
+                                 ? js::DefaultObjectForContextOrNull(cx)
+                                 : NULL);
     if (!(selfHostingGlobal_ = JS_NewGlobalObject(cx, &self_hosting_global_class,
                                                   NULL, JS::DontFireOnNewGlobalHook)))
         return false;
     JSAutoCompartment ac(cx, selfHostingGlobal_);
-    js::SetDefaultObjectForContext(cx, selfHostingGlobal_);
+    if (receivesDefaultObject)
+        js::SetDefaultObjectForContext(cx, selfHostingGlobal_);
     Rooted<GlobalObject*> shg(cx, &selfHostingGlobal_->as<GlobalObject>());
     /*
      * During initialization of standard classes for the self-hosting global,
@@ -762,7 +761,8 @@ JSRuntime::initSelfHosting(JSContext *cx)
         ok = Evaluate(cx, shg, options, src, srcLen, &rv);
     }
     JS_SetErrorReporter(cx, oldReporter);
-    js::SetDefaultObjectForContext(cx, savedGlobal);
+    if (receivesDefaultObject)
+        js::SetDefaultObjectForContext(cx, savedGlobal);
     return ok;
 }
 
@@ -771,13 +771,13 @@ JSRuntime::finishSelfHosting()
 {
     selfHostingGlobal_ = NULL;
 
-    SelfHostedClass *head = SelfHostedClass::head;
-    while (head) {
-        SelfHostedClass *tmp = head;
-        head = head->next;
+    SelfHostedClass *shClass = selfHostedClasses_;
+    while (shClass) {
+        SelfHostedClass *tmp = shClass;
+        shClass = shClass->next;
         js_delete(tmp);
     }
-    SelfHostedClass::head = NULL;
+    selfHostedClasses_ = NULL;
 }
 
 void
@@ -785,6 +785,13 @@ JSRuntime::markSelfHostingGlobal(JSTracer *trc)
 {
     if (selfHostingGlobal_)
         MarkObjectRoot(trc, &selfHostingGlobal_, "self-hosting global");
+}
+
+void
+JSRuntime::addSelfHostedClass(SelfHostedClass *shClass)
+{
+    shClass->next = selfHostedClasses_;
+    selfHostedClasses_ = shClass;
 }
 
 typedef AutoObjectObjectHashMap CloneMemory;
@@ -818,7 +825,7 @@ CloneProperties(JSContext *cx, HandleObject obj, HandleObject clone, CloneMemory
         }
     }
 
-    if (SelfHostedClass::is(obj->getClass())) {
+    if (SelfHostedClass::is(cx, obj->getClass())) {
         for (uint32_t i = 0; i < JSCLASS_RESERVED_SLOTS(obj->getClass()); i++) {
             val = obj->getReservedSlot(i);
             if (!CloneValue(cx, &val, clonedObjects))
@@ -859,7 +866,7 @@ CloneObject(JSContext *cx, HandleObject srcObj, CloneMemory &clonedObjects)
     if (srcObj->is<JSFunction>()) {
         if (srcObj->as<JSFunction>().isWrappable()) {
             clone = srcObj;
-            if (!cx->compartment()->wrap(cx, clone.address()))
+            if (!cx->compartment()->wrap(cx, &clone))
                 return NULL;
         } else {
             RootedFunction fun(cx, &srcObj->as<JSFunction>());
@@ -935,6 +942,9 @@ JSRuntime::cloneSelfHostedFunctionScript(JSContext *cx, Handle<PropertyName*> na
         return false;
 
     RootedFunction sourceFun(cx, &funVal.toObject().as<JSFunction>());
+    // JSFunction::generatorKind can't handle lazy self-hosted functions, so we make sure there
+    // aren't any.
+    JS_ASSERT(!sourceFun->isGenerator());
     RootedScript sourceScript(cx, sourceFun->nonLazyScript());
     JS_ASSERT(!sourceScript->enclosingStaticScope());
     JSScript *cscript = CloneScript(cx, NullPtr(), targetFun, sourceScript);

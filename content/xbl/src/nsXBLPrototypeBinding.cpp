@@ -104,7 +104,6 @@ nsXBLPrototypeBinding::nsXBLPrototypeBinding()
   mBaseNameSpaceID(kNameSpaceID_None)
 {
   MOZ_COUNT_CTOR(nsXBLPrototypeBinding);
-  mInterfaceTable.Init();
 }
 
 nsresult
@@ -199,13 +198,6 @@ nsXBLPrototypeBinding::SetBasePrototype(nsXBLPrototypeBinding* aBinding)
   }
 
   mBaseBinding = aBinding;
-}
-
-already_AddRefed<nsIContent>
-nsXBLPrototypeBinding::GetBindingElement()
-{
-  nsCOMPtr<nsIContent> result = mBinding;
-  return result.forget();
 }
 
 void
@@ -1621,7 +1613,7 @@ nsXBLPrototypeBinding::ResolveBaseBinding()
       if (!CheckTagNameWhiteList(nameSpaceID, tagName)) {
         const PRUnichar* params[] = { display.get() };
         nsContentUtils::ReportToConsole(nsIScriptError::errorFlag,
-                                        "XBL", nullptr,
+                                        NS_LITERAL_CSTRING("XBL"), nullptr,
                                         nsContentUtils::eXBL_PROPERTIES,
                                        "InvalidExtendsBinding",
                                         params, ArrayLength(params),

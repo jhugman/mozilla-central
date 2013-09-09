@@ -16,14 +16,12 @@
 #include "nsGeolocation.h"
 #include "nsIHttpProtocolHandler.h"
 #include "nsICachingChannel.h"
-#include "nsIDocShell.h"
 #include "nsIWebContentHandlerRegistrar.h"
 #include "nsICookiePermission.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsCharSeparatedTokenizer.h"
 #include "nsContentUtils.h"
 #include "nsUnicharUtils.h"
-#include "nsVariant.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Telemetry.h"
 #include "BatteryManager.h"
@@ -31,9 +29,7 @@
 #include "nsIDOMWakeLock.h"
 #include "nsIPowerManagerService.h"
 #include "mozilla/dom/MobileMessageManager.h"
-#include "nsISmsService.h"
 #include "mozilla/Hal.h"
-#include "nsIWebNavigation.h"
 #include "nsISiteSpecificUserAgent.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/StaticPtr.h"
@@ -51,21 +47,26 @@
 #include "nsNetUtil.h"
 #include "nsIHttpChannel.h"
 #include "TimeManager.h"
+#include "DeviceStorage.h"
+#include "nsIDOMNavigatorSystemMessages.h"
 
 #ifdef MOZ_MEDIA_NAVIGATOR
 #include "MediaManager.h"
 #endif
 #ifdef MOZ_B2G_RIL
-#include "Telephony.h"
+#include "mozilla/dom/telephony/Telephony.h"
 #endif
 #ifdef MOZ_B2G_BT
 #include "BluetoothManager.h"
 #endif
-#include "nsIDOMCameraManager.h"
 #include "DOMCameraManager.h"
 
 #ifdef MOZ_AUDIO_CHANNEL_MANAGER
 #include "AudioChannelManager.h"
+#endif
+
+#ifdef MOZ_B2G_FM
+#include "mozilla/dom/FMRadio.h"
 #endif
 
 #include "nsIDOMGlobalPropertyInitializer.h"
@@ -197,6 +198,13 @@ Navigator::Invalidate()
     mBatteryManager->Shutdown();
     mBatteryManager = nullptr;
   }
+
+#ifdef MOZ_B2G_FM
+  if (mFMRadio) {
+    mFMRadio->Shutdown();
+    mFMRadio = nullptr;
+  }
+#endif
 
   if (mPowerManager) {
     mPowerManager->Shutdown();
@@ -455,8 +463,7 @@ Navigator::GetMimeTypes(ErrorResult& aRv)
       aRv.Throw(NS_ERROR_UNEXPECTED);
       return nullptr;
     }
-    nsWeakPtr win = do_GetWeakReference(mWindow);
-    mMimeTypes = new nsMimeTypeArray(win);
+    mMimeTypes = new nsMimeTypeArray(mWindow);
   }
 
   return mMimeTypes;
@@ -470,8 +477,7 @@ Navigator::GetPlugins(ErrorResult& aRv)
       aRv.Throw(NS_ERROR_UNEXPECTED);
       return nullptr;
     }
-    nsWeakPtr win = do_GetWeakReference(mWindow);
-    mPlugins = new nsPluginArray(win);
+    mPlugins = new nsPluginArray(mWindow);
     mPlugins->Init();
   }
 
@@ -585,8 +591,7 @@ Navigator::JavaEnabled(ErrorResult& aRv)
       aRv.Throw(NS_ERROR_UNEXPECTED);
       return false;
     }
-    nsWeakPtr win = do_GetWeakReference(mWindow);
-    mMimeTypes = new nsMimeTypeArray(win);
+    mMimeTypes = new nsMimeTypeArray(mWindow);
   }
 
   RefreshMIMEArray();
@@ -1050,6 +1055,34 @@ Navigator::GetMozNotification(ErrorResult& aRv)
   return mNotification;
 }
 
+#ifdef MOZ_B2G_FM
+
+using mozilla::dom::FMRadio;
+
+FMRadio*
+Navigator::GetMozFMRadio(ErrorResult& aRv)
+{
+  if (!mFMRadio) {
+    if (!mWindow) {
+      aRv.Throw(NS_ERROR_UNEXPECTED);
+      return nullptr;
+    }
+
+    NS_ENSURE_TRUE(mWindow->GetDocShell(), nullptr);
+
+    mFMRadio = new FMRadio();
+    mFMRadio->Init(mWindow);
+  }
+
+  return mFMRadio;
+}
+
+#endif  // MOZ_B2G_FM
+
+//*****************************************************************************
+//    Navigator::nsINavigatorBattery
+//*****************************************************************************
+
 battery::BatteryManager*
 Navigator::GetBattery(ErrorResult& aRv)
 {
@@ -1121,7 +1154,7 @@ Navigator::GetMozMobileMessage()
 
 #ifdef MOZ_B2G_RIL
 
-nsIDOMMozCellBroadcast*
+CellBroadcast*
 Navigator::GetMozCellBroadcast(ErrorResult& aRv)
 {
   if (!mCellBroadcast) {
@@ -1129,11 +1162,7 @@ Navigator::GetMozCellBroadcast(ErrorResult& aRv)
       aRv.Throw(NS_ERROR_UNEXPECTED);
       return nullptr;
     }
-
-    aRv = NS_NewCellBroadcast(mWindow, getter_AddRefs(mCellBroadcast));
-    if (aRv.Failed()) {
-      return nullptr;
-    }
+    mCellBroadcast = CellBroadcast::Create(mWindow, aRv);
   }
 
   return mCellBroadcast;
@@ -1153,7 +1182,7 @@ Navigator::GetMozTelephony(ErrorResult& aRv)
   return mTelephony;
 }
 
-nsIDOMMozVoicemail*
+Voicemail*
 Navigator::GetMozVoicemail(ErrorResult& aRv)
 {
   if (!mVoicemail) {
@@ -1455,10 +1484,9 @@ Navigator::DoNewResolve(JSContext* aCx, JS::Handle<JSObject*> aObject,
     return true;
   }
 
-  nsScriptNameSpaceManager* nameSpaceManager =
-    nsJSRuntime::GetNameSpaceManager();
+  nsScriptNameSpaceManager* nameSpaceManager = GetNameSpaceManager();
   if (!nameSpaceManager) {
-    return Throw<true>(aCx, NS_ERROR_NOT_INITIALIZED);
+    return Throw(aCx, NS_ERROR_NOT_INITIALIZED);
   }
 
   nsDependentJSString name(aId);
@@ -1477,7 +1505,7 @@ Navigator::DoNewResolve(JSContext* aCx, JS::Handle<JSObject*> aObject,
                                   js::CheckedUnwrap(aObject,
                                                     /* stopAtOuter = */ false));
     if (!naviObj) {
-      return Throw<true>(aCx, NS_ERROR_DOM_SECURITY_ERR);
+      return Throw(aCx, NS_ERROR_DOM_SECURITY_ERR);
     }
 
     JS::Rooted<JSObject*> domObject(aCx);
@@ -1503,7 +1531,7 @@ Navigator::DoNewResolve(JSContext* aCx, JS::Handle<JSObject*> aObject,
 
       domObject = construct(aCx, naviObj);
       if (!domObject) {
-        return Throw<true>(aCx, NS_ERROR_FAILURE);
+        return Throw(aCx, NS_ERROR_FAILURE);
       }
     }
 
@@ -1522,7 +1550,7 @@ Navigator::DoNewResolve(JSContext* aCx, JS::Handle<JSObject*> aObject,
 
   nsCOMPtr<nsISupports> native(do_CreateInstance(name_struct->mCID, &rv));
   if (NS_FAILED(rv)) {
-    return Throw<true>(aCx, rv);
+    return Throw(aCx, rv);
   }
 
   JS::Rooted<JS::Value> prop_val(aCx, JS::UndefinedValue()); // Property value.
@@ -1531,12 +1559,12 @@ Navigator::DoNewResolve(JSContext* aCx, JS::Handle<JSObject*> aObject,
 
   if (gpi) {
     if (!mWindow) {
-      return Throw<true>(aCx, NS_ERROR_UNEXPECTED);
+      return Throw(aCx, NS_ERROR_UNEXPECTED);
     }
 
     rv = gpi->Init(mWindow, prop_val.address());
     if (NS_FAILED(rv)) {
-      return Throw<true>(aCx, rv);
+      return Throw(aCx, rv);
     }
   }
 
@@ -1546,12 +1574,12 @@ Navigator::DoNewResolve(JSContext* aCx, JS::Handle<JSObject*> aObject,
                                     getter_AddRefs(holder), true);
 
     if (NS_FAILED(rv)) {
-      return Throw<true>(aCx, rv);
+      return Throw(aCx, rv);
     }
   }
 
   if (!JS_WrapValue(aCx, prop_val.address())) {
-    return Throw<true>(aCx, NS_ERROR_UNEXPECTED);
+    return Throw(aCx, NS_ERROR_UNEXPECTED);
   }
 
   aValue.set(prop_val);
@@ -1570,8 +1598,7 @@ void
 Navigator::GetOwnPropertyNames(JSContext* aCx, nsTArray<nsString>& aNames,
                                ErrorResult& aRv)
 {
-  nsScriptNameSpaceManager *nameSpaceManager =
-    nsJSRuntime::GetNameSpaceManager();
+  nsScriptNameSpaceManager *nameSpaceManager = GetNameSpaceManager();
   if (!nameSpaceManager) {
     NS_ERROR("Can't get namespace manager.");
     aRv.Throw(NS_ERROR_UNEXPECTED);
@@ -1721,6 +1748,16 @@ Navigator::HasBluetoothSupport(JSContext* /* unused */, JSObject* aGlobal)
   return win && bluetooth::BluetoothManager::CheckPermission(win);
 }
 #endif // MOZ_B2G_BT
+
+#ifdef MOZ_B2G_FM
+/* static */
+bool
+Navigator::HasFMRadioSupport(JSContext* /* unused */, JSObject* aGlobal)
+{
+  nsCOMPtr<nsPIDOMWindow> win = GetWindowFromGlobal(aGlobal);
+  return win && CheckPermission(win, "fmradio");
+}
+#endif // MOZ_B2G_FM
 
 #ifdef MOZ_TIME_MANAGER
 /* static */

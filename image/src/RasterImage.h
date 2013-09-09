@@ -22,27 +22,24 @@
 #include "nsCOMPtr.h"
 #include "imgIContainer.h"
 #include "nsIProperties.h"
-#include "nsITimer.h"
-#include "nsIRequest.h"
 #include "nsTArray.h"
 #include "imgFrame.h"
 #include "nsThreadUtils.h"
 #include "DiscardTracker.h"
-#include "nsISupportsImpl.h"
+#include "Orientation.h"
+#include "nsIObserver.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/TimeStamp.h"
-#include "mozilla/Telemetry.h"
-#include "mozilla/LinkedList.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/WeakPtr.h"
 #include "mozilla/Mutex.h"
-#include "gfx2DGlue.h"
 #ifdef DEBUG
   #include "imgIContainerDebug.h"
 #endif
 
 class nsIInputStream;
 class nsIThreadPool;
+class nsIRequest;
 
 #define NS_RASTERIMAGE_CID \
 { /* 376ff2c1-9bf6-418a-b143-3340c00112f7 */         \
@@ -186,13 +183,11 @@ public:
   /* Callbacks for decoders */
   nsresult SetFrameAsNonPremult(uint32_t aFrameNum, bool aIsNonPremult);
 
-  /**
-   * Sets the size of the container. This should only be called by the
-   * decoder. This function may be called multiple times, but will throw an
-   * error if subsequent calls do not match the first.
+  /** Sets the size and inherent orientation of the container. This should only
+   * be called by the decoder. This function may be called multiple times, but
+   * will throw an error if subsequent calls do not match the first.
    */
-  nsresult SetSize(int32_t aWidth, int32_t aHeight);
-
+  nsresult SetSize(int32_t aWidth, int32_t aHeight, Orientation aOrientation);
 
   /**
    * Ensures that a given frame number exists with the given parameters, and
@@ -583,6 +578,7 @@ private:
 
 private: // data
   nsIntSize                  mSize;
+  Orientation                mOrientation;
 
   // Whether our frames were decoded using any special flags.
   // Some flags (e.g. unpremultiplied data) may not be compatible

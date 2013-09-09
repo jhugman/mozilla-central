@@ -9,9 +9,7 @@
 
 #include "EnableWebAudioCheck.h"
 #include "MediaBufferDecoder.h"
-#include "MediaStreamGraph.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/dom/AudioContextBinding.h"
 #include "mozilla/dom/TypedArray.h"
 #include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
@@ -19,7 +17,7 @@
 #include "nsDOMEventTargetHelper.h"
 #include "nsHashKeys.h"
 #include "nsTHashtable.h"
-#include "StreamBuffer.h"
+#include "js/TypeDecls.h"
 
 // X11 has a #define for CurrentTime. Unbelievable :-(.
 // See content/media/DOMMediaStream.h for more fun!
@@ -27,14 +25,14 @@
 #undef CurrentTime
 #endif
 
-struct JSContext;
-class JSObject;
 class nsPIDOMWindow;
 
 namespace mozilla {
 
+class DOMMediaStream;
 class ErrorResult;
-struct WebAudioDecodeJob;
+class MediaStream;
+class MediaStreamGraph;
 
 namespace dom {
 
@@ -50,12 +48,12 @@ class ConvolverNode;
 class DelayNode;
 class DynamicsCompressorNode;
 class GainNode;
-class GlobalObject;
 class HTMLMediaElement;
 class MediaElementAudioSourceNode;
+class GlobalObject;
 class MediaStreamAudioDestinationNode;
 class MediaStreamAudioSourceNode;
-class OfflineRenderSuccessCallback;
+class OscillatorNode;
 class PannerNode;
 class ScriptProcessorNode;
 class WaveShaperNode;
@@ -195,6 +193,9 @@ public:
   already_AddRefed<BiquadFilterNode>
   CreateBiquadFilter();
 
+  already_AddRefed<OscillatorNode>
+  CreateOscillator();
+
   already_AddRefed<PeriodicWave>
   CreatePeriodicWave(const Float32Array& aRealData, const Float32Array& aImagData,
                      ErrorResult& aRv);
@@ -213,6 +214,7 @@ public:
   MediaStream* DestinationStream() const;
   void UnregisterAudioBufferSourceNode(AudioBufferSourceNode* aNode);
   void UnregisterPannerNode(PannerNode* aNode);
+  void UnregisterOscillatorNode(OscillatorNode* aNode);
   void UnregisterScriptProcessorNode(ScriptProcessorNode* aNode);
   void UpdatePannerSource();
 
@@ -242,6 +244,7 @@ private:
   // These are all weak pointers.
   nsTHashtable<nsPtrHashKey<PannerNode> > mPannerNodes;
   nsTHashtable<nsPtrHashKey<AudioBufferSourceNode> > mAudioBufferSourceNodes;
+  nsTHashtable<nsPtrHashKey<OscillatorNode> > mOscillatorNodes;
   // Hashset containing all ScriptProcessorNodes in order to stop them.
   // These are all weak pointers.
   nsTHashtable<nsPtrHashKey<ScriptProcessorNode> > mScriptProcessorNodes;

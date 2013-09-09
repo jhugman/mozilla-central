@@ -48,7 +48,7 @@
 
 #include "nsTArray.h"
 
-#include "imgIEncoder.h"
+#include "ImageEncoder.h"
 
 #include "gfxContext.h"
 #include "gfxASurface.h"
@@ -73,6 +73,7 @@
 #include "jsapi.h"
 #include "jsfriendapi.h"
 
+#include "mozilla/Alignment.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/CheckedInt.h"
 #include "mozilla/dom/ContentParent.h"
@@ -139,20 +140,19 @@ const Float SIGMA_MAX = 100;
 /* Memory reporter stuff */
 static int64_t gCanvasAzureMemoryUsed = 0;
 
-static int64_t GetCanvasAzureMemoryUsed() {
-  return gCanvasAzureMemoryUsed;
-}
-
 // This is KIND_OTHER because it's not always clear where in memory the pixels
 // of a canvas are stored.  Furthermore, this memory will be tracked by the
 // underlying surface implementations.  See bug 655638 for details.
-NS_MEMORY_REPORTER_IMPLEMENT(CanvasAzureMemory,
-  "canvas-2d-pixel-bytes",
-  KIND_OTHER,
-  UNITS_BYTES,
-  GetCanvasAzureMemoryUsed,
-  "Memory used by 2D canvases. Each canvas requires (width * height * 4) "
-  "bytes.")
+class Canvas2dPixelsReporter MOZ_FINAL : public MemoryReporterBase
+{
+  public:
+    Canvas2dPixelsReporter()
+      : MemoryReporterBase("canvas-2d-pixels", KIND_OTHER, UNITS_BYTES,
+"Memory used by 2D canvases. Each canvas requires (width * height * 4) bytes.")
+    {}
+private:
+    int64_t Amount() MOZ_OVERRIDE { return gCanvasAzureMemoryUsed; }
+};
 
 class CanvasRadialGradient : public CanvasGradient
 {
@@ -546,7 +546,7 @@ CanvasRenderingContext2D::CanvasRenderingContext2D()
   sNumLivingContexts++;
   SetIsDOMBinding();
 
-#if USE_SKIA_GPU
+#ifdef USE_SKIA_GPU
   mForceSoftware = false;
 #endif
 }
@@ -563,10 +563,8 @@ CanvasRenderingContext2D::~CanvasRenderingContext2D()
     NS_IF_RELEASE(sErrorTarget);
   }
 
-#if USE_SKIA_GPU
-  std::vector<CanvasRenderingContext2D*>::iterator iter = std::find(DemotableContexts().begin(), DemotableContexts().end(), this);
-  if (iter != DemotableContexts().end())
-    DemotableContexts().erase(iter);
+#ifdef USE_SKIA_GPU
+  RemoveDemotableContext(this);
 #endif
 }
 
@@ -745,12 +743,13 @@ CanvasRenderingContext2D::RedrawUser(const gfxRect& r)
   Redraw(newr);
 }
 
-#if USE_SKIA_GPU
-
 void CanvasRenderingContext2D::Demote()
 {
-  if (!IsTargetValid() || mForceSoftware)
+#ifdef  USE_SKIA_GPU
+  if (!IsTargetValid() || mForceSoftware || !mTarget->GetGLContext())
     return;
+
+  RemoveDemotableContext(this);
 
   RefPtr<SourceSurface> snapshot = mTarget->Snapshot();
   RefPtr<DrawTarget> oldTarget = mTarget;
@@ -763,10 +762,20 @@ void CanvasRenderingContext2D::Demote()
   if (!IsTargetValid())
     return;
 
-  // Put back the content from the old DrawTarget
+  // Restore the content from the old DrawTarget
   mgfx::Rect r(0, 0, mWidth, mHeight);
   mTarget->DrawSurface(snapshot, r, r);
+
+  // Restore the clips and transform
+  for (uint32_t i = 0; i < CurrentState().clipsPushed.size(); i++) {
+    mTarget->PushClip(CurrentState().clipsPushed[i]);
+  }
+
+  mTarget->SetTransform(oldTarget->GetTransform());
+#endif
 }
+
+#ifdef USE_SKIA_GPU
 
 std::vector<CanvasRenderingContext2D*>&
 CanvasRenderingContext2D::DemotableContexts()
@@ -789,22 +798,31 @@ CanvasRenderingContext2D::DemoteOldestContextIfNecessary()
     return;
 
   CanvasRenderingContext2D* oldest = contexts.front();
-  contexts.erase(contexts.begin());
-
   oldest->Demote();
 }
 
 void
 CanvasRenderingContext2D::AddDemotableContext(CanvasRenderingContext2D* context)
 {
+  std::vector<CanvasRenderingContext2D*>::iterator iter = std::find(DemotableContexts().begin(), DemotableContexts().end(), context);
+  if (iter != DemotableContexts().end())
+    return;
+
   DemotableContexts().push_back(context);
 }
 
-#define MIN_SKIA_GL_DIMENSION 16
+void
+CanvasRenderingContext2D::RemoveDemotableContext(CanvasRenderingContext2D* context)
+{
+  std::vector<CanvasRenderingContext2D*>::iterator iter = std::find(DemotableContexts().begin(), DemotableContexts().end(), context);
+  if (iter != DemotableContexts().end())
+    DemotableContexts().erase(iter);
+}
 
 bool
 CheckSizeForSkiaGL(IntSize size) {
-  return size.width > MIN_SKIA_GL_DIMENSION && size.height > MIN_SKIA_GL_DIMENSION;
+  int minsize = Preferences::GetInt("gfx.canvas.min-size-for-skia-gl", 128);
+  return size.width >= minsize && size.height >= minsize;
 }
 
 #endif
@@ -855,7 +873,7 @@ CanvasRenderingContext2D::EnsureTarget()
         if (!mForceSoftware && CheckSizeForSkiaGL(size))
         {
           glContext = GLContextProvider::CreateOffscreen(gfxIntSize(size.width, size.height),
-                                                         caps, GLContext::ContextFlagsNone);
+                                                         caps, gl::ContextFlagsNone);
         }
 
         if (glContext) {
@@ -869,7 +887,7 @@ CanvasRenderingContext2D::EnsureTarget()
 #endif
        mTarget = layerManager->CreateDrawTarget(size, format);
      } else {
-       mTarget = gfxPlatform::GetPlatform()->CreateOffscreenDrawTarget(size, format);
+       mTarget = gfxPlatform::GetPlatform()->CreateOffscreenCanvasDrawTarget(size, format);
      }
   }
 
@@ -877,7 +895,7 @@ CanvasRenderingContext2D::EnsureTarget()
     static bool registered = false;
     if (!registered) {
       registered = true;
-      NS_RegisterMemoryReporter(new NS_MEMORY_REPORTER_NAME(CanvasAzureMemory));
+      NS_RegisterMemoryReporter(new Canvas2dPixelsReporter());
     }
 
     gCanvasAzureMemoryUsed += mWidth * mHeight * 4;
@@ -1028,71 +1046,71 @@ CanvasRenderingContext2D::Render(gfxContext *ctx, gfxPattern::GraphicsFilter aFi
   return rv;
 }
 
-NS_IMETHODIMP
-CanvasRenderingContext2D::GetInputStream(const char *aMimeType,
-                                         const PRUnichar *aEncoderOptions,
-                                         nsIInputStream **aStream)
+void
+CanvasRenderingContext2D::GetImageBuffer(uint8_t** aImageBuffer,
+                                         int32_t* aFormat)
 {
-  EnsureTarget();
-  if (!IsTargetValid()) {
-    return NS_ERROR_FAILURE;
-  }
+  *aImageBuffer = nullptr;
+  *aFormat = 0;
 
   nsRefPtr<gfxASurface> surface;
-
-  if (NS_FAILED(GetThebesSurface(getter_AddRefs(surface)))) {
-    return NS_ERROR_FAILURE;
+  nsresult rv = GetThebesSurface(getter_AddRefs(surface));
+  if (NS_FAILED(rv)) {
+    return;
   }
 
-  nsresult rv;
-  const char encoderPrefix[] = "@mozilla.org/image/encoder;2?type=";
   static const fallible_t fallible = fallible_t();
-  nsAutoArrayPtr<char> conid(new (fallible) char[strlen(encoderPrefix) + strlen(aMimeType) + 1]);
-
-  if (!conid) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
-
-  strcpy(conid, encoderPrefix);
-  strcat(conid, aMimeType);
-
-  nsCOMPtr<imgIEncoder> encoder = do_CreateInstance(conid);
-  if (!encoder) {
-    return NS_ERROR_FAILURE;
-  }
-
-  nsAutoArrayPtr<uint8_t> imageBuffer(new (fallible) uint8_t[mWidth * mHeight * 4]);
+  uint8_t* imageBuffer = new (fallible) uint8_t[mWidth * mHeight * 4];
   if (!imageBuffer) {
-    return NS_ERROR_OUT_OF_MEMORY;
+    return;
   }
 
   nsRefPtr<gfxImageSurface> imgsurf =
-    new gfxImageSurface(imageBuffer.get(),
+    new gfxImageSurface(imageBuffer,
                         gfxIntSize(mWidth, mHeight),
                         mWidth * 4,
                         gfxASurface::ImageFormatARGB32);
 
   if (!imgsurf || imgsurf->CairoStatus()) {
-    return NS_ERROR_FAILURE;
+    delete[] imageBuffer;
+    return;
   }
 
   nsRefPtr<gfxContext> ctx = new gfxContext(imgsurf);
-
   if (!ctx || ctx->HasError()) {
-    return NS_ERROR_FAILURE;
+    delete[] imageBuffer;
+    return;
   }
 
   ctx->SetOperator(gfxContext::OPERATOR_SOURCE);
   ctx->SetSource(surface, gfxPoint(0, 0));
   ctx->Paint();
 
-  rv = encoder->InitFromData(imageBuffer.get(),
-                              mWidth * mHeight * 4, mWidth, mHeight, mWidth * 4,
-                              imgIEncoder::INPUT_FORMAT_HOSTARGB,
-                              nsDependentString(aEncoderOptions));
-  NS_ENSURE_SUCCESS(rv, rv);
+  *aImageBuffer = imageBuffer;
+  *aFormat = imgIEncoder::INPUT_FORMAT_HOSTARGB;
+}
 
-  return CallQueryInterface(encoder, aStream);
+NS_IMETHODIMP
+CanvasRenderingContext2D::GetInputStream(const char *aMimeType,
+                                         const PRUnichar *aEncoderOptions,
+                                         nsIInputStream **aStream)
+{
+  uint8_t* imageBuffer = nullptr;
+  int32_t format = 0;
+  GetImageBuffer(&imageBuffer, &format);
+  if (!imageBuffer) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsCString enccid("@mozilla.org/image/encoder;2?type=");
+  enccid += aMimeType;
+  nsCOMPtr<imgIEncoder> encoder = do_CreateInstance(enccid.get());
+  if (!encoder) {
+    return NS_ERROR_FAILURE;
+  }
+
+  return ImageEncoder::GetInputStream(mWidth, mHeight, imageBuffer, format,
+                                      encoder, aEncoderOptions, aStream);
 }
 
 SurfaceFormat
@@ -3561,7 +3579,7 @@ CanvasRenderingContext2D::EnsureErrorTarget()
     return;
   }
 
-  RefPtr<DrawTarget> errorTarget = gfxPlatform::GetPlatform()->CreateOffscreenDrawTarget(IntSize(1, 1), FORMAT_B8G8R8A8);
+  RefPtr<DrawTarget> errorTarget = gfxPlatform::GetPlatform()->CreateOffscreenCanvasDrawTarget(IntSize(1, 1), FORMAT_B8G8R8A8);
   NS_ABORT_IF_FALSE(errorTarget, "Failed to allocate the error target!");
 
   sErrorTarget = errorTarget;
@@ -3731,6 +3749,9 @@ NS_IMETHODIMP
 CanvasRenderingContext2D::GetThebesSurface(gfxASurface **surface)
 {
   EnsureTarget();
+  if (!IsTargetValid()) {
+    return NS_ERROR_FAILURE;
+  }
 
   nsRefPtr<gfxASurface> thebesSurface =
       gfxPlatform::GetPlatform()->GetThebesSurfaceForDrawTarget(mTarget);

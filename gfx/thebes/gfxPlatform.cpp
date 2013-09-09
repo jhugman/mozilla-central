@@ -247,7 +247,8 @@ static const char *gPrefLangNames[] = {
 };
 
 gfxPlatform::gfxPlatform()
-  : mAzureCanvasBackendCollector(this, &gfxPlatform::GetAzureBackendInfo)
+  : mAzureCanvasBackendCollector(MOZ_THIS_IN_INITIALIZER_LIST(),
+                                 &gfxPlatform::GetAzureBackendInfo)
   , mDrawLayerBorders(false)
   , mDrawTileBorders(false)
   , mDrawBigImageBorders(false)
@@ -361,17 +362,18 @@ gfxPlatform::Init()
     mozilla::gl::GLContext::StaticInit();
 #endif
 
-    bool useOffMainThreadCompositing = GetPrefLayersOffMainThreadCompositionEnabled() ||
-        Preferences::GetBool("browser.tabs.remote", false);
-    useOffMainThreadCompositing &= GetPlatform()->SupportsOffMainThreadCompositing();
+    bool useOffMainThreadCompositing = OffMainThreadCompositionRequired() ||
+                                       GetPrefLayersOffMainThreadCompositionEnabled();
 
-    if (useOffMainThreadCompositing && (XRE_GetProcessType() ==
-                                        GeckoProcessType_Default)) {
+    if (!OffMainThreadCompositionRequired()) {
+      useOffMainThreadCompositing &= GetPlatform()->SupportsOffMainThreadCompositing();
+    }
+
+    if (useOffMainThreadCompositing && (XRE_GetProcessType() == GeckoProcessType_Default)) {
         CompositorParent::StartUp();
-        if (Preferences::GetBool("layers.async-video.enabled",false)) {
+        if (Preferences::GetBool("layers.async-video.enabled", false)) {
             ImageBridgeChild::StartUp();
         }
-
     }
 
     nsresult rv;
@@ -874,7 +876,7 @@ gfxPlatform::CreateDrawTargetForBackend(BackendType aBackend, const IntSize& aSi
 }
 
 RefPtr<DrawTarget>
-gfxPlatform::CreateOffscreenDrawTarget(const IntSize& aSize, SurfaceFormat aFormat)
+gfxPlatform::CreateOffscreenCanvasDrawTarget(const IntSize& aSize, SurfaceFormat aFormat)
 {
   NS_ASSERTION(mPreferredCanvasBackend, "No backend.");
   RefPtr<DrawTarget> target = CreateDrawTargetForBackend(mPreferredCanvasBackend, aSize, aFormat);
@@ -886,6 +888,12 @@ gfxPlatform::CreateOffscreenDrawTarget(const IntSize& aSize, SurfaceFormat aForm
   return CreateDrawTargetForBackend(mFallbackCanvasBackend, aSize, aFormat);
 }
 
+RefPtr<DrawTarget>
+gfxPlatform::CreateOffscreenContentDrawTarget(const IntSize& aSize, SurfaceFormat aFormat)
+{
+  NS_ASSERTION(mContentBackend, "No backend.");
+  return CreateDrawTargetForBackend(mContentBackend, aSize, aFormat);
+}
 
 RefPtr<DrawTarget>
 gfxPlatform::CreateDrawTargetForData(unsigned char* aData, const IntSize& aSize, int32_t aStride, SurfaceFormat aFormat)
@@ -1356,8 +1364,9 @@ gfxPlatform::InitBackendPrefs(uint32_t aCanvasBitmask, uint32_t aContentBitmask)
       mPreferredCanvasBackend = BACKEND_CAIRO;
     }
     mFallbackCanvasBackend = GetCanvasBackendPref(aCanvasBitmask & ~(1 << mPreferredCanvasBackend));
-    mContentBackend = GetContentBackendPref(aContentBitmask);
+
     mContentBackendBitmask = aContentBitmask;
+    mContentBackend = GetContentBackendPref(mContentBackendBitmask);
 }
 
 /* static */ BackendType
@@ -1367,16 +1376,17 @@ gfxPlatform::GetCanvasBackendPref(uint32_t aBackendBitmask)
 }
 
 /* static */ BackendType
-gfxPlatform::GetContentBackendPref(uint32_t aBackendBitmask)
+gfxPlatform::GetContentBackendPref(uint32_t &aBackendBitmask)
 {
     return GetBackendPref("gfx.content.azure.enabled", "gfx.content.azure.backends", aBackendBitmask);
 }
 
 /* static */ BackendType
-gfxPlatform::GetBackendPref(const char* aEnabledPrefName, const char* aBackendPrefName, uint32_t aBackendBitmask)
+gfxPlatform::GetBackendPref(const char* aEnabledPrefName, const char* aBackendPrefName, uint32_t &aBackendBitmask)
 {
     if (aEnabledPrefName &&
         !Preferences::GetBool(aEnabledPrefName, false)) {
+        aBackendBitmask = 0;
         return BACKEND_NONE;
     }
 
@@ -1386,13 +1396,20 @@ gfxPlatform::GetBackendPref(const char* aEnabledPrefName, const char* aBackendPr
         ParseString(prefString, ',', backendList);
     }
 
+    uint32_t allowedBackends = 0;
+    BackendType result = BACKEND_NONE;
     for (uint32_t i = 0; i < backendList.Length(); ++i) {
-        BackendType result = BackendTypeForName(backendList[i]);
-        if ((1 << result) & aBackendBitmask) {
-            return result;
+        BackendType type = BackendTypeForName(backendList[i]);
+        if ((1 << type) & aBackendBitmask) {
+            allowedBackends |= (1 << type);
+            if (result == BACKEND_NONE) {
+                result = type;
+            }
         }
     }
-    return BACKEND_NONE;
+
+    aBackendBitmask = allowedBackends;
+    return result;
 }
 
 bool
@@ -1885,6 +1902,7 @@ static bool sLayersSupportsD3D9 = true;
 static int  sPrefLayoutFrameRate = -1;
 static bool sBufferRotationEnabled = false;
 static bool sComponentAlphaEnabled = true;
+static bool sPrefBrowserTabsRemote = false;
 
 static bool sLayersAccelerationPrefsInitialized = false;
 
@@ -1903,6 +1921,7 @@ InitLayersAccelerationPrefs()
     sPrefLayoutFrameRate = Preferences::GetInt("layout.frame_rate", -1);
     sBufferRotationEnabled = Preferences::GetBool("layers.bufferrotation.enabled", true);
     sComponentAlphaEnabled = Preferences::GetBool("layers.componentalpha.enabled", true);
+    sPrefBrowserTabsRemote = Preferences::GetBool("browser.tabs.remote", false);
 
     nsCOMPtr<nsIGfxInfo> gfxInfo = do_GetService("@mozilla.org/gfx/info;1");
     if (gfxInfo) {
@@ -1939,6 +1958,12 @@ gfxPlatform::GetPrefLayersAccelerationForceEnabled()
 {
   InitLayersAccelerationPrefs();
   return sPrefLayersAccelerationForceEnabled;
+}
+
+bool gfxPlatform::OffMainThreadCompositionRequired()
+{
+  InitLayersAccelerationPrefs();
+  return sPrefBrowserTabsRemote;
 }
 
 bool

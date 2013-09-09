@@ -8,13 +8,12 @@
 
 #include "nsIDOMMediaStream.h"
 #include "nsCycleCollectionParticipant.h"
-#include "nsIPrincipal.h"
 #include "nsWrapperCache.h"
-#include "nsIDOMWindow.h"
 #include "StreamBuffer.h"
-#include "nsIRunnable.h"
+#include "nsIDOMWindow.h"
 
 class nsXPCClassInfo;
+class nsIPrincipal;
 
 // GetCurrentTime is defined in winbase.h as zero argument macro forwarding to
 // GetTickCount() and conflicts with NS_DECL_NSIDOMMEDIASTREAM, containing
@@ -38,6 +37,8 @@ class MediaStreamTrack;
 class AudioStreamTrack;
 class VideoStreamTrack;
 }
+
+class MediaStreamDirectListener;
 
 /**
  * DOM wrapper for MediaStreams.
@@ -73,6 +74,20 @@ public:
   void GetVideoTracks(nsTArray<nsRefPtr<VideoStreamTrack> >& aTracks);
 
   MediaStream* GetStream() const { return mStream; }
+
+  /**
+   * Overridden in DOMLocalMediaStreams to allow getUserMedia to pass
+   * data directly to RTCPeerConnection without going through graph queuing.
+   * Returns a bool to let us know if direct data will be delivered.
+   */
+  virtual bool AddDirectListener(MediaStreamDirectListener *aListener) { return false; }
+  virtual void RemoveDirectListener(MediaStreamDirectListener *aListener) {}
+
+  /**
+   * Overridden in DOMLocalMediaStreams to allow getUserMedia to disable
+   * media at the SourceMediaStream.
+   */
+  virtual void SetTrackEnabled(TrackID aTrackID, bool aEnabled);
 
   bool IsFinished();
   /**

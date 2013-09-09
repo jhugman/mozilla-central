@@ -10,7 +10,7 @@
 #include "jit/shared/Lowering-x86-shared.h"
 
 namespace js {
-namespace ion {
+namespace jit {
 
 class LIRGeneratorX86 : public LIRGeneratorX86Shared
 {
@@ -43,6 +43,7 @@ class LIRGeneratorX86 : public LIRGeneratorX86Shared
     bool visitStoreTypedArrayElement(MStoreTypedArrayElement *ins);
     bool visitStoreTypedArrayElementHole(MStoreTypedArrayElementHole *ins);
     bool visitAsmJSUnsignedToDouble(MAsmJSUnsignedToDouble *ins);
+    bool visitAsmJSLoadHeap(MAsmJSLoadHeap *ins);
     bool visitAsmJSStoreHeap(MAsmJSStoreHeap *ins);
     bool visitAsmJSLoadFuncPtr(MAsmJSLoadFuncPtr *ins);
     bool visitStoreTypedArrayElementStatic(MStoreTypedArrayElementStatic *ins);
@@ -60,6 +61,6 @@ class LIRGeneratorX86 : public LIRGeneratorX86Shared
 typedef LIRGeneratorX86 LIRGeneratorSpecific;
 
 } // namespace js
-} // namespace ion
+} // namespace jit
 
 #endif /* jit_x86_Lowering_x86_h */

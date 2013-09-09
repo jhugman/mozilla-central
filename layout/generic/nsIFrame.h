@@ -24,17 +24,15 @@
 #include "nsQueryFrame.h"
 #include "nsStyleContext.h"
 #include "nsStyleStruct.h"
-#include "nsStyleStructFwd.h"
 #include "nsHTMLReflowMetrics.h"
 #include "nsFrameList.h"
-#include "nsIContent.h"
-#include "nsAlgorithm.h"
 #include "mozilla/layout/FrameChildList.h"
-#include "mozilla/css/ImageLoader.h"
 #include "FramePropertyTable.h"
 #include "mozilla/TypedEnum.h"
 #include "nsDirection.h"
 #include <algorithm>
+#include "nsITheme.h"
+#include "gfx3DMatrix.h"
 
 #ifdef ACCESSIBILITY
 #include "mozilla/a11y/AccTypes.h"
@@ -80,6 +78,7 @@ class gfxSkipCharsIterator;
 class gfxContext;
 class nsLineList_iterator;
 class nsAbsoluteContainingBlock;
+class nsIContent;
 
 struct nsPeekOffsetStruct;
 struct nsPoint;
@@ -335,6 +334,21 @@ typedef uint64_t nsFrameState;
 #define NS_SUBTREE_DIRTY(_frame)  \
   (((_frame)->GetStateBits() &      \
     (NS_FRAME_IS_DIRTY | NS_FRAME_HAS_DIRTY_CHILDREN)) != 0)
+
+/**
+ * Constant used to indicate an unconstrained size.
+ *
+ * @see #Reflow()
+ */
+#define NS_UNCONSTRAINEDSIZE NS_MAXSIZE
+
+#define NS_INTRINSICSIZE    NS_UNCONSTRAINEDSIZE
+#define NS_AUTOHEIGHT       NS_UNCONSTRAINEDSIZE
+#define NS_AUTOMARGIN       NS_UNCONSTRAINEDSIZE
+#define NS_AUTOOFFSET       NS_UNCONSTRAINEDSIZE
+// NOTE: there are assumptions all over that these have the same value, namely NS_UNCONSTRAINEDSIZE
+//       if any are changed to be a value other than NS_UNCONSTRAINEDSIZE
+//       at least update AdjustComputedHeight/Width and test ad nauseum
 
 //----------------------------------------------------------------------
 
@@ -828,8 +842,8 @@ public:
    * position.
    */
   nsRect GetRect() const { return mRect; }
-  nsPoint GetPosition() const { return nsPoint(mRect.x, mRect.y); }
-  nsSize GetSize() const { return nsSize(mRect.width, mRect.height); }
+  nsPoint GetPosition() const { return mRect.TopLeft(); }
+  nsSize GetSize() const { return mRect.Size(); }
 
   /**
    * When we change the size of the frame's border-box rect, we may need to
@@ -865,10 +879,7 @@ public:
       : GetPosition();
   }
 
-  static void DestroyRegion(void* aPropertyValue)
-  {
-    delete static_cast<nsRegion*>(aPropertyValue);
-  }
+  static void DestroyRegion(void* aPropertyValue);
 
   static void DestroyMargin(void* aPropertyValue)
   {
@@ -890,10 +901,7 @@ public:
     delete static_cast<nsOverflowAreas*>(aPropertyValue);
   }
 
-  static void DestroySurface(void* aPropertyValue)
-  {
-    static_cast<gfxASurface*>(aPropertyValue)->Release();
-  }
+  static void DestroySurface(void* aPropertyValue);
 
 #ifdef _MSC_VER
 // XXX Workaround MSVC issue by making the static FramePropertyDescriptor
@@ -919,6 +927,7 @@ public:
   NS_DECLARE_FRAME_PROPERTY(IBSplitSpecialPrevSibling, nullptr)
 
   NS_DECLARE_FRAME_PROPERTY(NormalPositionProperty, DestroyPoint)
+  NS_DECLARE_FRAME_PROPERTY(ComputedStickyOffsetProperty, DestroyMargin)
 
   NS_DECLARE_FRAME_PROPERTY(OutlineInnerRectProperty, DestroyRect)
   NS_DECLARE_FRAME_PROPERTY(PreEffectsBBoxProperty, DestroyRect)
@@ -1365,19 +1374,7 @@ public:
    * Ensure that aImage gets notifed when the underlying image request loads
    * or animates.
    */
-  void AssociateImage(const nsStyleImage& aImage, nsPresContext* aPresContext)
-  {
-    if (aImage.GetType() != eStyleImageType_Image) {
-      return;
-    }
-
-    imgIRequest *req = aImage.GetImageData();
-    mozilla::css::ImageLoader* loader =
-      aPresContext->Document()->StyleImageLoader();
-
-    // If this fails there's not much we can do ...
-    loader->AssociateRequestToFrame(req, this);
-  }
+  void AssociateImage(const nsStyleImage& aImage, nsPresContext* aPresContext);
 
   /**
    * This structure holds information about a cursor. mContainer represents a
@@ -2429,10 +2426,7 @@ public:
   /**
    * @returns true if this frame is selected.
    */
-  bool IsSelected() const {
-    return (GetContent() && GetContent()->IsSelectionDescendant()) ?
-      IsFrameSelected() : false;
-  }
+  bool IsSelected() const;
 
   /**
    *  called to discover where this frame, or a parent frame has user-select style

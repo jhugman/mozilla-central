@@ -14,13 +14,14 @@
 #include "nsNetCID.h"
 #include "nsPrintfCString.h"
 #include "XPCJSMemoryReporter.h"
+#include "js/MemoryMetrics.h"
+#include "nsServiceManagerUtils.h"
 
 using namespace mozilla;
 
 nsWindowMemoryReporter::nsWindowMemoryReporter()
   : mCheckForGhostWindowsCallbackPending(false)
 {
-  mDetachedWindows.Init();
 }
 
 NS_IMPL_ISUPPORTS3(nsWindowMemoryReporter, nsIMemoryMultiReporter, nsIObserver,
@@ -332,14 +333,11 @@ nsWindowMemoryReporter::CollectReports(nsIMemoryMultiReporterCallback* aCb,
 
   // Get the IDs of all the "ghost" windows.
   nsTHashtable<nsUint64HashKey> ghostWindows;
-  ghostWindows.Init();
   CheckForGhostWindows(&ghostWindows);
 
   WindowPaths windowPaths;
-  windowPaths.Init();
 
   WindowPaths topWindowPaths;
-  topWindowPaths.Init();
 
   // Collect window memory usage.
   nsWindowSizes windowTotalSizes(NULL);
@@ -648,7 +646,6 @@ nsWindowMemoryReporter::CheckForGhostWindows(
   }
 
   nsTHashtable<nsCStringHashKey> nonDetachedWindowDomains;
-  nonDetachedWindowDomains.Init();
 
   // Populate nonDetachedWindowDomains.
   GetNonDetachedWindowDomainsEnumeratorData nonDetachedEnumData =
@@ -737,7 +734,6 @@ GhostURLsReporter::CollectReports(
 {
   // Get the IDs of all the ghost windows in existance.
   nsTHashtable<nsUint64HashKey> ghostWindows;
-  ghostWindows.Init();
   mWindowReporter->CheckForGhostWindows(&ghostWindows);
 
   ReportGhostWindowsEnumeratorData reportGhostWindowsEnumData =
@@ -748,47 +744,6 @@ GhostURLsReporter::CollectReports(
                                 &reportGhostWindowsEnumData);
 
   return reportGhostWindowsEnumData.rv;
-}
-
-NS_IMPL_ISUPPORTS1(nsWindowMemoryReporter::NumGhostsReporter,
-                   nsIMemoryReporter)
-
-nsWindowMemoryReporter::
-NumGhostsReporter::NumGhostsReporter(
-  nsWindowMemoryReporter *aWindowReporter)
-  : mWindowReporter(aWindowReporter)
-{}
-
-NS_IMETHODIMP
-nsWindowMemoryReporter::
-NumGhostsReporter::GetProcess(nsACString& aProcess)
-{
-  aProcess.AssignLiteral("");
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsWindowMemoryReporter::
-NumGhostsReporter::GetPath(nsACString& aPath)
-{
-  aPath.AssignLiteral("ghost-windows");
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsWindowMemoryReporter::
-NumGhostsReporter::GetKind(int32_t* aKind)
-{
-  *aKind = KIND_OTHER;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsWindowMemoryReporter::
-NumGhostsReporter::GetUnits(int32_t* aUnits)
-{
-  *aUnits = nsIMemoryReporter::UNITS_COUNT;
-  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -810,14 +765,10 @@ in the browser or add-ons.",
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsWindowMemoryReporter::
-NumGhostsReporter::GetAmount(int64_t* aAmount)
+int64_t
+nsWindowMemoryReporter::NumGhostsReporter::Amount()
 {
   nsTHashtable<nsUint64HashKey> ghostWindows;
-  ghostWindows.Init();
   mWindowReporter->CheckForGhostWindows(&ghostWindows);
-
-  *aAmount = ghostWindows.Count();
-  return NS_OK;
+  return ghostWindows.Count();
 }

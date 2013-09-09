@@ -7,6 +7,9 @@ package org.mozilla.gecko;
 
 import org.mozilla.gecko.db.BrowserDB;
 import org.mozilla.gecko.gfx.LayerView;
+import org.mozilla.gecko.mozglue.GeckoLoader;
+import org.mozilla.gecko.util.Clipboard;
+import org.mozilla.gecko.util.HardwareUtils;
 import org.mozilla.gecko.util.GeckoEventListener;
 import org.mozilla.gecko.util.ThreadUtils;
 
@@ -20,21 +23,42 @@ import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
-import android.os.Handler;
 
 public class GeckoView extends LayerView
     implements GeckoEventListener, ContextGetter {
 
+    private static final String LOGTAG = "GeckoView";
+
     public GeckoView(Context context, AttributeSet attrs) {
         super(context, attrs);
-
         TypedArray a = context.obtainStyledAttributes(attrs, R.styleable.GeckoView);
         String url = a.getString(R.styleable.GeckoView_url);
+        boolean doInit = a.getBoolean(R.styleable.GeckoView_doinit, true);
         a.recycle();
+
+        if (!doInit)
+            return;
+
+        // If running outside of a GeckoActivity (eg, from a library project),
+        // load the native code and disable content providers
+        if (!(context instanceof GeckoActivity)) {
+            // Set the GeckoInterface if the context is an activity and the GeckoInterface
+            // has not already been set
+            if (context instanceof Activity && getGeckoInterface() == null) {
+                setGeckoInterface(new BaseGeckoInterface(context));
+            }
+
+            Clipboard.init(context);
+            HardwareUtils.init(context);
+
+            GeckoLoader.loadMozGlue();
+            BrowserDB.setEnableContentProviders(false);
+        }
 
         if (url != null) {
             GeckoThread.setUri(url);
@@ -46,30 +70,27 @@ public class GeckoView extends LayerView
             Tabs tabs = Tabs.getInstance();
             tabs.attachToContext(context);
         }
-        GeckoProfile profile = GeckoProfile.get(context);
-        BrowserDB.initialize(profile.getName());
         GeckoAppShell.registerEventListener("Gecko:Ready", this);
 
         ThreadUtils.setUiThread(Thread.currentThread(), new Handler());
         initializeView(GeckoAppShell.getEventDispatcher());
+
+        GeckoProfile profile = GeckoProfile.get(context);
+        BrowserDB.initialize(profile.getName());
+
         if (GeckoThread.checkAndSetLaunchState(GeckoThread.LaunchState.Launching, GeckoThread.LaunchState.Launched)) {
             GeckoAppShell.setLayerView(this);
             GeckoThread.createAndStart();
         }
     }
 
-    @Override
-    public void onWindowFocusChanged(boolean hasFocus) {
-        super.onWindowFocusChanged(hasFocus);
-
-        if (hasFocus) {
-            setBackgroundDrawable(null);
-        }
-    }
-
     public void loadUrl(String uri) {
         Tabs.getInstance().loadUrl(uri);
     }
+
+    public void loadUrlInNewTab(String uri) {
+        Tabs.getInstance().loadUrl(uri, Tabs.LOADURL_NEW_TAB);
+     }
 
     public void handleMessage(String event, JSONObject message) {
         if (event.equals("Gecko:Ready")) {
@@ -85,7 +106,11 @@ public class GeckoView extends LayerView
         }
     }
 
-    public static void setGeckoInterface(GeckoAppShell.GeckoInterface aGeckoInterface) {
-        GeckoAppShell.setGeckoInterface(aGeckoInterface);
+    public static void setGeckoInterface(final BaseGeckoInterface geckoInterface) {
+        GeckoAppShell.setGeckoInterface(geckoInterface);
+    }
+
+    public static GeckoAppShell.GeckoInterface getGeckoInterface() {
+        return GeckoAppShell.getGeckoInterface();
     }
 }

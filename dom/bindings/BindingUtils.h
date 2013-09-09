@@ -11,20 +11,25 @@
 
 #include "jsfriendapi.h"
 #include "jswrapper.h"
+#include "mozilla/Alignment.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/CallbackObject.h"
 #include "mozilla/dom/DOMJSClass.h"
 #include "mozilla/dom/DOMJSProxyHandler.h"
+#include "mozilla/dom/Exceptions.h"
 #include "mozilla/dom/NonRefcountedDOMObject.h"
 #include "mozilla/dom/Nullable.h"
 #include "mozilla/dom/workers/Workers.h"
 #include "mozilla/ErrorResult.h"
 #include "mozilla/Likely.h"
+#include "mozilla/Util.h"
 #include "nsCycleCollector.h"
 #include "nsIXPConnect.h"
+#include "nsThreadUtils.h" // Hacky work around for some bindings needing NS_IsMainThread.
 #include "nsTraceRefcnt.h"
 #include "qsObjectHelper.h"
 #include "xpcpublic.h"
+#include "nsIVariant.h"
 
 #include "nsWrapperCacheInlines.h"
 
@@ -61,47 +66,32 @@ UnwrapArg(JSContext* cx, jsval v, Interface** ppArg,
 }
 
 bool
-ThrowErrorMessage(JSContext* aCx, const ErrNum aErrorNumber, ...);
-bool
 ThrowInvalidThis(JSContext* aCx, const JS::CallArgs& aArgs,
                  const ErrNum aErrorNumber,
                  const char* aInterfaceName);
 
-template<bool mainThread>
-inline bool
-Throw(JSContext* cx, nsresult rv)
-{
-  using mozilla::dom::workers::exceptions::ThrowDOMExceptionForNSResult;
-
-  // XXX Introduce exception machinery.
-  if (mainThread) {
-    xpc::Throw(cx, rv);
-  } else {
-    if (!JS_IsExceptionPending(cx)) {
-      ThrowDOMExceptionForNSResult(cx, rv);
-    }
-  }
-  return false;
-}
-
-template<bool mainThread>
 inline bool
 ThrowMethodFailedWithDetails(JSContext* cx, ErrorResult& rv,
                              const char* ifaceName,
-                             const char* memberName)
+                             const char* memberName,
+                             bool reportJSContentExceptions = false)
 {
   if (rv.IsTypeError()) {
     rv.ReportTypeError(cx);
     return false;
   }
   if (rv.IsJSException()) {
-    rv.ReportJSException(cx);
+    if (reportJSContentExceptions) {
+      rv.ReportJSExceptionFromJSImplementation(cx);
+    } else {
+      rv.ReportJSException(cx);
+    }
     return false;
   }
   if (rv.IsNotEnoughArgsError()) {
     rv.ReportNotEnoughArgsError(cx, ifaceName, memberName);
   }
-  return Throw<mainThread>(cx, rv.ErrorCode());
+  return Throw(cx, rv.ErrorCode());
 }
 
 // Returns true if the JSClass is used for DOM objects.
@@ -181,6 +171,10 @@ IsDOMObject(JSObject* obj)
   return IsDOMClass(clasp) || IsDOMProxy(obj, clasp);
 }
 
+#define UNWRAP_OBJECT(Interface, cx, obj, value)                             \
+  mozilla::dom::UnwrapObject<mozilla::dom::prototypes::id::Interface,        \
+    mozilla::dom::Interface##Binding::NativeType>(cx, obj, value)
+
 // Some callers don't want to set an exception when unwrapping fails
 // (for example, overload resolution uses unwrapping to tell what sort
 // of thing it's looking at).
@@ -255,15 +249,6 @@ MOZ_ALWAYS_INLINE bool
 IsConvertibleToCallbackInterface(JSContext* cx, JS::Handle<JSObject*> obj)
 {
   return IsNotDateOrRegExp(cx, obj);
-}
-
-// U must be something that a T* can be assigned to (e.g. T* or an nsRefPtr<T>).
-template <class T, typename U>
-inline nsresult
-UnwrapObject(JSContext* cx, JSObject* obj, U& value)
-{
-  return UnwrapObject<static_cast<prototypes::ID>(
-           PrototypeIDMap<T>::PrototypeID), T>(cx, obj, value);
 }
 
 // The items in the protoAndIfaceArray are indexed by the prototypes::id::ID and
@@ -650,7 +635,7 @@ WrapNewBindingObject(JSContext* cx, JS::Handle<JSObject*> scope, T* value,
   JSObject* obj = value->GetWrapperPreserveColor();
   bool couldBeDOMBinding = CouldBeDOMBinding(value);
   if (obj) {
-    xpc_UnmarkNonNullGrayObject(obj);
+    JS::ExposeObjectToActiveJS(obj);
   } else {
     // Inline this here while we have non-dom objects in wrapper caches.
     if (!couldBeDOMBinding) {
@@ -1517,6 +1502,16 @@ struct FakeDependentString {
     mFlags |= nsDependentString::F_VOIDED;
   }
 
+  const nsDependentString::char_type* Data() const
+  {
+    return mData;
+  }
+
+  nsDependentString::size_type Length() const
+  {
+    return mLength;
+  }
+
   // If this ever changes, change the corresponding code in the
   // Optional<nsAString> specialization as well.
   const nsAString* ToAStringPtr() const {
@@ -1626,6 +1621,12 @@ class UnionMember {
 public:
     T& SetValue() {
       new (storage.addr()) T();
+      return *storage.addr();
+    }
+    template <typename T1>
+    T& SetValue(const T1 &t1)
+    {
+      new (storage.addr()) T(t1);
       return *storage.addr();
     }
     template <typename T1, typename T2>
@@ -2298,21 +2299,21 @@ class GetCCParticipant
 {
   // Helper for GetCCParticipant for classes that participate in CC.
   template<class U>
-  static nsCycleCollectionParticipant*
+  static MOZ_CONSTEXPR nsCycleCollectionParticipant*
   GetHelper(int, typename U::NS_CYCLE_COLLECTION_INNERCLASS* dummy=nullptr)
   {
     return T::NS_CYCLE_COLLECTION_INNERCLASS::GetParticipant();
   }
   // Helper for GetCCParticipant for classes that don't participate in CC.
   template<class U>
-  static nsCycleCollectionParticipant*
+  static MOZ_CONSTEXPR nsCycleCollectionParticipant*
   GetHelper(double)
   {
     return nullptr;
   }
 
 public:
-  static nsCycleCollectionParticipant*
+  static MOZ_CONSTEXPR nsCycleCollectionParticipant*
   Get()
   {
     // Passing int() here will try to call the GetHelper that takes an int as
@@ -2333,6 +2334,9 @@ public:
     return nullptr;
   }
 };
+
+bool
+ThreadsafeCheckIsChrome(JSContext* aCx, JSObject* aObj);
 
 } // namespace dom
 } // namespace mozilla

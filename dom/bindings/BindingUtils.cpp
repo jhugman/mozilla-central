@@ -4,21 +4,19 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "BindingUtils.h"
+
 #include <algorithm>
 #include <stdarg.h>
 
 #include "JavaScriptParent.h"
 
-#include "prprf.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/Assertions.h"
 
-#include "BindingUtils.h"
-
 #include "AccessCheck.h"
 #include "jsfriendapi.h"
-#include "nsContentUtils.h"
 #include "nsIDOMGlobalPropertyInitializer.h"
 #include "nsIXPConnect.h"
 #include "WrapperFactory.h"
@@ -26,12 +24,16 @@
 #include "XPCQuickStubs.h"
 #include "XrayWrapper.h"
 #include "nsPrintfCString.h"
+#include "prprf.h"
 
+#include "mozilla/dom/DOMError.h"
+#include "mozilla/dom/DOMErrorBinding.h"
 #include "mozilla/dom/HTMLObjectElement.h"
 #include "mozilla/dom/HTMLObjectElementBinding.h"
 #include "mozilla/dom/HTMLSharedObjectElement.h"
 #include "mozilla/dom/HTMLEmbedElementBinding.h"
 #include "mozilla/dom/HTMLAppletElementBinding.h"
+#include "WorkerPrivate.h"
 
 namespace mozilla {
 namespace dom {
@@ -184,6 +186,41 @@ ErrorResult::ReportJSException(JSContext* cx)
   // If JS_WrapValue failed, not much we can do about it...  No matter
   // what, go ahead and unroot mJSException.
   JS_RemoveValueRoot(cx, &mJSException);
+}
+
+void
+ErrorResult::ReportJSExceptionFromJSImplementation(JSContext* aCx)
+{
+  MOZ_ASSERT(!mMightHaveUnreportedJSException,
+             "Why didn't you tell us you planned to handle JS exceptions?");
+
+  dom::DOMError* domError;
+  nsresult rv = UNWRAP_OBJECT(DOMError, aCx, &mJSException.toObject(),
+                              domError);
+  if (NS_FAILED(rv)) {
+    // Unwrapping really shouldn't fail here, if mExceptionHandling is set to
+    // eRethrowContentExceptions then the CallSetup destructor only stores an
+    // exception if it unwraps to DOMError. If we reach this then either
+    // mExceptionHandling wasn't set to eRethrowContentExceptions and we
+    // shouldn't be calling ReportJSExceptionFromJSImplementation or something
+    // went really wrong.
+    NS_RUNTIMEABORT("We stored a non-DOMError exception!");
+  }
+
+  nsString message;
+  domError->GetMessage(message);
+
+  JSErrorReport errorReport;
+  memset(&errorReport, 0, sizeof(JSErrorReport));
+  errorReport.errorNumber = JSMSG_USER_DEFINED_ERROR;
+  errorReport.ucmessage = message.get();
+  errorReport.exnType = JSEXN_ERR;
+  JS_ThrowReportedError(aCx, nullptr, &errorReport);
+  JS_RemoveValueRoot(aCx, &mJSException);
+  
+  // We no longer have a useful exception but we do want to signal that an error
+  // occured.
+  mResult = NS_ERROR_FAILURE;
 }
 
 void
@@ -642,7 +679,7 @@ NativeInterface2JSObjectAndThrowIfFailed(JSContext* aCx,
     // or not.  This is a sloppy stab at the right semantics; the
     // method really ought to be fixed to behave consistently.
     if (!JS_IsExceptionPending(aCx)) {
-      Throw<true>(aCx, NS_FAILED(rv) ? rv : NS_ERROR_UNEXPECTED);
+      Throw(aCx, NS_FAILED(rv) ? rv : NS_ERROR_UNEXPECTED);
     }
     return false;
   }
@@ -711,7 +748,7 @@ VariantToJsval(JSContext* aCx, JS::Handle<JSObject*> aScope,
   if (!XPCVariant::VariantDataToJS(aVariant, &rv, aRetval)) {
     // Does it throw?  Who knows
     if (!JS_IsExceptionPending(aCx)) {
-      Throw<true>(aCx, NS_FAILED(rv) ? rv : NS_ERROR_UNEXPECTED);
+      Throw(aCx, NS_FAILED(rv) ? rv : NS_ERROR_UNEXPECTED);
     }
     return false;
   }
@@ -738,23 +775,23 @@ QueryInterface(JSContext* cx, unsigned argc, JS::Value* vp)
 
   nsISupports* native = UnwrapDOMObjectToISupports(obj);
   if (!native) {
-    return Throw<true>(cx, NS_ERROR_FAILURE);
+    return Throw(cx, NS_ERROR_FAILURE);
   }
 
   if (argc < 1) {
-    return Throw<true>(cx, NS_ERROR_XPC_NOT_ENOUGH_ARGS);
+    return Throw(cx, NS_ERROR_XPC_NOT_ENOUGH_ARGS);
   }
 
   JS::Value* argv = JS_ARGV(cx, vp);
   if (!argv[0].isObject()) {
-    return Throw<true>(cx, NS_ERROR_XPC_BAD_CONVERT_JS);
+    return Throw(cx, NS_ERROR_XPC_BAD_CONVERT_JS);
   }
 
   nsIJSID* iid;
   SelfRef iidRef;
   if (NS_FAILED(xpc_qsUnwrapArg<nsIJSID>(cx, argv[0], &iid, &iidRef.ptr,
                                           &argv[0]))) {
-    return Throw<true>(cx, NS_ERROR_XPC_BAD_CONVERT_JS);
+    return Throw(cx, NS_ERROR_XPC_BAD_CONVERT_JS);
   }
   MOZ_ASSERT(iid);
 
@@ -762,7 +799,7 @@ QueryInterface(JSContext* cx, unsigned argc, JS::Value* vp)
     nsresult rv;
     nsCOMPtr<nsIClassInfo> ci = do_QueryInterface(native, &rv);
     if (NS_FAILED(rv)) {
-      return Throw<true>(cx, rv);
+      return Throw(cx, rv);
     }
 
     return WrapObject(cx, origObj, ci, &NS_GET_IID(nsIClassInfo), args.rval());
@@ -771,7 +808,7 @@ QueryInterface(JSContext* cx, unsigned argc, JS::Value* vp)
   nsCOMPtr<nsISupports> unused;
   nsresult rv = native->QueryInterface(*iid->GetID(), getter_AddRefs(unused));
   if (NS_FAILED(rv)) {
-    return Throw<true>(cx, rv);
+    return Throw(cx, rv);
   }
 
   *vp = thisv;
@@ -1680,7 +1717,7 @@ ReparentWrapper(JSContext* aCx, JS::HandleObject aObjArg)
   }
 
   nsObjectLoadingContent* htmlobject;
-  nsresult rv = UnwrapObject<HTMLObjectElement>(aCx, aObj, htmlobject);
+  nsresult rv = UNWRAP_OBJECT(HTMLObjectElement, aCx, aObj, htmlobject);
   if (NS_FAILED(rv)) {
     rv = UnwrapObject<prototypes::id::HTMLEmbedElement,
                       HTMLSharedObjectElement>(aCx, aObj, htmlobject);
@@ -1705,53 +1742,53 @@ ReparentWrapper(JSContext* aCx, JS::HandleObject aObjArg)
   return NS_OK;
 }
 
-template<bool mainThread>
-inline JSObject*
-GetGlobalObject(JSContext* aCx, JSObject* aObject,
-                Maybe<JSAutoCompartment>& aAutoCompartment)
+GlobalObject::GlobalObject(JSContext* aCx, JSObject* aObject)
+  : mGlobalJSObject(aCx),
+    mCx(aCx),
+    mGlobalObject(nullptr)
 {
+  Maybe<JSAutoCompartment> ac;
   JS::Rooted<JSObject*> obj(aCx, aObject);
   if (js::IsWrapper(obj)) {
     obj = js::CheckedUnwrap(obj, /* stopAtOuter = */ false);
     if (!obj) {
-      Throw<mainThread>(aCx, NS_ERROR_XPC_SECURITY_MANAGER_VETO);
-      return nullptr;
+      // We should never end up here on a worker thread, since there shouldn't
+      // be any security wrappers to worry about.
+      if (!MOZ_LIKELY(NS_IsMainThread())) {
+        MOZ_CRASH();
+      }
+
+      Throw(aCx, NS_ERROR_XPC_SECURITY_MANAGER_VETO);
+      return;
     }
-    aAutoCompartment.construct(aCx, obj);
+    ac.construct(aCx, obj);
   }
 
-  return JS_GetGlobalForObject(aCx, obj);
+  mGlobalJSObject = JS_GetGlobalForObject(aCx, obj);
 }
 
-GlobalObject::GlobalObject(JSContext* aCx, JSObject* aObject)
-  : mGlobalJSObject(aCx)
+nsISupports*
+GlobalObject::GetAsSupports() const
 {
-  Maybe<JSAutoCompartment> ac;
-  mGlobalJSObject = GetGlobalObject<true>(aCx, aObject, ac);
-  if (!mGlobalJSObject) {
-    mGlobalObject = nullptr;
-    return;
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (mGlobalObject) {
+    return mGlobalObject;
   }
 
-  JS::Rooted<JS::Value> val(aCx, JS::ObjectValue(*mGlobalJSObject));
+  JS::Rooted<JS::Value> val(mCx, JS::ObjectValue(*mGlobalJSObject));
 
   // Switch this to UnwrapDOMObjectToISupports once our global objects are
   // using new bindings.
-  nsresult rv = xpc_qsUnwrapArg<nsISupports>(aCx, val, &mGlobalObject,
+  nsresult rv = xpc_qsUnwrapArg<nsISupports>(mCx, val, &mGlobalObject,
                                              static_cast<nsISupports**>(getter_AddRefs(mGlobalObjectRef)),
                                              val.address());
   if (NS_FAILED(rv)) {
     mGlobalObject = nullptr;
-    Throw<true>(aCx, NS_ERROR_XPC_BAD_CONVERT_JS);
+    Throw(mCx, NS_ERROR_XPC_BAD_CONVERT_JS);
   }
-}
 
-WorkerGlobalObject::WorkerGlobalObject(JSContext* aCx, JSObject* aObject)
-  : mGlobalJSObject(aCx),
-    mCx(aCx)
-{
-  Maybe<JSAutoCompartment> ac;
-  mGlobalJSObject = GetGlobalObject<false>(aCx, aObject, ac);
+  return mGlobalObject;
 }
 
 bool
@@ -1848,48 +1885,10 @@ ReportLenientThisUnwrappingFailure(JSContext* cx, JS::Handle<JSObject*> obj)
   if (global.Failed()) {
     return false;
   }
-  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(global.Get());
+  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(global.GetAsSupports());
   if (window && window->GetDoc()) {
     window->GetDoc()->WarnOnceAbout(nsIDocument::eLenientThis);
   }
-  return true;
-}
-
-// Date implementation methods
-Date::Date() :
-  mMsecSinceEpoch(UnspecifiedNaN())
-{
-}
-
-bool
-Date::IsUndefined() const
-{
-  return IsNaN(mMsecSinceEpoch);
-}
-
-bool
-Date::SetTimeStamp(JSContext* cx, JSObject* objArg)
-{
-  JS::Rooted<JSObject*> obj(cx, objArg);
-  MOZ_ASSERT(JS_ObjectIsDate(cx, obj));
-
-  obj = js::CheckedUnwrap(obj);
-  // This really sucks: even if JS_ObjectIsDate, CheckedUnwrap can _still_ fail
-  if (!obj) {
-    return false;
-  }
-  mMsecSinceEpoch = js_DateGetMsecSinceEpoch(obj);
-  return true;
-}
-
-bool
-Date::ToDateObject(JSContext* cx, JS::MutableHandle<JS::Value> rval) const
-{
-  JSObject* obj = JS_NewDateObjectMsec(cx, mMsecSinceEpoch);
-  if (!obj) {
-    return false;
-  }
-  rval.set(JS::ObjectValue(*obj));
   return true;
 }
 
@@ -1923,7 +1922,7 @@ GetWindowForJSImplementedObject(JSContext* cx, JS::Handle<JSObject*> obj,
 
   // It's OK if we have null here: that just means the content-side
   // object really wasn't associated with any window.
-  nsCOMPtr<nsPIDOMWindow> win(do_QueryInterface(global.Get()));
+  nsCOMPtr<nsPIDOMWindow> win(do_QueryInterface(global.GetAsSupports()));
   win.forget(window);
   return true;
 }
@@ -1935,7 +1934,7 @@ ConstructJSImplementation(JSContext* aCx, const char* aContractId,
                           ErrorResult& aRv)
 {
   // Get the window to use as a parent and for initialization.
-  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aGlobal.Get());
+  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aGlobal.GetAsSupports());
   if (!window) {
     aRv.Throw(NS_ERROR_FAILURE);
     return nullptr;
@@ -2061,6 +2060,13 @@ ConvertJSValueToByteString(JSContext* cx, JS::Handle<JS::Value> v,
   result.SetLength(length);
 
   return true;
+}
+
+bool
+ThreadsafeCheckIsChrome(JSContext* aCx, JSObject* aObj) {
+  using mozilla::dom::workers::GetWorkerPrivateFromContext;
+  return NS_IsMainThread() ? xpc::AccessCheck::isChrome(aObj):
+                             GetWorkerPrivateFromContext(aCx)->IsChromeWorker();
 }
 
 } // namespace dom

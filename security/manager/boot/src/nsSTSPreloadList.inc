@@ -4,11 +4,11 @@
 
 /*****************************************************************************/
 /* This is an automatically generated file. If you're not                    */
-/* nsStrictTransportSecurityService.cpp, you shouldn't be #including it.     */
+/* nsSiteSecurityService.cpp, you shouldn't be #including it.     */
 /*****************************************************************************/
 
 #include <stdint.h>
-const PRTime gPreloadListExpirationTime = INT64_C(1386411284101000);
+const PRTime gPreloadListExpirationTime = INT64_C(1389435858346000);
 
 class nsSTSPreload
 {
@@ -34,6 +34,7 @@ static const nsSTSPreload kSTSPreloadList[] = {
   { "carezone.com", false },
   { "check.torproject.org", false },
   { "chromiumcodereview.appspot.com", false },
+  { "cloudns.com.au", true },
   { "cloudsecurityalliance.org", true },
   { "codereview.appspot.com", false },
   { "conformal.com", true },
@@ -70,17 +71,21 @@ static const nsSTSPreload kSTSPreloadList[] = {
   { "login.persona.org", true },
   { "login.sapo.pt", true },
   { "logotype.se", true },
+  { "lolicore.ch", true },
   { "lookout.com", false },
   { "luneta.nearbuysystems.com", false },
   { "makeyourlaws.org", true },
   { "manager.linode.com", false },
   { "mattmccutchen.net", true },
+  { "mediacru.sh", true },
   { "mega.co.nz", false },
   { "members.mayfirst.org", false },
   { "members.nearlyfreespeech.net", false },
+  { "mudcrab.us", true },
   { "my.onlime.ch", false },
   { "mylookout.com", false },
   { "neg9.org", false },
+  { "oplop.appspot.com", true },
   { "p.linode.com", false },
   { "passwd.io", true },
   { "paste.linode.com", false },
@@ -109,7 +114,7 @@ static const nsSTSPreload kSTSPreloadList[] = {
   { "webmail.gigahost.dk", false },
   { "webmail.mayfirst.org", false },
   { "webmail.onlime.ch", false },
-  { "whonix.org", true },
+  { "wiki.python.org", true },
   { "wiz.biz", true },
   { "writeapp.me", false },
   { "www.apollo-auto.com", true },

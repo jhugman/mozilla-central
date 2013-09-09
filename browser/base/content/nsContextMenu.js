@@ -308,32 +308,24 @@ nsContextMenu.prototype = {
                   this.onTextInput && top.gBidiUI);
     this.showItem("context-bidi-page-direction-toggle",
                   !this.onTextInput && top.gBidiUI);
-    
-    // SocialMarks
-    let marksEnabled = SocialUI.enabled && Social.provider.pageMarkInfo;
-    let enablePageMark = marksEnabled && !(this.isContentSelected ||
-                            this.onTextInput || this.onLink || this.onImage ||
-                            this.onVideo || this.onAudio || this.onSocial);
-    let enableLinkMark = marksEnabled && ((this.onLink && !this.onMailtoLink &&
-                                           !this.onSocial) || this.onPlainTextLink);
-    if (enablePageMark) {
-      Social.isURIMarked(gBrowser.currentURI, function(marked) {
-        let label = marked ? "social.unmarkpage.label" : "social.markpage.label";
-        let provider = Social.provider || Social.defaultProvider;
-        let menuLabel = gNavigatorBundle.getFormattedString(label, [provider.name]);
-        this.setItemAttr("context-markpage", "label", menuLabel);
-      }.bind(this));
-    }
-    this.showItem("context-markpage", enablePageMark);
-    if (enableLinkMark) {
-      Social.isURIMarked(this.linkURI, function(marked) {
-        let label = marked ? "social.unmarklink.label" : "social.marklink.label";
-        let provider = Social.provider || Social.defaultProvider;
-        let menuLabel = gNavigatorBundle.getFormattedString(label, [provider.name]);
-        this.setItemAttr("context-marklink", "label", menuLabel);
-      }.bind(this));
-    }
-    this.showItem("context-marklink", enableLinkMark);
+
+    // SocialMarks. Marks does not work with text selections, only links. If
+    // there is more than MENU_LIMIT providers, we show a submenu for them,
+    // otherwise we have a menuitem per provider (added in SocialMarks class).
+    let markProviders = SocialMarks.getProviders();
+    let enablePageMarks = markProviders.length > 0 && !(this.onLink || this.onImage
+                            || this.onVideo || this.onAudio);
+    this.showItem("context-markpageMenu", enablePageMarks && markProviders.length > SocialMarks.MENU_LIMIT);
+    let enablePageMarkItems = enablePageMarks && markProviders.length <= SocialMarks.MENU_LIMIT;
+    let linkmenus = document.getElementsByClassName("context-markpage");
+    [m.hidden = !enablePageMarkItems for (m of linkmenus)];
+
+    let enableLinkMarks = markProviders.length > 0 &&
+                            ((this.onLink && !this.onMailtoLink) || this.onPlainTextLink);
+    this.showItem("context-marklinkMenu", enableLinkMarks && markProviders.length > SocialMarks.MENU_LIMIT);
+    let enableLinkMarkItems = enableLinkMarks && markProviders.length <= SocialMarks.MENU_LIMIT;
+    linkmenus = document.getElementsByClassName("context-marklink");
+    [m.hidden = !enableLinkMarkItems for (m of linkmenus)];
 
     // SocialShare
     let shareButton = SocialShare.shareButton;
@@ -350,7 +342,7 @@ nsContextMenu.prototype = {
   },
 
   initSpellingItems: function() {
-    var canSpell = InlineSpellCheckerUI.canSpellCheck;
+    var canSpell = InlineSpellCheckerUI.canSpellCheck && this.canSpellCheck;
     var onMisspelling = InlineSpellCheckerUI.overMisspelling;
     var showUndo = canSpell && InlineSpellCheckerUI.canUndo();
     this.showItem("spell-check-enabled", canSpell);
@@ -375,7 +367,7 @@ nsContextMenu.prototype = {
       this.showItem("spell-no-suggestions", false);
 
     // dictionary list
-    this.showItem("spell-dictionaries", InlineSpellCheckerUI.enabled);
+    this.showItem("spell-dictionaries", canSpell && InlineSpellCheckerUI.enabled);
     if (canSpell) {
       var dictMenu = document.getElementById("spell-dictionaries-menu");
       var dictSep = document.getElementById("spell-language-separator");
@@ -547,6 +539,7 @@ nsContextMenu.prototype = {
     this.onEditableArea    = false;
     this.isDesignMode      = false;
     this.onCTPPlugin       = false;
+    this.canSpellCheck     = false;
 
     // Remember the node that was clicked.
     this.target = aNode;
@@ -648,6 +641,13 @@ nsContextMenu.prototype = {
                this.target.mozMatchesSelector(":-moz-handler-clicktoplay")) {
         this.onCTPPlugin = true;
       }
+
+      this.canSpellCheck = this._isSpellCheckEnabled(this.target);
+    }
+    else if (this.target.nodeType == Node.TEXT_NODE) {
+      // For text nodes, look at the parent node to determine the spellcheck attribute.
+      this.canSpellCheck = this.target.parentNode &&
+                           this._isSpellCheckEnabled(this.target);
     }
 
     // Second, bubble out, looking for items of interest that can have childen.
@@ -749,7 +749,7 @@ nsContextMenu.prototype = {
           this.isDesignMode      = true;
           this.onEditableArea = true;
           InlineSpellCheckerUI.init(editingSession.getEditorForWindow(win));
-          var canSpell = InlineSpellCheckerUI.canSpellCheck;
+          var canSpell = InlineSpellCheckerUI.canSpellCheck && this.canSpellCheck;
           InlineSpellCheckerUI.initFromEvent(aRangeParent, aRangeOffset);
           this.showItem("spell-check-enabled", canSpell);
           this.showItem("spell-separator", canSpell);
@@ -800,6 +800,23 @@ nsContextMenu.prototype = {
     }
 
     return aRemotePrincipal;
+  },
+
+  _isSpellCheckEnabled: function(aNode) {
+    // We can always force-enable spellchecking on textboxes
+    if (this.isTargetATextBox(aNode)) {
+      return true;
+    }
+    // We can never spell check something which is not content editable
+    var editable = aNode.isContentEditable;
+    if (!editable && aNode.ownerDocument) {
+      editable = aNode.ownerDocument.designMode == "on";
+    }
+    if (!editable) {
+      return false;
+    }
+    // Otherwise make sure that nothing in the parent chain disables spellchecking
+    return aNode.spellcheck;
   },
 
   // Open linked-to URL in a new window.
@@ -880,10 +897,7 @@ nsContextMenu.prototype = {
   reload: function(event) {
     if (this.onSocial) {
       // full reload of social provider
-      Social.enabled = false;
-      Services.tm.mainThread.dispatch(function() {
-        Social.enabled = true;
-      }, Components.interfaces.nsIThread.DISPATCH_NORMAL);
+      Social.provider.reload();
     } else {
       BrowserReloadOrDuplicate(event);
     }
@@ -1263,7 +1277,7 @@ nsContextMenu.prototype = {
   },
 
   playPlugin: function() {
-    gPluginHandler.activateSinglePlugin(this.target.ownerDocument.defaultView.top, this.target);
+    gPluginHandler._showClickToPlayNotification(this.browser, this.target);
   },
 
   hidePlugin: function() {
@@ -1575,12 +1589,10 @@ nsContextMenu.prototype = {
                                        }, window.top);
     }
   },
-
-  markLink: function CM_markLink() {
-    // send link to social
-    SocialMark.toggleURIMark(this.linkURI);
+  markLink: function CM_markLink(origin) {
+    // send link to social, if it is the page url linkURI will be null
+    SocialMarks.markLink(origin, this.linkURI ? this.linkURI.spec : null);
   },
-
   shareLink: function CM_shareLink() {
     SocialShare.sharePage(null, { url: this.linkURI.spec });
   },

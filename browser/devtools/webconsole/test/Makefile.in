@@ -2,14 +2,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH			= @DEPTH@
-topsrcdir	= @top_srcdir@
-srcdir		= @srcdir@
-VPATH			= @srcdir@
-relativesrcdir  = @relativesrcdir@
-
-include $(DEPTH)/config/autoconf.mk
-
 MOCHITEST_BROWSER_FILES = \
 	browser_webconsole_notifications.js \
 	browser_webconsole_message_node_id.js \
@@ -147,6 +139,8 @@ MOCHITEST_BROWSER_FILES = \
 	browser_console_navigation_marker.js \
 	browser_webconsole_bug_762593_insecure_passwords_web_console_warning.js \
 	browser_webconsole_bug_762593_insecure_passwords_about_blank_web_console_warning.js \
+	browser_webconsole_allow_mixedcontent_securityerrors.js \
+	browser_webconsole_block_mixedcontent_securityerrors.js \
 	head.js \
 	$(NULL)
 
@@ -254,6 +248,5 @@ MOCHITEST_BROWSER_FILES += \
 	test-iframe1.html \
 	test-iframe2.html \
 	test-iframe3.html \
+	test-mixedcontent-securityerrors.html \
 	$(NULL)
-
-include $(topsrcdir)/config/rules.mk

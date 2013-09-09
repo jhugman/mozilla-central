@@ -13,6 +13,9 @@
 #include "nsISupportsArray.h"
 #include "nsIDocShell.h"
 #include "nsIDocument.h"
+#include "nsISupportsPrimitives.h"
+#include "nsIInterfaceRequestorUtils.h"
+#include "mozilla/dom/ContentChild.h"
 
 // For PR_snprintf
 #include "prprf.h"
@@ -291,6 +294,34 @@ public:
     if (mSourceStream) {
       mSourceStream->EndAllTrackAndFinish();
     }
+  }
+
+  // Allow getUserMedia to pass input data directly to PeerConnection/MediaPipeline
+  virtual bool AddDirectListener(MediaStreamDirectListener *aListener) MOZ_OVERRIDE
+  {
+    if (mSourceStream) {
+      mSourceStream->AddDirectListener(aListener);
+      return true; // application should ignore NotifyQueuedTrackData
+    }
+    return false;
+  }
+
+  virtual void RemoveDirectListener(MediaStreamDirectListener *aListener) MOZ_OVERRIDE
+  {
+    if (mSourceStream) {
+      mSourceStream->RemoveDirectListener(aListener);
+    }
+  }
+
+  // let us intervene for direct listeners when someone does track.enabled = false
+  virtual void SetTrackEnabled(TrackID aID, bool aEnabled) MOZ_OVERRIDE
+  {
+    // We encapsulate the SourceMediaStream and TrackUnion into one entity, so
+    // we can handle the disabling at the SourceMediaStream
+
+    // We need to find the input track ID for output ID aID, so we let the TrackUnion
+    // forward the request to the source and translate the ID
+    GetStream()->AsProcessedStream()->ForwardTrackEnabled(aID, aEnabled);
   }
 
   // The actual MediaStream is a TrackUnionStream. But these resources need to be
@@ -888,9 +919,6 @@ MediaManager::MediaManager()
   }
   LOG(("%s: default prefs: %dx%d @%dfps (min %d)", __FUNCTION__,
        mPrefs.mWidth, mPrefs.mHeight, mPrefs.mFPS, mPrefs.mMinFPS));
-
-  mActiveWindows.Init();
-  mActiveCallbacks.Init();
 }
 
 NS_IMPL_ISUPPORTS2(MediaManager, nsIMediaManagerService, nsIObserver)
@@ -1263,7 +1291,7 @@ MediaManager::RemoveFromWindowList(uint64_t aWindowID,
         nsAutoString data;
         data.Append(NS_ConvertUTF8toUTF16(windowBuffer));
 
-        nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
+        nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
         obs->NotifyObservers(nullptr, "recording-window-ended", data.get());
         LOG(("Sent recording-window-ended for window %llu (outer %llu)",
              aWindowID, outerID));
@@ -1302,7 +1330,7 @@ MediaManager::Observe(nsISupports* aSubject, const char* aTopic,
   const PRUnichar* aData)
 {
   NS_ASSERTION(NS_IsMainThread(), "Observer invoked off the main thread");
-  nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
+  nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
 
   if (!strcmp(aTopic, NS_PREFBRANCH_PREFCHANGE_TOPIC_ID)) {
     nsCOMPtr<nsIPrefBranch> branch( do_QueryInterface(aSubject) );
@@ -1570,6 +1598,45 @@ GetUserMediaCallbackMediaStreamListener::NotifyRemoved(MediaStreamGraph* aGraph)
   if (!mFinished) {
     NotifyFinished(aGraph);
   }
+}
+
+NS_IMETHODIMP
+GetUserMediaNotificationEvent::Run()
+{
+  NS_ASSERTION(NS_IsMainThread(), "Only call on main thread");
+  // Make sure mStream is cleared and our reference to the DOMMediaStream
+  // is dropped on the main thread, no matter what happens in this method.
+  // Otherwise this object might be destroyed off the main thread,
+  // releasing DOMMediaStream off the main thread, which is not allowed.
+  nsRefPtr<DOMMediaStream> stream = mStream.forget();
+
+  nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
+  if (!obs) {
+    NS_WARNING("Could not get the Observer service for GetUserMedia recording notification.");
+    return NS_ERROR_FAILURE;
+  }
+  nsString msg;
+  switch (mStatus) {
+  case STARTING:
+    msg = NS_LITERAL_STRING("starting");
+    stream->OnTracksAvailable(mOnTracksAvailableCallback.forget());
+    break;
+  case STOPPING:
+    msg = NS_LITERAL_STRING("shutdown");
+    if (mListener) {
+      mListener->SetStopped();
+    }
+    break;
+  }
+  obs->NotifyObservers(nullptr,
+		       "recording-device-events",
+		       msg.get());
+  // Forward recording events to parent process.
+  // The events are gathered in chrome process and used for recording indicator
+  if (XRE_GetProcessType() != GeckoProcessType_Default) {
+    unused << dom::ContentChild::GetSingleton()->SendRecordingDeviceEvents(msg);
+  }
+  return NS_OK;
 }
 
 } // namespace mozilla

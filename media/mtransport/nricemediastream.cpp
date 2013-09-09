@@ -46,6 +46,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "logging.h"
 #include "nsError.h"
+#include "mozilla/Scoped.h"
 
 // nICEr includes
 extern "C" {
@@ -71,6 +72,52 @@ extern "C" {
 namespace mozilla {
 
 MOZ_MTLOG_MODULE("mtransport")
+
+// Make an NrIceCandidate from the candidate |cand|.
+// This is not a member fxn because we want to hide the
+// defn of nr_ice_candidate but we pass by reference.
+static NrIceCandidate* MakeNrIceCandidate(const nr_ice_candidate& candc) {
+  ScopedDeletePtr<NrIceCandidate> out(new NrIceCandidate());
+
+  int r;
+  // Const-cast because the internal nICEr code isn't const-correct.
+  nr_ice_candidate *cand = const_cast<nr_ice_candidate *>(&candc);
+  char addr[INET6_ADDRSTRLEN + 1];
+
+  r = nr_transport_addr_get_addrstring(&cand->addr, addr, sizeof(addr));
+  if (r)
+    return nullptr;
+
+  int port;
+  r=nr_transport_addr_get_port(&cand->addr, &port);
+  if (r)
+    return nullptr;
+
+  NrIceCandidate::Type type;
+
+  switch(cand->type) {
+    case HOST:
+      type = NrIceCandidate::ICE_HOST;
+      break;
+    case SERVER_REFLEXIVE:
+      type = NrIceCandidate::ICE_SERVER_REFLEXIVE;
+      break;
+    case PEER_REFLEXIVE:
+      type = NrIceCandidate::ICE_PEER_REFLEXIVE;
+      break;
+    case RELAYED:
+      type = NrIceCandidate::ICE_RELAYED;
+      break;
+    default:
+      return nullptr;
+  }
+
+  out->host = addr;
+  out->port = port;
+  out->type = type;
+
+  return out.forget();
+}
 
 // NrIceMediaStream
 RefPtr<NrIceMediaStream>
@@ -150,6 +197,43 @@ nsresult NrIceMediaStream::ParseTrickleCandidate(const std::string& candidate) {
   return NS_OK;
 }
 
+// Returns NS_ERROR_NOT_AVAILABLE if component is unpaired or disabled.
+nsresult NrIceMediaStream::GetActivePair(int component,
+                                         NrIceCandidate **localp,
+                                         NrIceCandidate **remotep) {
+  int r;
+  nr_ice_candidate *local_int;
+  nr_ice_candidate *remote_int;
+
+  r = nr_ice_media_stream_get_active(ctx_->peer(),
+                                     stream_,
+                                     component,
+                                     &local_int, &remote_int);
+  // If result is R_REJECTED then component is unpaired or disabled.
+  if (r == R_REJECTED)
+    return NS_ERROR_NOT_AVAILABLE;
+
+  if (r)
+    return NS_ERROR_FAILURE;
+
+  ScopedDeletePtr<NrIceCandidate> local(
+      MakeNrIceCandidate(*local_int));
+  if (!local)
+    return NS_ERROR_FAILURE;
+
+  ScopedDeletePtr<NrIceCandidate> remote(
+      MakeNrIceCandidate(*remote_int));
+  if (!remote)
+    return NS_ERROR_FAILURE;
+
+  if (localp)
+    *localp = local.forget();
+  if (remotep)
+    *remotep = remote.forget();
+
+  return NS_OK;
+}
+
 
 void NrIceMediaStream::EmitAllCandidates() {
   char **attrs = 0;
@@ -225,6 +309,21 @@ std::vector<std::string> NrIceMediaStream::GetCandidates() const {
   return ret;
 }
 
+nsresult NrIceMediaStream::DisableComponent(int component_id) {
+  if (!stream_)
+    return NS_ERROR_FAILURE;
+
+  int r = nr_ice_media_stream_disable_component(stream_,
+                                                component_id);
+  if (r) {
+    MOZ_MTLOG(ML_ERROR, "Couldn't disable '" << name_ << "':" <<
+              component_id);
+    return NS_ERROR_FAILURE;
+  }
+
+  return NS_OK;
+}
+
 nsresult NrIceMediaStream::SendPacket(int component_id,
                                       const unsigned char *data,
                                       size_t len) {
@@ -248,9 +347,16 @@ nsresult NrIceMediaStream::SendPacket(int component_id,
 
 
 void NrIceMediaStream::Ready() {
-  MOZ_MTLOG(ML_DEBUG, "Marking stream ready '" << name_ << "'");
-  state_ = ICE_OPEN;
-  SignalReady(this);
+  // This function is called whenever a stream becomes ready, but it
+  // gets fired multiple times when a stream gets nominated repeatedly.
+  if (state_ != ICE_OPEN) {
+    MOZ_MTLOG(ML_DEBUG, "Marking stream ready '" << name_ << "'");
+    state_ = ICE_OPEN;
+    SignalReady(this);
+  }
+  else {
+    MOZ_MTLOG(ML_DEBUG, "Stream ready callback fired again for '" << name_ << "'");
+  }
 }
 
 void NrIceMediaStream::Close() {

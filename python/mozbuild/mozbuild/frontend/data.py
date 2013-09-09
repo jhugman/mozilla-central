@@ -17,6 +17,8 @@ structures.
 
 from __future__ import unicode_literals
 
+import os
+
 from collections import OrderedDict
 
 
@@ -136,6 +138,22 @@ class VariablePassthru(SandboxDerived):
         SandboxDerived.__init__(self, sandbox)
         self.variables = {}
 
+class XPIDLFile(SandboxDerived):
+    """Describes an XPIDL file to be compiled."""
+
+    __slots__ = (
+        'basename',
+        'source_path',
+    )
+
+    def __init__(self, sandbox, source, module):
+        SandboxDerived.__init__(self, sandbox)
+
+        self.source_path = source
+        self.basename = os.path.basename(source)
+        self.module = module
+
+
 class Exports(SandboxDerived):
     """Sandbox container object for EXPORTS, which is a HierarchicalStringList.
 
@@ -143,11 +161,13 @@ class Exports(SandboxDerived):
     this object fills that role. It just has a reference to the underlying
     HierarchicalStringList, which is created when parsing EXPORTS.
     """
-    __slots__ = ('exports')
+    __slots__ = ('exports', 'dist_install')
 
-    def __init__(self, sandbox, exports):
+    def __init__(self, sandbox, exports, dist_install=True):
         SandboxDerived.__init__(self, sandbox)
         self.exports = exports
+        self.dist_install = dist_install
+
 
 class IPDLFile(SandboxDerived):
     """Describes an individual .ipdl source file."""
@@ -189,3 +209,15 @@ class XpcshellManifests(SandboxDerived):
     def __init__(self, sandbox, manifests):
         SandboxDerived.__init__(self, sandbox)
         self.xpcshell_manifests = manifests
+
+class LocalInclude(SandboxDerived):
+    """Describes an individual local include path."""
+
+    __slots__ = (
+        'path',
+    )
+
+    def __init__(self, sandbox, path):
+        SandboxDerived.__init__(self, sandbox)
+
+        self.path = path

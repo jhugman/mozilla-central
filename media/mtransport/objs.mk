@@ -23,12 +23,16 @@ LOCAL_INCLUDES += \
  -I$(topsrcdir)/media/mtransport/third_party/nrappkit/src/event \
  $(NULL)
 
-ifeq ($(OS_TARGET), Darwin)
+ifneq (,$(filter Darwin DragonFly FreeBSD NetBSD OpenBSD,$(OS_TARGET)))
 LOCAL_INCLUDES += \
   -I$(topsrcdir)/media/mtransport/third_party/nrappkit/src/port/darwin/include \
   -I$(topsrcdir)/media/mtransport/third_party/nrappkit/src/port/generic/include \
   $(NULL)
+ifeq ($(OS_TARGET), Darwin)
 DEFINES += -DDARWIN
+else
+DEFINES += -DBSD
+endif
 endif
 
 ifeq ($(OS_TARGET), Linux)
@@ -36,7 +40,7 @@ LOCAL_INCLUDES += \
   -I$(topsrcdir)/media/mtransport/third_party/nrappkit/src/port/linux/include \
   -I$(topsrcdir)/media/mtransport/third_party/nrappkit/src/port/generic/include \
   $(NULL)
-DEFINES += -DLINUX
+DEFINES += -DLINUX -DUSE_INTERFACE_PRIORITIZER
 endif
 
 ifeq ($(OS_TARGET), Android)
@@ -67,6 +71,7 @@ MTRANSPORT_LCPPSRCS = \
   nricemediastream.cpp \
   nriceresolverfake.cpp \
   nriceresolver.cpp \
+  nrinterfaceprioritizer.cpp \
   nr_socket_prsock.cpp \
   nr_timer.cpp \
   transportflow.cpp \
@@ -82,6 +87,7 @@ ifeq (gonk,$(MOZ_WIDGET_TOOLKIT))
 MTRANSPORT_LCPPSRCS += \
   gonk_addrs.cpp \
   $(NULL)
+DEFINES += -DUSE_INTERFACE_PRIORITIZER
 endif
 
 MTRANSPORT_CPPSRCS = $(addprefix $(topsrcdir)/media/mtransport/, $(MTRANSPORT_LCPPSRCS))

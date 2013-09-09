@@ -23,7 +23,7 @@
 #include "vm/Stack-inl.h"
 
 using namespace js;
-using namespace js::ion;
+using namespace js::jit;
 
 /* static */ PCMappingSlotInfo::SlotLocation
 PCMappingSlotInfo::ToSlotLocation(const StackValue *stackVal)
@@ -86,7 +86,7 @@ static IonExecStatus
 EnterBaseline(JSContext *cx, EnterJitData &data)
 {
     JS_CHECK_RECURSION(cx, return IonExec_Aborted);
-    JS_ASSERT(ion::IsBaselineEnabled(cx));
+    JS_ASSERT(jit::IsBaselineEnabled(cx));
     JS_ASSERT_IF(data.osrFrame, CheckFrame(data.osrFrame));
 
     EnterIonCode enter = cx->runtime()->ionRuntime()->enterBaseline();
@@ -100,7 +100,7 @@ EnterBaseline(JSContext *cx, EnterJitData &data)
         IonContext ictx(cx, NULL);
         JitActivation activation(cx, data.constructing);
         JSAutoResolveFlags rf(cx, RESOLVE_INFER);
-        AutoFlushInhibitor afi(cx->compartment()->ionCompartment());
+        AutoFlushInhibitor afi(cx->runtime()->ionRuntime());
 
         if (data.osrFrame)
             data.osrFrame->setRunningInJit();
@@ -129,7 +129,7 @@ EnterBaseline(JSContext *cx, EnterJitData &data)
 }
 
 IonExecStatus
-ion::EnterBaselineMethod(JSContext *cx, RunState &state)
+jit::EnterBaselineMethod(JSContext *cx, RunState &state)
 {
     BaselineScript *baseline = state.script()->baselineScript();
 
@@ -149,7 +149,7 @@ ion::EnterBaselineMethod(JSContext *cx, RunState &state)
 }
 
 IonExecStatus
-ion::EnterBaselineAtBranch(JSContext *cx, StackFrame *fp, jsbytecode *pc)
+jit::EnterBaselineAtBranch(JSContext *cx, StackFrame *fp, jsbytecode *pc)
 {
     JS_ASSERT(JSOp(*pc) == JSOP_LOOPENTRY);
 
@@ -235,7 +235,7 @@ BaselineCompile(JSContext *cx, HandleScript script)
 static MethodStatus
 CanEnterBaselineJIT(JSContext *cx, HandleScript script, bool osr)
 {
-    JS_ASSERT(ion::IsBaselineEnabled(cx));
+    JS_ASSERT(jit::IsBaselineEnabled(cx));
 
     // Skip if the script has been disabled.
     if (!script->canBaselineCompile())
@@ -286,7 +286,7 @@ CanEnterBaselineJIT(JSContext *cx, HandleScript script, bool osr)
 }
 
 MethodStatus
-ion::CanEnterBaselineAtBranch(JSContext *cx, StackFrame *fp, bool newType)
+jit::CanEnterBaselineAtBranch(JSContext *cx, StackFrame *fp, bool newType)
 {
    // If constructing, allocate a new |this| object.
    if (fp->isConstructing() && fp->functionThis().isPrimitive()) {
@@ -305,7 +305,7 @@ ion::CanEnterBaselineAtBranch(JSContext *cx, StackFrame *fp, bool newType)
 }
 
 MethodStatus
-ion::CanEnterBaselineMethod(JSContext *cx, RunState &state)
+jit::CanEnterBaselineMethod(JSContext *cx, RunState &state)
 {
     if (state.isInvoke()) {
         InvokeState &invoke = *state.asInvoke();
@@ -398,6 +398,16 @@ BaselineScript::trace(JSTracer *trc)
         for (ICStub *stub = ent.firstStub(); stub; stub = stub->next())
             stub->trace(trc);
     }
+}
+
+/* static */
+void
+BaselineScript::writeBarrierPre(Zone *zone, BaselineScript *script)
+{
+#ifdef JSGC_INCREMENTAL
+    if (zone->needsBarrier())
+        script->trace(zone->barrierTracer());
+#endif
 }
 
 void
@@ -713,8 +723,9 @@ BaselineScript::toggleDebugTraps(JSScript *script, jsbytecode *pc)
 
     SrcNoteLineScanner scanner(script->notes(), script->lineno);
 
-    IonContext ictx(script->runtimeFromMainThread(), script->compartment(), NULL);
-    AutoFlushCache afc("DebugTraps");
+    JSRuntime *rt = script->runtimeFromMainThread();
+    IonContext ictx(rt, script->compartment(), NULL);
+    AutoFlushCache afc("DebugTraps", rt->ionRuntime());
 
     for (uint32_t i = 0; i < numPCMappingIndexEntries(); i++) {
         PCMappingIndexEntry &entry = pcMappingIndexEntry(i);
@@ -827,7 +838,7 @@ BaselineScript::purgeOptimizedStubs(Zone *zone)
 }
 
 void
-ion::FinishDiscardBaselineScript(FreeOp *fop, JSScript *script)
+jit::FinishDiscardBaselineScript(FreeOp *fop, JSScript *script)
 {
     if (!script->hasBaselineScript())
         return;
@@ -843,12 +854,13 @@ ion::FinishDiscardBaselineScript(FreeOp *fop, JSScript *script)
         return;
     }
 
-    BaselineScript::Destroy(fop, script->baselineScript());
+    BaselineScript *baseline = script->baselineScript();
     script->setBaselineScript(NULL);
+    BaselineScript::Destroy(fop, baseline);
 }
 
 void
-ion::IonCompartment::toggleBaselineStubBarriers(bool enabled)
+jit::IonCompartment::toggleBaselineStubBarriers(bool enabled)
 {
     for (ICStubCodeMap::Enum e(*stubCodes_); !e.empty(); e.popFront()) {
         IonCode *code = *e.front().value.unsafeGet();
@@ -857,7 +869,7 @@ ion::IonCompartment::toggleBaselineStubBarriers(bool enabled)
 }
 
 void
-ion::SizeOfBaselineData(JSScript *script, mozilla::MallocSizeOf mallocSizeOf, size_t *data,
+jit::SizeOfBaselineData(JSScript *script, mozilla::MallocSizeOf mallocSizeOf, size_t *data,
                         size_t *fallbackStubs)
 {
     *data = 0;
@@ -868,7 +880,7 @@ ion::SizeOfBaselineData(JSScript *script, mozilla::MallocSizeOf mallocSizeOf, si
 }
 
 void
-ion::ToggleBaselineSPS(JSRuntime *runtime, bool enable)
+jit::ToggleBaselineSPS(JSRuntime *runtime, bool enable)
 {
     for (ZonesIter zone(runtime); !zone.done(); zone.next()) {
         for (gc::CellIter i(zone, gc::FINALIZE_SCRIPT); !i.done(); i.next()) {
@@ -881,9 +893,9 @@ ion::ToggleBaselineSPS(JSRuntime *runtime, bool enable)
 }
 
 static void
-MarkActiveBaselineScripts(JSContext *cx, const JitActivationIterator &activation)
+MarkActiveBaselineScripts(JSRuntime *rt, const JitActivationIterator &activation)
 {
-    for (ion::IonFrameIterator iter(activation); !iter.done(); ++iter) {
+    for (jit::IonFrameIterator iter(activation); !iter.done(); ++iter) {
         switch (iter.type()) {
           case IonFrame_BaselineJS:
             iter.script()->baselineScript()->setActive();
@@ -892,7 +904,7 @@ MarkActiveBaselineScripts(JSContext *cx, const JitActivationIterator &activation
             // Keep the baseline script around, since bailouts from the ion
             // jitcode might need to re-enter into the baseline jitcode.
             iter.script()->baselineScript()->setActive();
-            for (InlineFrameIterator inlineIter(cx, &iter); inlineIter.more(); ++inlineIter)
+            for (InlineFrameIterator inlineIter(rt, &iter); inlineIter.more(); ++inlineIter)
                 inlineIter.script()->baselineScript()->setActive();
             break;
           }
@@ -902,21 +914,11 @@ MarkActiveBaselineScripts(JSContext *cx, const JitActivationIterator &activation
 }
 
 void
-ion::MarkActiveBaselineScripts(Zone *zone)
+jit::MarkActiveBaselineScripts(Zone *zone)
 {
-    // First check if there is a JitActivation on the stack, so that there
-    // must be a valid IonContext.
-    JitActivationIterator iter(zone->runtimeFromMainThread());
-    if (iter.done())
-        return;
-
-    // If baseline is disabled, there are no baseline scripts on the stack.
-    JSContext *cx = GetIonContext()->cx;
-    if (!ion::IsBaselineEnabled(cx))
-        return;
-
-    for (; !iter.done(); ++iter) {
+    JSRuntime *rt = zone->runtimeFromMainThread();
+    for (JitActivationIterator iter(rt); !iter.done(); ++iter) {
         if (iter.activation()->compartment()->zone() == zone)
-            MarkActiveBaselineScripts(cx, iter);
+            MarkActiveBaselineScripts(rt, iter);
     }
 }

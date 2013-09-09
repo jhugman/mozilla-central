@@ -28,6 +28,9 @@ const CSP_TYPE_WEBSOCKET_SPEC_COMPLIANT = "csp_type_websocket_spec_compliant";
 const WARN_FLAG = Ci.nsIScriptError.warningFlag;
 const ERROR_FLAG = Ci.nsIScriptError.ERROR_FLAG;
 
+// The cutoff length of content location in creating CSP cache key.
+const CSP_CACHE_URI_CUTOFF_SIZE = 512;
+
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/CSPUtils.jsm");
@@ -177,19 +180,19 @@ ContentSecurityPolicy.prototype = {
     switch (aViolationType) {
     case Ci.nsIContentSecurityPolicy.VIOLATION_TYPE_INLINE_STYLE:
       if (!this._policy.allowsInlineStyles)
-        this._asyncReportViolation('self',null,'inline style base restriction',
+        this._asyncReportViolation('self', null, CSPLocalizer.getStr("inlineStyleBlocked"),
                                    'violated base restriction: Inline Stylesheets will not apply',
                                    aSourceFile, aScriptSample, aLineNum);
       break;
     case Ci.nsIContentSecurityPolicy.VIOLATION_TYPE_INLINE_SCRIPT:
       if (!this._policy.allowsInlineScripts)
-        this._asyncReportViolation('self', null, 'inline script base restriction',
+        this._asyncReportViolation('self', null, CSPLocalizer.getStr("inlineScriptBlocked"),
                                    'violated base restriction: Inline Scripts will not execute',
                                    aSourceFile, aScriptSample, aLineNum);
       break;
     case Ci.nsIContentSecurityPolicy.VIOLATION_TYPE_EVAL:
       if (!this._policy.allowsEvalInScripts)
-        this._asyncReportViolation('self', null, 'eval script base restriction',
+        this._asyncReportViolation('self', null, CSPLocalizer.getStr("scriptFromStringBlocked"),
                                    'violated base restriction: Code will not be created from strings',
                                    aSourceFile, aScriptSample, aLineNum);
       break;
@@ -359,9 +362,9 @@ ContentSecurityPolicy.prototype = {
 
       var violationMessage = null;
       if (blockedUri["asciiSpec"]) {
-         violationMessage = CSPLocalizer.getFormatStr("directiveViolatedWithURI", [violatedDirective, blockedUri.asciiSpec]);
+         violationMessage = CSPLocalizer.getFormatStr("CSPViolationWithURI", [violatedDirective, blockedUri.asciiSpec]);
       } else {
-         violationMessage = CSPLocalizer.getFormatStr("directiveViolated", [violatedDirective]);
+         violationMessage = CSPLocalizer.getFormatStr("CSPViolation", [violatedDirective]);
       }
       this._policy.log(WARN_FLAG, violationMessage,
                         (aSourceFile) ? aSourceFile : null,
@@ -496,6 +499,25 @@ ContentSecurityPolicy.prototype = {
   },
 
   /**
+   * Creates a cache key from content location and content type.
+   */
+  _createCacheKey:
+  function (aContentLocation, aContentType) {
+    if (aContentType != Ci.nsIContentPolicy.TYPE_SCRIPT &&
+        aContentLocation.scheme == "data") {
+      // For non-script data: URI, use ("data:", aContentType) as the cache key.
+      return aContentLocation.scheme + ":" + aContentType;
+    }
+
+    let uri = aContentLocation.spec;
+    if (uri.length > CSP_CACHE_URI_CUTOFF_SIZE) {
+      // Don't cache for a URI longer than the cutoff size.
+      return null;
+    }
+    return uri + "!" + aContentType;
+  },
+
+  /**
    * Delegate method called by the service when sub-elements of the protected
    * document are being loaded.  Given a bit of information about the request,
    * decides whether or not the policy is satisfied.
@@ -507,8 +529,8 @@ ContentSecurityPolicy.prototype = {
                           aContext,
                           aMimeTypeGuess,
                           aOriginalUri) {
-    let key = aContentLocation.spec + "!" + aContentType;
-    if (this._cache[key]) {
+    let key = this._createCacheKey(aContentLocation, aContentType);
+    if (key && this._cache[key]) {
       return this._cache[key];
     }
 
@@ -582,8 +604,10 @@ ContentSecurityPolicy.prototype = {
       }
     }
 
-    let ret = this._cache[key] =
-      (this._reportOnlyMode ? Ci.nsIContentPolicy.ACCEPT : res);
+    let ret = (this._reportOnlyMode ? Ci.nsIContentPolicy.ACCEPT : res);
+    if (key) {
+      this._cache[key] = ret;
+    }
     return ret;
   },
 

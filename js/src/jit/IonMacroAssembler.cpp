@@ -9,6 +9,7 @@
 #include "jsinfer.h"
 #include "jsprf.h"
 
+#include "builtin/TypeRepresentation.h"
 #include "jit/Bailouts.h"
 #include "jit/BaselineFrame.h"
 #include "jit/BaselineIC.h"
@@ -23,7 +24,7 @@
 #include "vm/Shape-inl.h"
 
 using namespace js;
-using namespace js::ion;
+using namespace js::jit;
 
 namespace {
 
@@ -122,6 +123,13 @@ MacroAssembler::guardType(const Source &address, types::Type type,
 template void MacroAssembler::guardTypeSet(const Address &address, const types::StackTypeSet *types,
                                            Register scratch, Label *matched, Label *miss);
 template void MacroAssembler::guardTypeSet(const ValueOperand &value, const types::StackTypeSet *types,
+                                           Register scratch, Label *matched, Label *miss);
+
+template void MacroAssembler::guardTypeSet(const Address &address, const types::HeapTypeSet *types,
+                                           Register scratch, Label *matched, Label *miss);
+template void MacroAssembler::guardTypeSet(const ValueOperand &value, const types::HeapTypeSet *types,
+                                           Register scratch, Label *matched, Label *miss);
+template void MacroAssembler::guardTypeSet(const TypedOrValueRegister &reg, const types::HeapTypeSet *types,
                                            Register scratch, Label *matched, Label *miss);
 
 template void MacroAssembler::guardTypeSet(const Address &address, const types::TypeSet *types,
@@ -276,23 +284,23 @@ MacroAssembler::loadFromTypedArray(int arrayType, const T &src, AnyRegister dest
                                    Label *fail)
 {
     switch (arrayType) {
-      case TypedArrayObject::TYPE_INT8:
+      case ScalarTypeRepresentation::TYPE_INT8:
         load8SignExtend(src, dest.gpr());
         break;
-      case TypedArrayObject::TYPE_UINT8:
-      case TypedArrayObject::TYPE_UINT8_CLAMPED:
+      case ScalarTypeRepresentation::TYPE_UINT8:
+      case ScalarTypeRepresentation::TYPE_UINT8_CLAMPED:
         load8ZeroExtend(src, dest.gpr());
         break;
-      case TypedArrayObject::TYPE_INT16:
+      case ScalarTypeRepresentation::TYPE_INT16:
         load16SignExtend(src, dest.gpr());
         break;
-      case TypedArrayObject::TYPE_UINT16:
+      case ScalarTypeRepresentation::TYPE_UINT16:
         load16ZeroExtend(src, dest.gpr());
         break;
-      case TypedArrayObject::TYPE_INT32:
+      case ScalarTypeRepresentation::TYPE_INT32:
         load32(src, dest.gpr());
         break;
-      case TypedArrayObject::TYPE_UINT32:
+      case ScalarTypeRepresentation::TYPE_UINT32:
         if (dest.isFloat()) {
             load32(src, temp);
             convertUInt32ToDouble(temp, dest.fpu());
@@ -302,9 +310,9 @@ MacroAssembler::loadFromTypedArray(int arrayType, const T &src, AnyRegister dest
             j(Assembler::Signed, fail);
         }
         break;
-      case TypedArrayObject::TYPE_FLOAT32:
-      case TypedArrayObject::TYPE_FLOAT64:
-        if (arrayType == TypedArrayObject::TYPE_FLOAT32)
+      case ScalarTypeRepresentation::TYPE_FLOAT32:
+      case ScalarTypeRepresentation::TYPE_FLOAT64:
+        if (arrayType == ScalarTypeRepresentation::TYPE_FLOAT32)
             loadFloatAsDouble(src, dest.fpu());
         else
             loadDouble(src, dest.fpu());
@@ -326,16 +334,16 @@ MacroAssembler::loadFromTypedArray(int arrayType, const T &src, const ValueOpera
                                    bool allowDouble, Register temp, Label *fail)
 {
     switch (arrayType) {
-      case TypedArrayObject::TYPE_INT8:
-      case TypedArrayObject::TYPE_UINT8:
-      case TypedArrayObject::TYPE_UINT8_CLAMPED:
-      case TypedArrayObject::TYPE_INT16:
-      case TypedArrayObject::TYPE_UINT16:
-      case TypedArrayObject::TYPE_INT32:
+      case ScalarTypeRepresentation::TYPE_INT8:
+      case ScalarTypeRepresentation::TYPE_UINT8:
+      case ScalarTypeRepresentation::TYPE_UINT8_CLAMPED:
+      case ScalarTypeRepresentation::TYPE_INT16:
+      case ScalarTypeRepresentation::TYPE_UINT16:
+      case ScalarTypeRepresentation::TYPE_INT32:
         loadFromTypedArray(arrayType, src, AnyRegister(dest.scratchReg()), InvalidReg, NULL);
         tagValue(JSVAL_TYPE_INT32, dest.scratchReg(), dest);
         break;
-      case TypedArrayObject::TYPE_UINT32:
+      case ScalarTypeRepresentation::TYPE_UINT32:
         // Don't clobber dest when we could fail, instead use temp.
         load32(src, temp);
         test32(temp, temp);
@@ -360,8 +368,8 @@ MacroAssembler::loadFromTypedArray(int arrayType, const T &src, const ValueOpera
             tagValue(JSVAL_TYPE_INT32, temp, dest);
         }
         break;
-      case TypedArrayObject::TYPE_FLOAT32:
-      case TypedArrayObject::TYPE_FLOAT64:
+      case ScalarTypeRepresentation::TYPE_FLOAT32:
+      case ScalarTypeRepresentation::TYPE_FLOAT64:
         loadFromTypedArray(arrayType, src, AnyRegister(ScratchFloatReg), dest.scratchReg(), NULL);
         boxDouble(ScratchFloatReg, dest);
         break;
@@ -1004,7 +1012,8 @@ MacroAssembler::loadBaselineOrIonNoArgCheck(Register script, Register dest, Exec
 void
 MacroAssembler::loadBaselineFramePtr(Register framePtr, Register dest)
 {
-    movePtr(framePtr, dest);
+    if (framePtr != dest)
+        movePtr(framePtr, dest);
     subPtr(Imm32(BaselineFrame::Size()), dest);
 }
 
@@ -1109,10 +1118,10 @@ MacroAssembler::handleFailure(ExecutionMode executionMode)
     void *handler;
     switch (executionMode) {
       case SequentialExecution:
-        handler = JS_FUNC_TO_DATA_PTR(void *, ion::HandleException);
+        handler = JS_FUNC_TO_DATA_PTR(void *, jit::HandleException);
         break;
       case ParallelExecution:
-        handler = JS_FUNC_TO_DATA_PTR(void *, ion::HandleParallelFailure);
+        handler = JS_FUNC_TO_DATA_PTR(void *, jit::HandleParallelFailure);
         break;
       default:
         MOZ_ASSUME_UNREACHABLE("No such execution mode");
@@ -1227,13 +1236,12 @@ MacroAssembler::tracelogStart(JSScript *script)
     PushRegsInMask(regs);
 
     Register temp = regs.takeGeneral();
-    Register logger = regs.takeGeneral();
     Register type = regs.takeGeneral();
     Register rscript = regs.takeGeneral();
 
     setupUnalignedABICall(3, temp);
-    movePtr(ImmWord((void *)TraceLogging::defaultLogger()), logger);
-    passABIArg(logger);
+    movePtr(ImmWord((void *)TraceLogging::defaultLogger()), temp);
+    passABIArg(temp);
     move32(Imm32(TraceLogging::SCRIPT_START), type);
     passABIArg(type);
     movePtr(ImmGCPtr(script), rscript);
@@ -1418,6 +1426,47 @@ MacroAssembler::finish()
     }
 
     MacroAssemblerSpecific::finish();
+}
+
+void
+MacroAssembler::branchIfNotInterpretedConstructor(Register fun, Register scratch, Label *label)
+{
+    // 16-bit loads are slow and unaligned 32-bit loads may be too so
+    // perform an aligned 32-bit load and adjust the bitmask accordingly.
+    JS_STATIC_ASSERT(offsetof(JSFunction, nargs) % sizeof(uint32_t) == 0);
+    JS_STATIC_ASSERT(offsetof(JSFunction, flags) == offsetof(JSFunction, nargs) + 2);
+    JS_STATIC_ASSERT(IS_LITTLE_ENDIAN);
+
+    // Emit code for the following test:
+    //
+    // bool isInterpretedConstructor() const {
+    //     return isInterpreted() && !isFunctionPrototype() &&
+    //         (!isSelfHostedBuiltin() || isSelfHostedConstructor());
+    // }
+
+    // First, ensure it's a scripted function.
+    load32(Address(fun, offsetof(JSFunction, nargs)), scratch);
+    branchTest32(Assembler::Zero, scratch, Imm32(JSFunction::INTERPRETED << 16), label);
+
+    // Common case: if both IS_FUN_PROTO and SELF_HOSTED are not set,
+    // we're done.
+    Label done;
+    uint32_t bits = (JSFunction::IS_FUN_PROTO | JSFunction::SELF_HOSTED) << 16;
+    branchTest32(Assembler::Zero, scratch, Imm32(bits), &done);
+    {
+        // The callee is either Function.prototype or self-hosted. Fail if
+        // SELF_HOSTED_CTOR is not set. This means the callee must be
+        // Function.prototype or a self-hosted function that's not a
+        // constructor.
+        branchTest32(Assembler::Zero, scratch, Imm32(JSFunction::SELF_HOSTED_CTOR << 16), label);
+
+#ifdef DEBUG
+        // Function.prototype should not have the SELF_HOSTED_CTOR flag.
+        branchTest32(Assembler::Zero, scratch, Imm32(JSFunction::IS_FUN_PROTO << 16), &done);
+        breakpoint();
+#endif
+    }
+    bind(&done);
 }
 
 void

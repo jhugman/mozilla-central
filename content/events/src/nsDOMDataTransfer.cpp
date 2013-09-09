@@ -7,10 +7,7 @@
 
 #include "nsDOMDataTransfer.h"
 
-#include "prlog.h"
-#include "nsString.h"
-#include "nsIServiceManager.h"
-#include "nsIInterfaceRequestorUtils.h"
+#include "nsIDOMDocument.h"
 #include "nsIVariant.h"
 #include "nsISupportsPrimitives.h"
 #include "nsDOMClassInfoID.h"
@@ -20,12 +17,10 @@
 #include "nsError.h"
 #include "nsIDragService.h"
 #include "nsIClipboard.h"
-#include "nsIScriptableRegion.h"
 #include "nsContentUtils.h"
 #include "nsIContent.h"
 #include "nsCRT.h"
 #include "nsIScriptObjectPrincipal.h"
-#include "nsIWebNavigation.h"
 #include "nsIScriptContext.h"
 
 using namespace mozilla;
@@ -497,8 +492,10 @@ nsDOMDataTransfer::MozGetDataAt(const nsAString& aFormat,
           nsresult rv = NS_OK;
           nsIScriptContext* c = pt->GetContextForEventHandlers(&rv);
           NS_ENSURE_TRUE(c && NS_SUCCEEDED(rv), NS_ERROR_DOM_SECURITY_ERR);
-          nsIScriptObjectPrincipal* sp = c->GetGlobalObject();
-          NS_ENSURE_TRUE(sp, NS_ERROR_DOM_SECURITY_ERR);
+          nsIGlobalObject* go = c->GetGlobalObject();
+          NS_ENSURE_TRUE(go, NS_ERROR_DOM_SECURITY_ERR);
+          nsCOMPtr<nsIScriptObjectPrincipal> sp = do_QueryInterface(go);
+          MOZ_ASSERT(sp, "This cannot fail on the main thread.");
           nsIPrincipal* dataPrincipal = sp->GetPrincipal();
           NS_ENSURE_TRUE(dataPrincipal, NS_ERROR_DOM_SECURITY_ERR);
           NS_ENSURE_TRUE(principal || (principal = GetCurrentPrincipal(&rv)),

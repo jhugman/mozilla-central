@@ -6,7 +6,6 @@
 #include "FrameBlender.h"
 
 #include "mozilla/MemoryReporting.h"
-#include "RasterImage.h"
 
 #include "pixman.h"
 
@@ -526,7 +525,7 @@ FrameBlender::DrawFrameTo(const uint8_t *aSrcData, const nsIntRect& aSrcRect,
                              0, 0,
                              0, 0,
                              aSrcRect.x, aSrcRect.y,
-                             aDstRect.width, aDstRect.height);
+                             aSrcRect.width, aSrcRect.height);
 
     pixman_image_unref(src);
     pixman_image_unref(dst);

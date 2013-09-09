@@ -41,7 +41,9 @@
 #include "nsDOMCSSDeclaration.h"
 #include "nsStyleTransformMatrix.h"
 #include "mozilla/dom/Element.h"
+#include "prtime.h"
 #include "nsWrapperCacheInlines.h"
+#include "nsUTF8Utils.h"
 #include <algorithm>
 
 using namespace mozilla;
@@ -1719,8 +1721,7 @@ nsComputedDOMStyle::GetCSSGradientString(const nsStyleGradient* aGradient,
     if (needSep) {
       aString.AppendLiteral(" ");
     }
-    SetCssTextToCoord(tokenString, aGradient->mAngle);
-    aString.Append(tokenString);
+    nsStyleUtil::AppendAngleValue(aGradient->mAngle, aString);
     needSep = true;
   }
 
@@ -2645,6 +2646,27 @@ nsComputedDOMStyle::DoGetTextAlignLast()
 }
 
 CSSValue*
+nsComputedDOMStyle::DoGetTextCombineHorizontal()
+{
+  nsROCSSPrimitiveValue *val = new nsROCSSPrimitiveValue;
+  uint8_t tch = StyleText()->mTextCombineHorizontal;
+
+  if (tch <= NS_STYLE_TEXT_COMBINE_HORIZ_ALL) {
+    val->SetIdent(
+      nsCSSProps::ValueToKeywordEnum(tch,
+                                     nsCSSProps::kTextCombineHorizontalKTable));
+  } else if (tch <= NS_STYLE_TEXT_COMBINE_HORIZ_DIGITS_2) {
+    val->SetString(NS_LITERAL_STRING("digits 2"));
+  } else if (tch <= NS_STYLE_TEXT_COMBINE_HORIZ_DIGITS_3) {
+    val->SetString(NS_LITERAL_STRING("digits 3"));
+  } else {
+    val->SetString(NS_LITERAL_STRING("digits 4"));
+  }
+
+  return val;
+}
+
+CSSValue*
 nsComputedDOMStyle::DoGetTextDecoration()
 {
   nsROCSSPrimitiveValue* val = new nsROCSSPrimitiveValue;
@@ -2747,6 +2769,16 @@ nsComputedDOMStyle::DoGetTextIndent()
   nsROCSSPrimitiveValue *val = new nsROCSSPrimitiveValue;
   SetValueToCoord(val, StyleText()->mTextIndent, false,
                   &nsComputedDOMStyle::GetCBContentWidth);
+  return val;
+}
+
+CSSValue*
+nsComputedDOMStyle::DoGetTextOrientation()
+{
+  nsROCSSPrimitiveValue* val = new nsROCSSPrimitiveValue;
+  val->SetIdent(
+    nsCSSProps::ValueToKeywordEnum(StyleText()->mTextOrientation,
+                                   nsCSSProps::kTextOrientationKTable));
   return val;
 }
 
@@ -3278,6 +3310,27 @@ nsComputedDOMStyle::DoGetForceBrokenImageIcon()
 }
 
 CSSValue*
+nsComputedDOMStyle::DoGetImageOrientation()
+{
+  nsROCSSPrimitiveValue *val = new nsROCSSPrimitiveValue;
+  nsAutoString string;
+  nsStyleImageOrientation orientation = StyleVisibility()->mImageOrientation;
+
+  if (orientation.IsFromImage()) {
+    string.AppendLiteral("from-image");
+  } else {
+    nsStyleUtil::AppendAngleValue(orientation.AngleAsCoord(), string);
+
+    if (orientation.IsFlipped()) {
+      string.AppendLiteral(" flip");
+    }
+  }
+
+  val->SetString(string);
+  return val;
+}
+
+CSSValue*
 nsComputedDOMStyle::DoGetIMEMode()
 {
   nsROCSSPrimitiveValue *val = new nsROCSSPrimitiveValue;
@@ -3655,6 +3708,8 @@ nsComputedDOMStyle::GetOffsetWidthFor(mozilla::css::Side aSide)
       return GetStaticOffset(aSide);
     case NS_STYLE_POSITION_RELATIVE:
       return GetRelativeOffset(aSide);
+    case NS_STYLE_POSITION_STICKY:
+      return GetStickyOffset(aSide);
     case NS_STYLE_POSITION_ABSOLUTE:
     case NS_STYLE_POSITION_FIXED:
       return GetAbsoluteOffset(aSide);
@@ -3754,6 +3809,36 @@ nsComputedDOMStyle::GetRelativeOffset(mozilla::css::Side aSide)
   val->SetAppUnits(sign * StyleCoordToNSCoord(coord, baseGetter, 0, false));
   return val;
 }
+
+CSSValue*
+nsComputedDOMStyle::GetStickyOffset(mozilla::css::Side aSide)
+{
+  nsROCSSPrimitiveValue *val = new nsROCSSPrimitiveValue;
+
+  const nsStylePosition* positionData = StylePosition();
+  nsStyleCoord coord = positionData->mOffset.Get(aSide);
+
+  NS_ASSERTION(coord.GetUnit() == eStyleUnit_Coord ||
+               coord.GetUnit() == eStyleUnit_Percent ||
+               coord.GetUnit() == eStyleUnit_Auto ||
+               coord.IsCalcUnit(),
+               "Unexpected unit");
+
+  if (coord.GetUnit() == eStyleUnit_Auto) {
+    val->SetIdent(eCSSKeyword_auto);
+    return val;
+  }
+  PercentageBaseGetter baseGetter;
+  if (aSide == NS_SIDE_LEFT || aSide == NS_SIDE_RIGHT) {
+    baseGetter = &nsComputedDOMStyle::GetScrollFrameContentWidth;
+  } else {
+    baseGetter = &nsComputedDOMStyle::GetScrollFrameContentHeight;
+  }
+
+  val->SetAppUnits(StyleCoordToNSCoord(coord, baseGetter, 0, false));
+  return val;
+}
+
 
 CSSValue*
 nsComputedDOMStyle::GetStaticOffset(mozilla::css::Side aSide)
@@ -4070,6 +4155,50 @@ nsComputedDOMStyle::GetCBContentHeight(nscoord& aHeight)
 
   nsIFrame* container = mOuterFrame->GetContainingBlock();
   aHeight = container->GetContentRect().height;
+  return true;
+}
+
+bool
+nsComputedDOMStyle::GetScrollFrameContentWidth(nscoord& aWidth)
+{
+  if (!mOuterFrame) {
+    return false;
+  }
+
+  AssertFlushedPendingReflows();
+
+  nsIScrollableFrame* scrollableFrame =
+    nsLayoutUtils::GetNearestScrollableFrame(mOuterFrame->GetParent(),
+      nsLayoutUtils::SCROLLABLE_SAME_DOC |
+      nsLayoutUtils::SCROLLABLE_INCLUDE_HIDDEN);
+
+  if (!scrollableFrame) {
+    return false;
+  }
+  aWidth =
+    scrollableFrame->GetScrolledFrame()->GetContentRectRelativeToSelf().width;
+  return true;
+}
+
+bool
+nsComputedDOMStyle::GetScrollFrameContentHeight(nscoord& aHeight)
+{
+  if (!mOuterFrame) {
+    return false;
+  }
+
+  AssertFlushedPendingReflows();
+
+  nsIScrollableFrame* scrollableFrame =
+    nsLayoutUtils::GetNearestScrollableFrame(mOuterFrame->GetParent(),
+      nsLayoutUtils::SCROLLABLE_SAME_DOC |
+      nsLayoutUtils::SCROLLABLE_INCLUDE_HIDDEN);
+
+  if (!scrollableFrame) {
+    return false;
+  }
+  aHeight =
+    scrollableFrame->GetScrolledFrame()->GetContentRectRelativeToSelf().height;
   return true;
 }
 
@@ -4999,6 +5128,7 @@ nsComputedDOMStyle::GetQueryablePropertyMap(uint32_t* aLength)
     COMPUTED_STYLE_MAP_ENTRY(font_variant_position,         FontVariantPosition),
     COMPUTED_STYLE_MAP_ENTRY(font_weight,                   FontWeight),
     COMPUTED_STYLE_MAP_ENTRY_LAYOUT(height,                 Height),
+    COMPUTED_STYLE_MAP_ENTRY(image_orientation,             ImageOrientation),
     COMPUTED_STYLE_MAP_ENTRY(ime_mode,                      IMEMode),
     COMPUTED_STYLE_MAP_ENTRY(justify_content,               JustifyContent),
     COMPUTED_STYLE_MAP_ENTRY_LAYOUT(left,                   Left),
@@ -5050,8 +5180,10 @@ nsComputedDOMStyle::GetQueryablePropertyMap(uint32_t* aLength)
     //// COMPUTED_STYLE_MAP_ENTRY(size,                     Size),
     COMPUTED_STYLE_MAP_ENTRY(table_layout,                  TableLayout),
     COMPUTED_STYLE_MAP_ENTRY(text_align,                    TextAlign),
+    COMPUTED_STYLE_MAP_ENTRY(text_combine_horizontal,       TextCombineHorizontal),
     COMPUTED_STYLE_MAP_ENTRY(text_decoration,               TextDecoration),
     COMPUTED_STYLE_MAP_ENTRY_LAYOUT(text_indent,            TextIndent),
+    COMPUTED_STYLE_MAP_ENTRY(text_orientation,              TextOrientation),
     COMPUTED_STYLE_MAP_ENTRY(text_overflow,                 TextOverflow),
     COMPUTED_STYLE_MAP_ENTRY(text_shadow,                   TextShadow),
     COMPUTED_STYLE_MAP_ENTRY(text_transform,                TextTransform),

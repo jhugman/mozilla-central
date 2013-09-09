@@ -7,11 +7,13 @@
 
 #include "jsapi.h"
 #include "jsfriendapi.h"
+#include "jsprf.h"
 #include "nsCOMPtr.h"
 #include "xpcprivate.h"
 #include "XPCInlines.h"
 #include "XPCQuickStubs.h"
 #include "mozilla/dom/BindingUtils.h"
+#include "mozilla/dom/Exceptions.h"
 
 using namespace mozilla;
 using namespace JS;
@@ -69,7 +71,7 @@ LookupInterfaceOrAncestor(uint32_t tableSize, const xpc_qsHashEntry *table,
 static MOZ_ALWAYS_INLINE bool
 HasBitInInterfacesBitmap(JSObject *obj, uint32_t interfaceBit)
 {
-    NS_ASSERTION(IS_WN_REFLECTOR(obj), "Not a wrapper?");
+    MOZ_ASSERT(IS_WN_REFLECTOR(obj), "Not a wrapper?");
 
     XPCWrappedNativeJSClass *clasp =
       (XPCWrappedNativeJSClass*)js::GetObjectClass(obj);
@@ -198,8 +200,8 @@ static void
 GetMethodInfo(JSContext *cx, jsval *vp, const char **ifaceNamep, jsid *memberIdp)
 {
     RootedObject funobj(cx, JSVAL_TO_OBJECT(JS_CALLEE(cx, vp)));
-    NS_ASSERTION(JS_ObjectIsFunction(cx, funobj),
-                 "JSNative callee should be Function object");
+    MOZ_ASSERT(JS_ObjectIsFunction(cx, funobj),
+               "JSNative callee should be Function object");
     RootedString str(cx, JS_GetFunctionId(JS_GetObjectFunction(funobj)));
     RootedId methodId(cx, str ? INTERNED_STRING_TO_JSID(cx, str) : JSID_VOID);
     GetMemberInfo(JSVAL_TO_OBJECT(vp[1]), methodId, ifaceNamep);
@@ -249,7 +251,7 @@ ThrowCallFailed(JSContext *cx, nsresult rv,
                          format, rv, ifaceName, memberName);
     }
 
-    XPCThrower::BuildAndThrowException(cx, rv, sz);
+    dom::Throw(cx, rv, sz);
 
     if (sz)
         JS_smprintf_free(sz);
@@ -335,7 +337,7 @@ ThrowBadArg(JSContext *cx, nsresult rv, const char *ifaceName,
     sz = JS_smprintf("%s arg %u [%s.%s]",
                      format, (unsigned int) paramnum, ifaceName, memberName);
 
-    XPCThrower::BuildAndThrowException(cx, rv, sz);
+    dom::Throw(cx, rv, sz);
 
     if (sz)
         JS_smprintf_free(sz);
@@ -849,8 +851,8 @@ xpc_qsXPCOMObjectToJsval(JSContext *cx, qsObjectHelper &aHelper,
 #ifdef DEBUG
     JSObject* jsobj = JSVAL_TO_OBJECT(*rval);
     if (jsobj && !js::GetObjectParent(jsobj))
-        NS_ASSERTION(js::GetObjectClass(jsobj)->flags & JSCLASS_IS_GLOBAL,
-                     "Why did we recreate this wrapper?");
+        MOZ_ASSERT(js::GetObjectClass(jsobj)->flags & JSCLASS_IS_GLOBAL,
+                   "Why did we recreate this wrapper?");
 #endif
 
     return true;
@@ -883,6 +885,6 @@ xpc_qsAssertContextOK(JSContext *cx)
     JSContext *topJSContext = stack->Peek();
 
     // This is what we're actually trying to assert here.
-    NS_ASSERTION(cx == topJSContext, "wrong context on XPCJSContextStack!");
+    MOZ_ASSERT(cx == topJSContext, "wrong context on XPCJSContextStack!");
 }
 #endif

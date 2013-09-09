@@ -11,8 +11,6 @@
 
 #include "mozilla/MemoryReporting.h"
 
-#include "js/HashTable.h"
-#include "jsfriendapi.h"
 
 // Maps...
 
@@ -142,10 +140,10 @@ public:
         NS_PRECONDITION(wrapper,"bad param");
 #ifdef DEBUG
         XPCWrappedNative* wrapperInMap = Find(wrapper->GetIdentityObject());
-        NS_ASSERTION(!wrapperInMap || wrapperInMap == wrapper,
-                     "About to remove a different wrapper with the same "
-                     "nsISupports identity! This will most likely cause serious "
-                     "problems!");
+        MOZ_ASSERT(!wrapperInMap || wrapperInMap == wrapper,
+                   "About to remove a different wrapper with the same "
+                   "nsISupports identity! This will most likely cause serious "
+                   "problems!");
 #endif
         PL_DHashTableOperate(mTable, wrapper->GetIdentityObject(), PL_DHASH_REMOVE);
     }

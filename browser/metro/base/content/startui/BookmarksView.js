@@ -30,6 +30,7 @@ function BookmarksView(aSet, aLimit, aRoot, aFilterUnpinned) {
   StartUI.chromeWin.addEventListener('BookmarksNeedsRefresh', this, false);
   window.addEventListener("TabClose", this, true);
 
+  this._adjustDOMforViewState();
   this.root = aRoot;
 }
 
@@ -302,7 +303,7 @@ BookmarksView.prototype = Util.extend(Object.create(View.prototype), {
       case "TabClose":
         // Flush any pending actions - appbar will call us back
         // before this returns with 'MozAppbarDismissing' above.
-        StartUI.chromeWin.ContextUI.dismiss();
+        StartUI.chromeWin.ContextUI.dismissContextAppbar();
       break;
     }
   }
@@ -322,10 +323,6 @@ let BookmarksStartView = {
       this._view.destruct();
     }
   },
-
-  show: function show() {
-    this._grid.arrangeItems();
-  }
 };
 
 /**

@@ -26,7 +26,6 @@
 #include "nsIDocument.h"
 #include "jsfriendapi.h"
 #include "xpcprivate.h"
-#include "nsContentUtils.h"
 #include "nsCxPusher.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Telemetry.h"
@@ -67,7 +66,7 @@ NS_IMETHODIMP
 nsSecurityNameSet::InitializeNameSet(nsIScriptContext* aScriptContext)
 {
     AutoJSContext cx;
-    JS::Rooted<JSObject*> global(cx, aScriptContext->GetNativeGlobal());
+    JS::Rooted<JSObject*> global(cx, aScriptContext->GetWindowProxy());
     JSAutoCompartment ac(cx, global);
 
     /*
