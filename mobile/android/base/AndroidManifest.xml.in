@@ -178,7 +178,8 @@
                   android:configChanges="keyboard|keyboardHidden|mcc|mnc|orientation|screenSize"
                   android:windowSoftInputMode="stateUnspecified|adjustResize"
                   android:excludeFromRecents="true"
-                  android:theme="@style/Gecko.App">
+                  android:theme="@style/Gecko.App"
+                  android:process=":@ANDROID_PACKAGE_NAME@.WebAppInstaller">
             <intent-filter>
                 <!-- catch links from synthetic apks -->
                 <action android:name="android.intent.action.VIEW" />
