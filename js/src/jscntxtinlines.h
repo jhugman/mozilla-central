@@ -18,7 +18,7 @@
 #include "vm/Interpreter.h"
 #include "vm/ProxyObject.h"
 
-#include "vm/ObjectImpl-inl.h"
+#include "gc/Barrier-inl.h"
 
 namespace js {
 
@@ -352,8 +352,8 @@ inline void
 ExclusiveContext::maybePause() const
 {
 #ifdef JS_WORKER_THREADS
-    if (workerThread)
-        workerThread->maybePause();
+    if (workerThread())
+        workerThread()->maybePause();
 #endif
 }
 

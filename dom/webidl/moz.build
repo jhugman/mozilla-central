@@ -203,6 +203,7 @@ WEBIDL_FILES = [
     'MessageChannel.webidl',
     'MessageEvent.webidl',
     'MessagePort.webidl',
+    'MessagePortList.webidl',
     'MimeType.webidl',
     'MimeTypeArray.webidl',
     'MobileMessageManager.webidl',
@@ -259,6 +260,7 @@ WEBIDL_FILES = [
     'SimpleGestureEvent.webidl',
     'SourceBuffer.webidl',
     'SourceBufferList.webidl',
+    'StorageType.webidl',
     'StyleSheet.webidl',
     'SVGAElement.webidl',
     'SVGAltGlyphElement.webidl',
@@ -458,7 +460,6 @@ WEBIDL_FILES += [
     'CustomEvent.webidl',
     'DeviceLightEvent.webidl',
     'DeviceOrientationEvent.webidl',
-    'DeviceProximityEvent.webidl',
     'DeviceStorageChangeEvent.webidl',
     'DOMTransactionEvent.webidl',
     'ElementReplaceEvent.webidl',
@@ -505,13 +506,6 @@ if CONFIG['MOZ_B2G_RIL']:
         'USSDReceivedEvent.webidl',
     ]
 
-if CONFIG['MOZ_GAMEPAD']:
-    WEBIDL_FILES += [
-        'GamepadAxisMoveEvent.webidl',
-        'GamepadButtonEvent.webidl',
-        'GamepadEvent.webidl',
-    ]
-
 if CONFIG['MOZ_WEBSPEECH']:
     WEBIDL_FILES += [
         'SpeechRecognitionError.webidl',
@@ -540,4 +534,14 @@ if CONFIG['MOZ_B2G']:
 
 GENERATED_EVENTS_WEBIDL_FILES = [
     'BlobEvent.webidl',
+    'DeviceProximityEvent.webidl',
 ]
+
+if CONFIG['MOZ_GAMEPAD']:
+    GENERATED_EVENTS_WEBIDL_FILES += [
+        'GamepadAxisMoveEvent.webidl',
+        'GamepadButtonEvent.webidl',
+        'GamepadEvent.webidl',
+    ]
+
+

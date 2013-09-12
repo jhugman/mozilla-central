@@ -22,8 +22,6 @@
 #include "jsgcinlines.h"
 #include "jsinferinlines.h"
 
-#include "vm/Shape-inl.h"
-
 using namespace js;
 using namespace js::jit;
 
@@ -1537,8 +1535,8 @@ MacroAssembler::convertTypedOrValueToDouble(TypedOrValueRegister src, FloatRegis
 }
 
 void
-MacroAssembler::convertDoubleToInt(FloatRegister src, Register output, Label *fail,
-                                   IntConversionBehavior behavior)
+MacroAssembler::convertDoubleToInt(FloatRegister src, Register output, Label *truncateFail,
+                                   Label *fail, IntConversionBehavior behavior)
 {
     switch (behavior) {
       case IntConversion_Normal:
@@ -1546,7 +1544,7 @@ MacroAssembler::convertDoubleToInt(FloatRegister src, Register output, Label *fa
         convertDoubleToInt32(src, output, fail, behavior == IntConversion_NegativeZeroCheck);
         break;
       case IntConversion_Truncate:
-        branchTruncateDouble(src, output, fail);
+        branchTruncateDouble(src, output, truncateFail ? truncateFail : fail);
         break;
       case IntConversion_ClampToUint8:
         clampDoubleToUint8(src, output);
@@ -1557,6 +1555,7 @@ MacroAssembler::convertDoubleToInt(FloatRegister src, Register output, Label *fa
 void
 MacroAssembler::convertValueToInt(ValueOperand value, MDefinition *maybeInput,
                                   Label *handleStringEntry, Label *handleStringRejoin,
+                                  Label *truncateDoubleSlow,
                                   Register stringReg, FloatRegister temp, Register output,
                                   Label *fail, IntConversionBehavior behavior)
 {
@@ -1615,7 +1614,7 @@ MacroAssembler::convertValueToInt(ValueOperand value, MDefinition *maybeInput,
         if (handleStrings)
             bind(handleStringRejoin);
 
-        convertDoubleToInt(temp, output, fail, behavior);
+        convertDoubleToInt(temp, output, truncateDoubleSlow, fail, behavior);
         jump(&done);
     }
 
@@ -1631,7 +1630,7 @@ MacroAssembler::convertValueToInt(ValueOperand value, MDefinition *maybeInput,
         bind(&isInt32);
         unboxInt32(value, output);
         if (behavior == IntConversion_ClampToUint8)
-            clampIntToUint8(output, output);
+            clampIntToUint8(output);
     }
 
     bind(&done);
@@ -1726,7 +1725,7 @@ MacroAssembler::convertTypedOrValueToInt(TypedOrValueRegister src, FloatRegister
             move32(src.typedReg().gpr(), output);
         break;
       case MIRType_Double:
-        convertDoubleToInt(src.typedReg().fpu(), output, fail, behavior);
+        convertDoubleToInt(src.typedReg().fpu(), output, NULL, fail, behavior);
         break;
       case MIRType_String:
       case MIRType_Object:
