@@ -42,14 +42,14 @@ public class WebAppInstaller extends GeckoApp {
     public void onCreate(Bundle savedInstanceState)
     {
         JSONObject message = getInstallMessage();
-        if (message != null) {
-            WebAppAllocator allocator = WebAppAllocator.getInstance(getApplicationContext());
-            String origin = message.optString("origin");
-            int index = allocator.findAndAllocateIndex(origin, "", (Bitmap) null);
-            if (index >= 0) {
-                mProfileName = "webapp" + index;
-            }
-        }
+//        if (message != null) {
+//            WebAppAllocator allocator = WebAppAllocator.getInstance(getApplicationContext());
+//            String origin = message.optString("origin");
+//            int index = allocator.findAndAllocateIndex(origin, "", (Bitmap) null);
+//            if (index >= 0) {
+//                mProfileName = "webapp" + index;
+//            }
+//        }
 
         if (mProfileName == null) {
             // something bad has happened;
