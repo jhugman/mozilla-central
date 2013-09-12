@@ -179,7 +179,7 @@
                   android:windowSoftInputMode="stateUnspecified|adjustResize"
                   android:excludeFromRecents="true"
                   android:theme="@style/Gecko.App"
-                  android:process=":@ANDROID_PACKAGE_NAME@.WebAppInstaller">
+                  android:multiprocess="true">
             <intent-filter>
                 <!-- catch links from synthetic apks -->
                 <action android:name="android.intent.action.VIEW" />

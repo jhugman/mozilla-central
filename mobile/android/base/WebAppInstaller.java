@@ -6,7 +6,9 @@
 package org.mozilla.gecko;
 
 import java.net.MalformedURLException;
+import java.net.URL;
 
+import org.json.JSONException;
 import org.json.JSONObject;
 
 import org.mozilla.gecko.GeckoThread.LaunchState;
@@ -16,6 +18,7 @@ import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
+import android.graphics.Bitmap;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
@@ -24,6 +27,8 @@ public class WebAppInstaller extends GeckoApp {
     private static final String LOGTAG = "GeckoWebAppInstaller";
 
     private View mSplashscreen;
+
+    private String mProfileName;
 
     protected int getIndex() { return 0; }
 
@@ -36,6 +41,21 @@ public class WebAppInstaller extends GeckoApp {
     @Override
     public void onCreate(Bundle savedInstanceState)
     {
+        JSONObject message = getInstallMessage();
+        if (message != null) {
+            WebAppAllocator allocator = WebAppAllocator.getInstance(getApplicationContext());
+            String origin = message.optString("origin");
+            int index = allocator.findAndAllocateIndex(origin, "", (Bitmap) null);
+            if (index >= 0) {
+                mProfileName = "webapp" + index;
+            }
+        }
+
+        if (mProfileName == null) {
+            // something bad has happened;
+            mProfileName = "webapp-installer";
+        }
+
         super.onCreate(savedInstanceState);
 
         mSplashscreen = findViewById(R.id.splashscreen);
@@ -44,44 +64,56 @@ public class WebAppInstaller extends GeckoApp {
             showSplash();
         }
 
-
-        String action = getIntent().getAction();
-        Bundle extras = getIntent().getExtras();
-
-        String packageName = extras != null ? extras.getString("packageName") : null;
-        Log.d(LOGTAG, "Package name is " + packageName);
-        if (packageName != null) {
-            // we're not installed yet.
-            Log.i(LOGTAG, "App " + packageName + " isn't installed yet");
-            try {
-                installWebApp(packageName);
-            } catch (Exception e) {
-                Log.e(LOGTAG, "Can't install " + packageName);
-            }
-            return;
+        if (message != null) {
+            GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Webapps:AutoInstall", message.toString()));
         }
 
     }
 
+    public JSONObject getInstallMessage() {
+        Bundle extras = getIntent().getExtras();
 
-    private void installWebApp(String packageName) throws NameNotFoundException, MalformedURLException {
+        String packageName = extras != null ? extras.getString("packageName") : null;
+        if (packageName != null) {
+            // we're not installed yet.
+            try {
+                return getInstallMessageFromPackage(packageName);
+
+            } catch (Exception e) {
+                Log.e(LOGTAG, "Can't install " + packageName);
+            }
+        }
+        return null;
+    }
+
+
+    private JSONObject getInstallMessageFromPackage(String packageName) throws NameNotFoundException, MalformedURLException, JSONException {
         ApplicationInfo app = getPackageManager()
                 .getApplicationInfo(packageName,
                         PackageManager.GET_META_DATA);
 
         Bundle metadata = app.metaData;
 
-        String type = metadata.getString("webapp");
-        if ("hosted".equals(type)) {
-            String manifestUrlString = metadata.getString("manifestUrl");
-            Log.i(LOGTAG, "Installing hosted app from " + manifestUrlString);
-            //GeckoAppShell.getEventDispatcher().registerEventListener("WebApps:PostInstall", this);
-            GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Webapps:AutoInstall", manifestUrlString));
-        } else if ("packaged".equals(type)) {
+        JSONObject messageObject = new JSONObject();
+        String urlString = metadata.getString("manifestUrl");
+        URL url = new URL(urlString);
+        messageObject.putOpt("origin", getOrigin(url));
+        messageObject.putOpt("manifestUrl", urlString);
+        messageObject.putOpt("type", metadata.getString("webapp"));
 
-        } else {
+        return messageObject;
+    }
 
+    private String getOrigin(URL url) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(url.getProtocol()).append("://");
+        sb.append(url.getHost());
+        int port = url.getPort();
+        if (port >= 0) {
+            sb.append(":").append(port);
         }
+
+        return url.toString();//sb.toString();
     }
 
     @Override
@@ -125,8 +157,7 @@ public class WebAppInstaller extends GeckoApp {
 
     @Override
     protected String getDefaultProfileName() {
-        String profile = "webapp-installer";
-        return profile;
+        return mProfileName;
     }
 
     @Override

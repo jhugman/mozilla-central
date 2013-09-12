@@ -754,7 +754,7 @@ this.DOMApplicationRegistry = {
       cpmm = null;
       ppmm = null;
     } else if (aTopic === "Webapps:AutoInstall") {
-      dump("Webapps.jsm: Webapps:AutoInstall: aSubject=" + JSON.stringify(aSubject) + "; aData=" + JSON.stringify({url:aData}));
+      dump("Webapps.jsm: Webapps:AutoInstall: aSubject=" + JSON.stringify(aSubject) + "; aData=" + JSON.stringify(aData));
 
       this._autoInstall(aData);
     }
@@ -769,10 +769,14 @@ this.DOMApplicationRegistry = {
         dump("Webapps.jsm: " + messageName + ": " + JSON.stringify(data));
       }
     };
+
+    let data = JSON.parse(aData);
+    let type = data.type; // can be hosted or packaged.
+
     this.doInstall({
       app: {
-        origin: aData,
-        manifestURL: aData
+        origin: data.origin,
+        manifestURL: data.manifestUrl
       },
       silentInstall: true,
       mm: mm
