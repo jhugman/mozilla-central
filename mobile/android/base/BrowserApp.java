@@ -8,11 +8,12 @@ package org.mozilla.gecko;
 import org.mozilla.gecko.animation.PropertyAnimator;
 import org.mozilla.gecko.db.BrowserContract.Combined;
 import org.mozilla.gecko.db.BrowserDB;
+import org.mozilla.gecko.favicons.Favicons;
+import org.mozilla.gecko.favicons.OnFaviconLoadedListener;
+import org.mozilla.gecko.favicons.LoadFaviconTask;
 import org.mozilla.gecko.gfx.BitmapUtils;
 import org.mozilla.gecko.gfx.GeckoLayerClient;
 import org.mozilla.gecko.gfx.ImmutableViewportMetrics;
-import org.mozilla.gecko.gfx.LayerView;
-import org.mozilla.gecko.gfx.PanZoomController;
 import org.mozilla.gecko.health.BrowserHealthRecorder;
 import org.mozilla.gecko.health.BrowserHealthReporter;
 import org.mozilla.gecko.home.BrowserSearch;
@@ -20,7 +21,6 @@ import org.mozilla.gecko.home.HomePager;
 import org.mozilla.gecko.home.HomePager.OnUrlOpenListener;
 import org.mozilla.gecko.menu.GeckoMenu;
 import org.mozilla.gecko.util.Clipboard;
-import org.mozilla.gecko.util.FloatUtils;
 import org.mozilla.gecko.util.GamepadUtils;
 import org.mozilla.gecko.util.HardwareUtils;
 import org.mozilla.gecko.util.StringUtils;
@@ -42,9 +42,7 @@ import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.database.Cursor;
 import android.graphics.Bitmap;
-import android.graphics.PointF;
 import android.graphics.Rect;
-import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.nfc.NdefMessage;
@@ -53,8 +51,6 @@ import android.nfc.NfcAdapter;
 import android.nfc.NfcEvent;
 import android.os.Build;
 import android.os.Bundle;
-import android.support.v4.app.Fragment;
-import android.support.v4.app.FragmentManager;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.InputDevice;
@@ -69,16 +65,11 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewStub;
 import android.view.animation.Interpolator;
-import android.widget.LinearLayout;
 import android.widget.RelativeLayout;
 import android.widget.Toast;
 
-import java.io.File;
-import java.io.InputStream;
-import java.net.URL;
 import java.net.URLEncoder;
 import java.util.EnumSet;
-import java.util.List;
 import java.util.Vector;
 
 abstract public class BrowserApp extends GeckoApp
@@ -116,9 +107,6 @@ abstract public class BrowserApp extends GeckoApp
     private HomePager mHomePager;
     private View mHomePagerContainer;
     protected Telemetry.Timer mAboutHomeStartupTimer = null;
-
-    // Set the default session restore value
-    private int mSessionRestore = -1;
 
     private static final int GECKO_TOOLS_MENU = -1;
     private static final int ADDON_MENU_OFFSET = 1000;
@@ -395,23 +383,14 @@ abstract public class BrowserApp extends GeckoApp
     }
 
     @Override
-    protected int getSessionRestoreState(Bundle savedInstanceState) {
-        if (mSessionRestore > -1) {
-            return mSessionRestore;
-        }
-
-        return super.getSessionRestoreState(savedInstanceState);
-    }
-
-    @Override
     public void onCreate(Bundle savedInstanceState) {
         mAboutHomeStartupTimer = new Telemetry.Timer("FENNEC_STARTUP_TIME_ABOUTHOME");
 
         String args = getIntent().getStringExtra("args");
         if (args != null && args.contains(GUEST_BROWSING_ARG)) {
             mProfile = GeckoProfile.createGuestProfile(this);
-        } else if (GeckoProfile.maybeCleanupGuestProfile(this)) {
-            mSessionRestore = RESTORE_NORMAL;
+        } else {
+            GeckoProfile.maybeCleanupGuestProfile(this);
         }
 
         super.onCreate(savedInstanceState);
@@ -469,6 +448,20 @@ abstract public class BrowserApp extends GeckoApp
         mBrowserToolbar.setOnFilterListener(new BrowserToolbar.OnFilterListener() {
             public void onFilter(String searchText, AutocompleteHandler handler) {
                 filterEditingMode(searchText, handler);
+            }
+        });
+
+        mBrowserToolbar.setOnStartEditingListener(new BrowserToolbar.OnStartEditingListener() {
+            public void onStartEditing() {
+                // Temporarily disable doorhanger notifications.
+                mDoorHangerPopup.disable();
+            }
+        });
+
+        mBrowserToolbar.setOnStopEditingListener(new BrowserToolbar.OnStopEditingListener() {
+            public void onStopEditing() {
+                // Re-enable doorhanger notifications.
+                mDoorHangerPopup.enable();
             }
         });
 
@@ -716,9 +709,8 @@ abstract public class BrowserApp extends GeckoApp
                     return true;
                 }
 
-                Favicons favicons = Favicons.getInstance();
-                favicons.loadFavicon(url, tab.getFaviconURL(), 0,
-                new Favicons.OnFaviconLoadedListener() {
+                Favicons.loadFavicon(url, tab.getFaviconURL(), 0,
+                new OnFaviconLoadedListener() {
                     @Override
                     public void onFaviconLoaded(String url, Bitmap favicon) {
                         GeckoAppShell.createShortcut(title, url, url, favicon == null ? null : favicon, "");
@@ -836,7 +828,7 @@ abstract public class BrowserApp extends GeckoApp
     @Override
     protected void loadStartupTab(String url) {
         // We aren't showing about:home, so cancel the telemetry timer
-        if (url != null || mRestoreMode != RESTORE_NONE) {
+        if (url != null || mShouldRestore) {
             mAboutHomeStartupTimer.cancel();
         }
 
@@ -969,13 +961,6 @@ abstract public class BrowserApp extends GeckoApp
         if (mSiteIdentityPopup != null) {
             mSiteIdentityPopup.dismiss();
         }
-    }
-
-    public View getActionBarLayout() {
-        RelativeLayout actionBar = (RelativeLayout) LayoutInflater.from(this).inflate(R.layout.browser_toolbar, null);
-        actionBar.setLayoutParams(new RelativeLayout.LayoutParams(RelativeLayout.LayoutParams.FILL_PARENT,
-                                                                  (int) getResources().getDimension(R.dimen.browser_toolbar_height)));
-        return actionBar;
     }
 
     @Override
@@ -1344,9 +1329,9 @@ abstract public class BrowserApp extends GeckoApp
     private void loadFavicon(final Tab tab) {
         maybeCancelFaviconLoad(tab);
 
-        int flags = Favicons.FLAG_SCALE | ( (tab.isPrivate() || tab.getErrorType() != Tab.ErrorType.NONE) ? 0 : Favicons.FLAG_PERSIST);
-        long id = Favicons.getInstance().loadFavicon(tab.getURL(), tab.getFaviconURL(), flags,
-                        new Favicons.OnFaviconLoadedListener() {
+        int flags = LoadFaviconTask.FLAG_SCALE | ( (tab.isPrivate() || tab.getErrorType() != Tab.ErrorType.NONE) ? 0 : LoadFaviconTask.FLAG_PERSIST);
+        int id = Favicons.loadFavicon(tab.getURL(), tab.getFaviconURL(), flags,
+                        new OnFaviconLoadedListener() {
 
             @Override
             public void onFaviconLoaded(String pageUrl, Bitmap favicon) {
@@ -1371,13 +1356,13 @@ abstract public class BrowserApp extends GeckoApp
     }
 
     private void maybeCancelFaviconLoad(Tab tab) {
-        long faviconLoadId = tab.getFaviconLoadId();
+        int faviconLoadId = tab.getFaviconLoadId();
 
         if (faviconLoadId == Favicons.NOT_LOADING)
             return;
 
         // Cancel pending favicon load task
-        Favicons.getInstance().cancelFaviconLoad(faviconLoadId);
+        Favicons.cancelFaviconLoad(faviconLoadId);
 
         // Reset favicon load state
         tab.setFaviconLoadId(Favicons.NOT_LOADING);
@@ -1421,7 +1406,7 @@ abstract public class BrowserApp extends GeckoApp
         animator.start();
     }
 
-    void commitEditingMode() {
+    private void commitEditingMode() {
         if (!mBrowserToolbar.isEditing()) {
             return;
         }
@@ -1496,7 +1481,7 @@ abstract public class BrowserApp extends GeckoApp
         }
     }
 
-    boolean dismissEditingMode() {
+    private boolean dismissEditingMode() {
         if (!mBrowserToolbar.isEditing()) {
             return false;
         }

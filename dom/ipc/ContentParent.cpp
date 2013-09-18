@@ -668,6 +668,7 @@ ContentParent::Init()
         obs->AddObserver(this, "file-watcher-update", false);
 #ifdef MOZ_WIDGET_GONK
         obs->AddObserver(this, NS_VOLUME_STATE_CHANGED, false);
+        obs->AddObserver(this, "phone-state-changed", false);
 #endif
 #ifdef ACCESSIBILITY
         obs->AddObserver(this, "a11y-init-or-shutdown", false);
@@ -1580,16 +1581,16 @@ ContentParent::RecvFirstIdle()
 }
 
 bool
-ContentParent::RecvAudioChannelGetMuted(const AudioChannelType& aType,
+ContentParent::RecvAudioChannelGetState(const AudioChannelType& aType,
                                         const bool& aElementHidden,
                                         const bool& aElementWasHidden,
-                                        bool* aValue)
+                                        AudioChannelState* aState)
 {
     nsRefPtr<AudioChannelService> service =
         AudioChannelService::GetAudioChannelService();
-    *aValue = false;
+    *aState = AUDIO_CHANNEL_STATE_NORMAL;
     if (service) {
-        *aValue = service->GetMutedInternal(aType, mChildID,
+        *aState = service->GetStateInternal(aType, mChildID,
                                             aElementHidden, aElementWasHidden);
     }
     return true;
@@ -1625,6 +1626,19 @@ ContentParent::RecvAudioChannelChangedNotification()
         AudioChannelService::GetAudioChannelService();
     if (service) {
        service->SendAudioChannelChangedNotification(ChildID());
+    }
+    return true;
+}
+
+bool
+ContentParent::RecvAudioChannelChangeDefVolChannel(
+  const AudioChannelType& aType, const bool& aHidden)
+{
+    nsRefPtr<AudioChannelService> service =
+        AudioChannelService::GetAudioChannelService();
+    if (service) {
+       service->SetDefaultVolumeControlChannelInternal(aType,
+                                                       aHidden, mChildID);
     }
     return true;
 }
@@ -1749,6 +1763,9 @@ ContentParent::Observe(nsISupports* aSubject,
         unused << SendFileSystemUpdate(volName, mountPoint, state,
                                        mountGeneration, isMediaPresent,
                                        isSharing);
+    } else if (!strcmp(aTopic, "phone-state-changed")) {
+        nsString state(aData);
+        unused << SendNotifyPhoneStateChange(state);
     }
 #endif
 #ifdef ACCESSIBILITY
@@ -2218,11 +2235,12 @@ ContentParent::AllocPExternalHelperAppParent(const OptionalURIParams& uri,
                                              const nsCString& aContentDisposition,
                                              const bool& aForceSave,
                                              const int64_t& aContentLength,
-                                             const OptionalURIParams& aReferrer)
+                                             const OptionalURIParams& aReferrer,
+                                             PBrowserParent* aBrowser)
 {
     ExternalHelperAppParent *parent = new ExternalHelperAppParent(uri, aContentLength);
     parent->AddRef();
-    parent->Init(this, aMimeContentType, aContentDisposition, aForceSave, aReferrer);
+    parent->Init(this, aMimeContentType, aContentDisposition, aForceSave, aReferrer, aBrowser);
     return parent;
 }
 

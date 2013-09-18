@@ -205,6 +205,9 @@ class MacroAssemblerX86Shared : public Assembler
         framePushed_ += sizeof(word.value);
         return pushWithPatch(word);
     }
+    CodeOffsetLabel PushWithPatch(const ImmPtr &imm) {
+        return PushWithPatch(ImmWord(uintptr_t(imm.value)));
+    }
 
     template <typename T>
     void Pop(const T &t) {
@@ -389,6 +392,9 @@ class MacroAssemblerX86Shared : public Assembler
     void storeFloat(FloatRegister src, const BaseIndex &dest) {
         movss(src, Operand(dest));
     }
+    void moveFloat(FloatRegister src, FloatRegister dest) {
+        movss(src, dest);
+    }
 
     // Checks whether a double is representable as a 32-bit integer. If so, the
     // integer is written to the output register. Otherwise, a bailout is taken to
@@ -528,7 +534,7 @@ class MacroAssemblerX86Shared : public Assembler
     bool buildOOLFakeExitFrame(void *fakeReturnAddr) {
         uint32_t descriptor = MakeFrameDescriptor(framePushed(), IonFrame_OptimizedJS);
         Push(Imm32(descriptor));
-        Push(ImmWord(fakeReturnAddr));
+        Push(ImmPtr(fakeReturnAddr));
         return true;
     }
 
