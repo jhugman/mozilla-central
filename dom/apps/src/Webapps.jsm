@@ -122,6 +122,7 @@ this.DOMApplicationRegistry = {
 
     Services.obs.addObserver(this, "xpcom-shutdown", false);
     Services.obs.addObserver(this, "Webapps:AutoInstall", false);
+    Services.obs.addObserver(this, "Webapps:AutoInstallPackage", false);
 
     AppDownloadManager.registerCancelFunction(this.cancelDownload.bind(this));
 
@@ -754,19 +755,23 @@ this.DOMApplicationRegistry = {
       cpmm = null;
       ppmm = null;
     } else if (aTopic === "Webapps:AutoInstall") {
-      dump("Webapps.jsm: Webapps:AutoInstall: aSubject=" + JSON.stringify(aSubject) + "; aData=" + JSON.stringify({url:aData}));
+      debug("Webapps.jsm: Webapps:AutoInstall: aSubject=" + JSON.stringify(aSubject) + "; aData=" + JSON.stringify({url:aData}));
 
       this._autoInstall(aData);
+    } else if (aTopic === "Webapps:AutoInstallPackage") {
+      debug("Webapps.jsm: Webapps:AutoInstallPackage: aSubject=" + JSON.stringify(aSubject) + "; aData=" + JSON.stringify({url:aData}));
+
+      this._autoInstallPackage(aData);
     }
   },
 
 
   _autoInstall: function (aData) {
-    dump("AutoInstalling from Webapps.jsm");
+    debug("AutoInstalling from Webapps.jsm");
 
     let mm = {
       sendAsyncMessage: function (messageName, data) {
-        dump("Webapps.jsm: " + messageName + ": " + JSON.stringify(data));
+        debug("Webapps.jsm: " + messageName + ": " + JSON.stringify(data));
       }
     };
     this.doInstall({
@@ -777,7 +782,28 @@ this.DOMApplicationRegistry = {
       silentInstall: true,
       mm: mm
     }, mm);
-    dump("Tried usual doInstall()");
+    debug("Tried usual doInstall()");
+  },
+
+  _autoInstallPackage: function (aData) {
+    debug("AutoInstalling package from Webapps.jsm");
+
+    let mm = {
+      sendAsyncMessage: function (messageName, data) {
+        debug("Webapps.jsm: " + messageName + ": " + JSON.stringify(data));
+      }
+    };
+    this.doInstallPackage({
+      isPackage: true,
+      app: {
+        origin: aData,
+        installOrigin: aData,
+        manifestURL: aData
+      },
+      silentInstall: true,
+      mm: mm
+    }, mm);
+    debug("Tried usual doInstallPackage()");
   },
 
   _downloadApk: function (aData, aMm) {
@@ -1867,7 +1893,7 @@ this.DOMApplicationRegistry = {
           let prefName = "dom.mozApps.auto_confirm_install";
           if ((Services.prefs.prefHasUserValue(prefName) &&
               Services.prefs.getBoolPref(prefName))) {
-            dump("Confirming install without user interaction");
+            debug("Confirming install without user interaction");
             this.confirmInstall(aData);
           } else {
             Services.obs.notifyObservers(aMm, "webapps-ask-install",
@@ -2152,7 +2178,18 @@ this.DOMApplicationRegistry = {
     // saved in the registry.
     this._saveApps((function() {
       this.broadcastMessage("Webapps:AddApp", { id: id, app: appObject });
-      this.broadcastMessage("Webapps:Install:Return:OK", aData);
+      if (aData.isPackage && aData.silentInstall) {
+        // Skip directly to onInstallSuccessAck, since there isn't
+        // a WebappsRegistry to receive Webapps:Install:Return:OK and respond
+        // Webapps:Install:Return:Ack.
+        this.onInstallSuccessAck(app.manifestURL);
+      }
+      else {
+        // Broadcast Webapps:Install:Return:OK so the WebappsRegistry can notify
+        // the installing page about the successful install, after which it'll
+        // respond Webapps:Install:Return:Ack, which calls onInstallSuccessAck.
+        this.broadcastMessage("Webapps:Install:Return:OK", aData);
+      }
     }).bind(this));
 
     if (!aData.isPackage) {
