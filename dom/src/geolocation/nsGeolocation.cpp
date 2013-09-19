@@ -369,11 +369,14 @@ nsGeolocationRequest::Notify(nsITimer* aTimer)
 {
   MOZ_ASSERT(!mShutdown, "timeout after shutdown");
 
-  NotifyError(nsIDOMGeoPositionError::TIMEOUT);
   if (!mIsWatchPositionRequest) {
     Shutdown();
     mLocator->RemoveRequest(this);
-  } else if (!mShutdown) {
+  }
+
+  NotifyError(nsIDOMGeoPositionError::TIMEOUT);
+
+  if (!mShutdown) {
     SetTimeoutTimer();
   }
 
@@ -534,6 +537,11 @@ nsGeolocationRequest::SendLocation(nsIDOMGeoPosition* aPosition)
   }
 
   mLocator->SetCachedPosition(wrapped);
+  if (!mIsWatchPositionRequest) {
+    // Cancel timer and position updates in case the position
+    // callback spins the event loop
+    Shutdown();
+  }
 
   // Ensure that the proper context is on the stack (bug 452762)
   nsCxPusher pusher;
@@ -552,9 +560,10 @@ nsGeolocationRequest::SendLocation(nsIDOMGeoPosition* aPosition)
     callback->HandleEvent(aPosition);
   }
 
-  if (!mIsWatchPositionRequest) {
-    Shutdown();
-  } else if (!mShutdown) { // The handler may have called clearWatch
+  if (!mShutdown) {
+    // For watch requests, the handler may have called clearWatch
+    MOZ_ASSERT(mIsWatchPositionRequest,
+               "non-shutdown getCurrentPosition request after callback!");
     SetTimeoutTimer();
   }
 }
@@ -1011,26 +1020,11 @@ NS_INTERFACE_MAP_END
 NS_IMPL_CYCLE_COLLECTING_ADDREF(Geolocation)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(Geolocation)
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(Geolocation)
-
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(Geolocation)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mCachedPosition)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
-  tmp->mPendingRequests.Clear();
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mPendingCallbacks)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mWatchingCallbacks)
-NS_IMPL_CYCLE_COLLECTION_UNLINK_END
-
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(Geolocation)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCachedPosition)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
-  for (uint32_t i = 0; i < tmp->mPendingRequests.Length(); ++i)
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPendingRequests[i].request)
-
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPendingCallbacks)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mWatchingCallbacks)
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
-NS_IMPL_CYCLE_COLLECTION_TRACE_WRAPPERCACHE(Geolocation)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_4(Geolocation,
+                                        mCachedPosition,
+                                        mPendingCallbacks,
+                                        mWatchingCallbacks,
+                                        mPendingRequests)
 
 Geolocation::Geolocation()
 : mLastWatchId(0)
@@ -1248,8 +1242,7 @@ Geolocation::GetCurrentPosition(GeoPositionCallback& callback,
   }
 
   if (sGeoInitPending) {
-    PendingRequest req = { request, PendingRequest::GetCurrentPosition };
-    mPendingRequests.AppendElement(req);
+    mPendingRequests.AppendElement(request);
     return NS_OK;
   }
 
@@ -1342,8 +1335,7 @@ Geolocation::WatchPosition(GeoPositionCallback& aCallback,
   }
 
   if (sGeoInitPending) {
-    PendingRequest req = { request, PendingRequest::WatchPosition };
-    mPendingRequests.AppendElement(req);
+    mPendingRequests.AppendElement(request);
     return NS_OK;
   }
 
@@ -1387,9 +1379,9 @@ Geolocation::ClearWatch(int32_t aWatchId)
   // make sure we also search through the pending requests lists for
   // watches to clear...
   for (uint32_t i = 0, length = mPendingRequests.Length(); i < length; ++i) {
-    if ((mPendingRequests[i].type == PendingRequest::WatchPosition) &&
-        (mPendingRequests[i].request->WatchId() == aWatchId)) {
-      mPendingRequests[i].request->Shutdown();
+    if (mPendingRequests[i]->IsWatch() &&
+        (mPendingRequests[i]->WatchId() == aWatchId)) {
+      mPendingRequests[i]->Shutdown();
       mPendingRequests.RemoveElementAt(i);
       break;
     }
@@ -1402,14 +1394,10 @@ void
 Geolocation::ServiceReady()
 {
   for (uint32_t length = mPendingRequests.Length(); length > 0; --length) {
-    switch (mPendingRequests[0].type) {
-      case PendingRequest::GetCurrentPosition:
-        GetCurrentPositionReady(mPendingRequests[0].request);
-        break;
-
-      case PendingRequest::WatchPosition:
-        WatchPositionReady(mPendingRequests[0].request);
-        break;
+    if (mPendingRequests[0]->IsWatch()) {
+      WatchPositionReady(mPendingRequests[0]);
+    } else {
+      GetCurrentPositionReady(mPendingRequests[0]);
     }
 
     mPendingRequests.RemoveElementAt(0);
@@ -1473,7 +1461,7 @@ Geolocation::RegisterRequestWithPrompt(nsGeolocationRequest* request)
 
     // because owner implements nsITabChild, we can assume that it is
     // the one and only TabChild.
-    TabChild* child = GetTabChildFrom(window->GetDocShell());
+    TabChild* child = TabChild::GetFrom(window->GetDocShell());
     if (!child) {
       return false;
     }

@@ -58,7 +58,7 @@ extern JS_FRIEND_API(bool)
 JS_SplicePrototype(JSContext *cx, JSObject *obj, JSObject *proto);
 
 extern JS_FRIEND_API(JSObject *)
-JS_NewObjectWithUniqueType(JSContext *cx, JSClass *clasp, JSObject *proto, JSObject *parent);
+JS_NewObjectWithUniqueType(JSContext *cx, const JSClass *clasp, JSObject *proto, JSObject *parent);
 
 extern JS_FRIEND_API(uint32_t)
 JS_ObjectCountDynamicSlots(JS::HandleObject obj);
@@ -203,7 +203,7 @@ struct JSFunctionSpecWithHelp {
 extern JS_FRIEND_API(bool)
 JS_DefineFunctionsWithHelp(JSContext *cx, JSObject *obj, const JSFunctionSpecWithHelp *fs);
 
-typedef bool (* JS_SourceHook)(JSContext *cx, JS::Handle<JSScript*> script,
+typedef bool (* JS_SourceHook)(JSContext *cx, const char *filename,
                                jschar **src, uint32_t *length);
 
 extern JS_FRIEND_API(void)
@@ -337,12 +337,12 @@ GetAnyCompartmentInZone(JS::Zone *zone);
 namespace shadow {
 
 struct TypeObject {
-    Class       *clasp;
+    const Class *clasp;
     JSObject    *proto;
 };
 
 struct BaseShape {
-    js::Class *clasp;
+    const js::Class *clasp;
     JSObject *parent;
     JSObject *_1;
     JSCompartment *compartment;
@@ -396,15 +396,15 @@ struct Atom {
 
 // This is equal to |&JSObject::class_|.  Use it in places where you don't want
 // to #include jsobj.h.
-extern JS_FRIEND_DATA(js::Class* const) ObjectClassPtr;
+extern JS_FRIEND_DATA(const js::Class* const) ObjectClassPtr;
 
-inline js::Class *
+inline const js::Class *
 GetObjectClass(JSObject *obj)
 {
     return reinterpret_cast<const shadow::Object*>(obj)->type->clasp;
 }
 
-inline JSClass *
+inline const JSClass *
 GetObjectJSClass(JSObject *obj)
 {
     return js::Jsvalify(GetObjectClass(obj));
@@ -487,7 +487,7 @@ NewFunctionByIdWithReserved(JSContext *cx, JSNative native, unsigned nargs, unsi
 
 JS_FRIEND_API(JSObject *)
 InitClassWithReserved(JSContext *cx, JSObject *obj, JSObject *parent_proto,
-                      JSClass *clasp, JSNative constructor, unsigned nargs,
+                      const JSClass *clasp, JSNative constructor, unsigned nargs,
                       const JSPropertySpec *ps, const JSFunctionSpec *fs,
                       const JSPropertySpec *static_ps, const JSFunctionSpec *static_fs);
 
@@ -637,6 +637,14 @@ GetNativeStackLimit(JSContext *cx)
 #define JS_CHECK_RECURSION_WITH_SP_DONT_REPORT(cx, sp, onerror)                 \
     JS_BEGIN_MACRO                                                              \
         if (!JS_CHECK_STACK_SIZE(js::GetNativeStackLimit(cx), sp)) {            \
+            onerror;                                                            \
+        }                                                                       \
+    JS_END_MACRO
+
+#define JS_CHECK_RECURSION_WITH_SP(cx, sp, onerror)                             \
+    JS_BEGIN_MACRO                                                              \
+        if (!JS_CHECK_STACK_SIZE(js::GetNativeStackLimit(cx), sp)) {            \
+            js_ReportOverRecursed(cx);                                          \
             onerror;                                                            \
         }                                                                       \
     JS_END_MACRO
@@ -1565,31 +1573,6 @@ DefaultValue(JSContext *cx, JS::HandleObject obj, JSType hint, JS::MutableHandle
 extern JS_FRIEND_API(bool)
 CheckDefineProperty(JSContext *cx, JS::HandleObject obj, JS::HandleId id, JS::HandleValue value,
                     JSPropertyOp getter, JSStrictPropertyOp setter, unsigned attrs);
-
-class ScriptSource;
-
-// An AsmJSModuleSourceDesc object holds a reference to the ScriptSource
-// containing an asm.js module as well as the [begin, end) range of the
-// module's chars within the ScriptSource.
-class AsmJSModuleSourceDesc
-{
-    ScriptSource *scriptSource_;
-    uint32_t bufStart_;
-    uint32_t bufEnd_;
-
-  public:
-    AsmJSModuleSourceDesc() : scriptSource_(NULL), bufStart_(UINT32_MAX), bufEnd_(UINT32_MAX) {}
-    void init(ScriptSource *scriptSource, uint32_t bufStart, uint32_t bufEnd);
-    ~AsmJSModuleSourceDesc();
-
-    ScriptSource *scriptSource() const { JS_ASSERT(scriptSource_ != NULL); return scriptSource_; }
-    uint32_t bufStart() const { JS_ASSERT(bufStart_ != UINT32_MAX); return bufStart_; }
-    uint32_t bufEnd() const { JS_ASSERT(bufStart_ != UINT32_MAX); return bufEnd_; }
-
-  private:
-    AsmJSModuleSourceDesc(const AsmJSModuleSourceDesc &) MOZ_DELETE;
-    void operator=(const AsmJSModuleSourceDesc &) MOZ_DELETE;
-};
 
 } /* namespace js */
 

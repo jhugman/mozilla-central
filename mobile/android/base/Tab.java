@@ -54,7 +54,7 @@ public class Tab {
     private boolean mExternal;
     private boolean mBookmark;
     private boolean mReadingListItem;
-    private long mFaviconLoadId;
+    private int mFaviconLoadId;
     private String mContentType;
     private boolean mHasTouchListeners;
     private ZoomConstraints mZoomConstraints;
@@ -184,7 +184,7 @@ public class Tab {
         return mFavicon;
     }
 
-    public Drawable getThumbnail() {
+    public BitmapDrawable getThumbnail() {
         return mThumbnail;
     }
 
@@ -351,11 +351,11 @@ public class Tab {
         return mHasTouchListeners;
     }
 
-    public void setFaviconLoadId(long faviconLoadId) {
+    public void setFaviconLoadId(int faviconLoadId) {
         mFaviconLoadId = faviconLoadId;
     }
 
-    public long getFaviconLoadId() {
+    public int getFaviconLoadId() {
         return mFaviconLoadId;
     }
 

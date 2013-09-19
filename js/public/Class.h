@@ -35,7 +35,7 @@ class SpecialId;
 
 // This is equal to JSFunction::class_.  Use it in places where you don't want
 // to #include jsfun.h.
-extern JS_FRIEND_DATA(js::Class* const) FunctionClassPtr;
+extern JS_FRIEND_DATA(const js::Class* const) FunctionClassPtr;
 
 static JS_ALWAYS_INLINE jsid
 SPECIALID_TO_JSID(const SpecialId &sid);
@@ -291,11 +291,6 @@ typedef bool
 // marking its native structures.
 typedef void
 (* JSTraceOp)(JSTracer *trc, JSObject *obj);
-
-// Callback that JSTraceOp implementation can provide to return a string
-// describing the reference traced with JS_CallTracer.
-typedef void
-(* JSTraceNamePrinter)(JSTracer *trc, char *buf, size_t bufsize);
 
 // A generic type for functions mapping an object to another object, or null
 // if an error or exception was thrown on cx.
@@ -634,22 +629,12 @@ JS_STATIC_ASSERT(offsetof(JSClass, hasInstance) == offsetof(Class, hasInstance))
 JS_STATIC_ASSERT(offsetof(JSClass, trace) == offsetof(Class, trace));
 JS_STATIC_ASSERT(sizeof(JSClass) == sizeof(Class));
 
-static JS_ALWAYS_INLINE JSClass *
-Jsvalify(Class *c)
-{
-    return (JSClass *)c;
-}
 static JS_ALWAYS_INLINE const JSClass *
 Jsvalify(const Class *c)
 {
     return (const JSClass *)c;
 }
 
-static JS_ALWAYS_INLINE Class *
-Valueify(JSClass *c)
-{
-    return (Class *)c;
-}
 static JS_ALWAYS_INLINE const Class *
 Valueify(const JSClass *c)
 {

@@ -16,8 +16,9 @@
 #include "jit/BaselineFrame.h"
 #include "vm/ScopeObject.h"
 
+#include "jsobjinlines.h"
+
 #include "jit/BaselineFrame-inl.h"
-#include "jit/IonFrameIterator-inl.h"
 
 namespace js {
 

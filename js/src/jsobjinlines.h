@@ -18,9 +18,8 @@
 
 #include "jsatominlines.h"
 #include "jscompartmentinlines.h"
+#include "jsgcinlines.h"
 #include "jsinferinlines.h"
-
-#include "vm/Shape-inl.h"
 
 /* static */ inline bool
 JSObject::setGenericAttributes(JSContext *cx, js::HandleObject obj,
@@ -84,7 +83,7 @@ JSObject::finalize(js::FreeOp *fop)
         JS_ASSERT(CurrentThreadCanAccessRuntime(fop->runtime()));
     }
 #endif
-    js::Class *clasp = getClass();
+    const js::Class *clasp = getClass();
     if (clasp->finalize)
         clasp->finalize(fop, this);
 
@@ -130,79 +129,10 @@ JSObject::canRemoveLastProperty()
 }
 
 inline void
-JSObject::setReservedSlot(uint32_t index, const js::Value &v)
-{
-    JS_ASSERT(index < JSSLOT_FREE(getClass()));
-    setSlot(index, v);
-}
-
-inline void
-JSObject::initReservedSlot(uint32_t index, const js::Value &v)
-{
-    JS_ASSERT(index < JSSLOT_FREE(getClass()));
-    initSlot(index, v);
-}
-
-inline void
-JSObject::prepareSlotRangeForOverwrite(size_t start, size_t end)
-{
-    for (size_t i = start; i < end; i++)
-        getSlotAddressUnchecked(i)->js::HeapSlot::~HeapSlot();
-}
-
-inline void
-JSObject::prepareElementRangeForOverwrite(size_t start, size_t end)
-{
-    JS_ASSERT(end <= getDenseInitializedLength());
-    for (size_t i = start; i < end; i++)
-        elements[i].js::HeapSlot::~HeapSlot();
-}
-
-inline void
-JSObject::setDenseInitializedLength(uint32_t length)
-{
-    JS_ASSERT(isNative());
-    JS_ASSERT(length <= getDenseCapacity());
-    prepareElementRangeForOverwrite(length, getElementsHeader()->initializedLength);
-    getElementsHeader()->initializedLength = length;
-}
-
-inline void
 JSObject::setShouldConvertDoubleElements()
 {
     JS_ASSERT(is<js::ArrayObject>() && !hasEmptyElements());
     getElementsHeader()->setShouldConvertDoubleElements();
-}
-
-inline bool
-JSObject::ensureElements(js::ThreadSafeContext *cx, uint32_t capacity)
-{
-    if (capacity > getDenseCapacity())
-        return growElements(cx, capacity);
-    return true;
-}
-
-inline void
-JSObject::setDenseElement(uint32_t index, const js::Value &val)
-{
-    JS_ASSERT(isNative() && index < getDenseInitializedLength());
-    elements[index].set(this, js::HeapSlot::Element, index, val);
-}
-
-inline void
-JSObject::setDenseElementMaybeConvertDouble(uint32_t index, const js::Value &val)
-{
-    if (val.isInt32() && shouldConvertDoubleElements())
-        setDenseElement(index, js::DoubleValue(val.toInt32()));
-    else
-        setDenseElement(index, val);
-}
-
-inline void
-JSObject::initDenseElement(uint32_t index, const js::Value &val)
-{
-    JS_ASSERT(isNative() && index < getDenseInitializedLength());
-    elements[index].init(this, js::HeapSlot::Element, index, val);
 }
 
 /* static */ inline void
@@ -238,72 +168,6 @@ JSObject::removeDenseElementForSparseIndex(js::ExclusiveContext *cx,
                                    js::types::OBJECT_FLAG_SPARSE_INDEXES);
     if (obj->containsDenseElement(index))
         obj->setDenseElement(index, js::MagicValue(JS_ELEMENTS_HOLE));
-}
-
-inline void
-JSObject::copyDenseElements(uint32_t dstStart, const js::Value *src, uint32_t count)
-{
-    JS_ASSERT(dstStart + count <= getDenseCapacity());
-    JS::Zone *zone = this->zone();
-    for (uint32_t i = 0; i < count; ++i)
-        elements[dstStart + i].set(zone, this, js::HeapSlot::Element, dstStart + i, src[i]);
-}
-
-inline void
-JSObject::initDenseElements(uint32_t dstStart, const js::Value *src, uint32_t count)
-{
-    JS_ASSERT(dstStart + count <= getDenseCapacity());
-    JSRuntime *rt = runtimeFromMainThread();
-    for (uint32_t i = 0; i < count; ++i)
-        elements[dstStart + i].init(rt, this, js::HeapSlot::Element, dstStart + i, src[i]);
-}
-
-inline void
-JSObject::moveDenseElements(uint32_t dstStart, uint32_t srcStart, uint32_t count)
-{
-    JS_ASSERT(dstStart + count <= getDenseCapacity());
-    JS_ASSERT(srcStart + count <= getDenseInitializedLength());
-
-    /*
-     * Using memmove here would skip write barriers. Also, we need to consider
-     * an array containing [A, B, C], in the following situation:
-     *
-     * 1. Incremental GC marks slot 0 of array (i.e., A), then returns to JS code.
-     * 2. JS code moves slots 1..2 into slots 0..1, so it contains [B, C, C].
-     * 3. Incremental GC finishes by marking slots 1 and 2 (i.e., C).
-     *
-     * Since normal marking never happens on B, it is very important that the
-     * write barrier is invoked here on B, despite the fact that it exists in
-     * the array before and after the move.
-    */
-    JS::Zone *zone = this->zone();
-    if (zone->needsBarrier()) {
-        if (dstStart < srcStart) {
-            js::HeapSlot *dst = elements + dstStart;
-            js::HeapSlot *src = elements + srcStart;
-            for (uint32_t i = 0; i < count; i++, dst++, src++)
-                dst->set(zone, this, js::HeapSlot::Element, dst - elements, *src);
-        } else {
-            js::HeapSlot *dst = elements + dstStart + count - 1;
-            js::HeapSlot *src = elements + srcStart + count - 1;
-            for (uint32_t i = 0; i < count; i++, dst--, src--)
-                dst->set(zone, this, js::HeapSlot::Element, dst - elements, *src);
-        }
-    } else {
-        memmove(elements + dstStart, elements + srcStart, count * sizeof(js::HeapSlot));
-        DenseRangeWriteBarrierPost(runtimeFromMainThread(), this, dstStart, count);
-    }
-}
-
-inline void
-JSObject::moveDenseElementsUnbarriered(uint32_t dstStart, uint32_t srcStart, uint32_t count)
-{
-    JS_ASSERT(!zone()->needsBarrier());
-
-    JS_ASSERT(dstStart + count <= getDenseCapacity());
-    JS_ASSERT(srcStart + count <= getDenseCapacity());
-
-    memmove(elements + dstStart, elements + srcStart, count * sizeof(js::Value));
 }
 
 inline void
@@ -647,14 +511,6 @@ JSObject::hasProperty(JSContext *cx, js::HandleObject obj,
     return true;
 }
 
-inline void
-JSObject::nativeSetSlot(uint32_t slot, const js::Value &value)
-{
-    JS_ASSERT(isNative());
-    JS_ASSERT(slot < slotSpan());
-    return setSlot(slot, value);
-}
-
 /* static */ inline void
 JSObject::nativeSetSlotWithType(js::ExclusiveContext *cx, js::HandleObject obj, js::Shape *shape,
                                 const js::Value &value)
@@ -797,7 +653,7 @@ IsNativeFunction(const js::Value &v, JSNative native)
  * TODO: a per-thread shape-based cache would be faster and simpler.
  */
 static JS_ALWAYS_INLINE bool
-ClassMethodIsNative(JSContext *cx, JSObject *obj, Class *clasp, jsid methodid, JSNative native)
+ClassMethodIsNative(JSContext *cx, JSObject *obj, const Class *clasp, jsid methodid, JSNative native)
 {
     JS_ASSERT(!obj->is<ProxyObject>());
     JS_ASSERT(obj->getClass() == clasp);
@@ -900,11 +756,11 @@ class AutoPropDescArrayRooter : private AutoGCRooter
  * default to the prototype's global if the prototype is non-null.
  */
 JSObject *
-NewObjectWithGivenProto(ExclusiveContext *cx, js::Class *clasp, TaggedProto proto, JSObject *parent,
+NewObjectWithGivenProto(ExclusiveContext *cx, const js::Class *clasp, TaggedProto proto, JSObject *parent,
                         gc::AllocKind allocKind, NewObjectKind newKind);
 
 inline JSObject *
-NewObjectWithGivenProto(ExclusiveContext *cx, js::Class *clasp, TaggedProto proto, JSObject *parent,
+NewObjectWithGivenProto(ExclusiveContext *cx, const js::Class *clasp, TaggedProto proto, JSObject *parent,
                         NewObjectKind newKind = GenericObject)
 {
     gc::AllocKind allocKind = gc::GetGCObjectKind(clasp);
@@ -912,14 +768,14 @@ NewObjectWithGivenProto(ExclusiveContext *cx, js::Class *clasp, TaggedProto prot
 }
 
 inline JSObject *
-NewObjectWithGivenProto(ExclusiveContext *cx, js::Class *clasp, JSObject *proto, JSObject *parent,
+NewObjectWithGivenProto(ExclusiveContext *cx, const js::Class *clasp, JSObject *proto, JSObject *parent,
                         NewObjectKind newKind = GenericObject)
 {
     return NewObjectWithGivenProto(cx, clasp, TaggedProto(proto), parent, newKind);
 }
 
 inline JSProtoKey
-GetClassProtoKey(js::Class *clasp)
+GetClassProtoKey(const js::Class *clasp)
 {
     JSProtoKey key = JSCLASS_CACHED_PROTO_KEY(clasp);
     if (key != JSProto_Null)
@@ -930,7 +786,7 @@ GetClassProtoKey(js::Class *clasp)
 }
 
 inline bool
-FindProto(ExclusiveContext *cx, js::Class *clasp, MutableHandleObject proto)
+FindProto(ExclusiveContext *cx, const js::Class *clasp, MutableHandleObject proto)
 {
     JSProtoKey protoKey = GetClassProtoKey(clasp);
     if (!js_GetClassPrototype(cx, protoKey, proto, clasp))
@@ -958,18 +814,18 @@ FindProto(ExclusiveContext *cx, js::Class *clasp, MutableHandleObject proto)
  * parent will be that global.
  */
 JSObject *
-NewObjectWithClassProtoCommon(ExclusiveContext *cx, js::Class *clasp, JSObject *proto, JSObject *parent,
+NewObjectWithClassProtoCommon(ExclusiveContext *cx, const js::Class *clasp, JSObject *proto, JSObject *parent,
                               gc::AllocKind allocKind, NewObjectKind newKind);
 
 inline JSObject *
-NewObjectWithClassProto(ExclusiveContext *cx, js::Class *clasp, JSObject *proto, JSObject *parent,
+NewObjectWithClassProto(ExclusiveContext *cx, const js::Class *clasp, JSObject *proto, JSObject *parent,
                         gc::AllocKind allocKind, NewObjectKind newKind = GenericObject)
 {
     return NewObjectWithClassProtoCommon(cx, clasp, proto, parent, allocKind, newKind);
 }
 
 inline JSObject *
-NewObjectWithClassProto(ExclusiveContext *cx, js::Class *clasp, JSObject *proto, JSObject *parent,
+NewObjectWithClassProto(ExclusiveContext *cx, const js::Class *clasp, JSObject *proto, JSObject *parent,
                         NewObjectKind newKind = GenericObject)
 {
     gc::AllocKind allocKind = gc::GetGCObjectKind(clasp);
@@ -981,14 +837,14 @@ NewObjectWithClassProto(ExclusiveContext *cx, js::Class *clasp, JSObject *proto,
  * according to the context's active global.
  */
 inline JSObject *
-NewBuiltinClassInstance(ExclusiveContext *cx, Class *clasp, gc::AllocKind allocKind,
+NewBuiltinClassInstance(ExclusiveContext *cx, const Class *clasp, gc::AllocKind allocKind,
                         NewObjectKind newKind = GenericObject)
 {
     return NewObjectWithClassProto(cx, clasp, NULL, NULL, allocKind, newKind);
 }
 
 inline JSObject *
-NewBuiltinClassInstance(ExclusiveContext *cx, Class *clasp, NewObjectKind newKind = GenericObject)
+NewBuiltinClassInstance(ExclusiveContext *cx, const Class *clasp, NewObjectKind newKind = GenericObject)
 {
     gc::AllocKind allocKind = gc::GetGCObjectKind(clasp);
     return NewBuiltinClassInstance(cx, clasp, allocKind, newKind);
@@ -1117,7 +973,7 @@ ValueIsSpecial(JSObject *obj, MutableHandleValue propval, MutableHandle<SpecialI
 
 JSObject *
 DefineConstructorAndPrototype(JSContext *cx, HandleObject obj, JSProtoKey key, HandleAtom atom,
-                              JSObject *protoProto, Class *clasp,
+                              JSObject *protoProto, const Class *clasp,
                               Native constructor, unsigned nargs,
                               const JSPropertySpec *ps, const JSFunctionSpec *fs,
                               const JSPropertySpec *static_ps, const JSFunctionSpec *static_fs,
@@ -1184,7 +1040,7 @@ DefineProperty(ExclusiveContext *cx, HandleObject obj, PropertyName *name, Handl
 
 extern JSObject *
 js_InitClass(JSContext *cx, js::HandleObject obj, JSObject *parent_proto,
-             js::Class *clasp, JSNative constructor, unsigned nargs,
+             const js::Class *clasp, JSNative constructor, unsigned nargs,
              const JSPropertySpec *ps, const JSFunctionSpec *fs,
              const JSPropertySpec *static_ps, const JSFunctionSpec *static_fs,
              JSObject **ctorp = NULL,

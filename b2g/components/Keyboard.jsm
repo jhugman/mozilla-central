@@ -17,7 +17,7 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 XPCOMUtils.defineLazyServiceGetter(this, "ppmm",
   "@mozilla.org/parentprocessmessagemanager;1", "nsIMessageBroadcaster");
 
-let Keyboard = {
+this.Keyboard = {
   _messageManager: null,
   _messageNames: [
     'SetValue', 'RemoveFocus', 'SetSelectedOption', 'SetSelectedOptions',
@@ -238,6 +238,10 @@ let Keyboard = {
   },
 
   getContext: function keyboardGetContext(msg) {
+    if (this._layouts) {
+      ppmm.broadcastAsyncMessage('Keyboard:LayoutsChange', this._layouts);
+    }
+
     this.sendAsyncMessage('Forms:GetContext', msg.data);
   },
 
@@ -247,7 +251,20 @@ let Keyboard = {
 
   endComposition: function keyboardEndComposition(msg) {
     this.sendAsyncMessage('Forms:EndComposition', msg.data);
+  },
+
+  /**
+   * Get the number of keyboard layouts active from keyboard_manager
+   */
+  _layouts: null,
+  setLayouts: function keyboardSetLayoutCount(layouts) {
+    // The input method plugins may not have loaded yet,
+    // cache the layouts so on init we can respond immediately instead
+    // of going back and forth between keyboard_manager
+    this._layouts = layouts;
+
+    ppmm.broadcastAsyncMessage('Keyboard:LayoutsChange', layouts);
   }
 };
 
-Keyboard.init();
+this.Keyboard.init();

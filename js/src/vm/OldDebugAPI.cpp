@@ -373,16 +373,6 @@ JS_ClearWatchPointsForObject(JSContext *cx, JSObject *obj)
     return true;
 }
 
-JS_PUBLIC_API(bool)
-JS_ClearAllWatchPoints(JSContext *cx)
-{
-    if (JSCompartment *comp = cx->compartment()) {
-        if (WatchpointMap *wpmap = comp->watchpointMap)
-            wpmap->clear();
-    }
-    return true;
-}
-
 /************************************************************************/
 
 JS_PUBLIC_API(unsigned)
@@ -581,7 +571,7 @@ JS_GetScriptSourceMap(JSContext *cx, JSScript *script)
 {
     ScriptSource *source = script->scriptSource();
     JS_ASSERT(source);
-    return source->hasSourceMap() ? source->sourceMap() : NULL;
+    return source->hasSourceMapURL() ? source->sourceMapURL() : NULL;
 }
 
 JS_PUBLIC_API(unsigned)
@@ -705,7 +695,7 @@ JS_GetPropertyDescArray(JSContext *cx, JSObject *obj_, JSPropertyDescArray *pda)
         return true;
     }
 
-    Class *clasp;
+    const Class *clasp;
     clasp = obj->getClass();
     if (!obj->isNative() || (clasp->flags & JSCLASS_NEW_ENUMERATE)) {
         JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL,

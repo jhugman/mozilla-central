@@ -1405,7 +1405,7 @@ Element::DispatchClickEvent(nsPresContext* aPresContext,
                             nsInputEvent* aSourceEvent,
                             nsIContent* aTarget,
                             bool aFullDispatch,
-                            const widget::EventFlags* aExtraEventFlags,
+                            const EventFlags* aExtraEventFlags,
                             nsEventStatus* aStatus)
 {
   NS_PRECONDITION(aTarget, "Must have target");
@@ -1712,10 +1712,6 @@ Element::SetAttrAndNotify(int32_t aNamespaceID,
 
   UpdateState(aNotify);
 
-  if (aNotify) {
-    nsNodeUtils::AttributeChanged(this, aNamespaceID, aName, aModType);
-  }
-
   if (aCallAfterSetAttr) {
     rv = AfterSetAttr(aNamespaceID, aName, &aValueForAfterSetAttr, aNotify);
     NS_ENSURE_SUCCESS(rv, rv);
@@ -1724,6 +1720,10 @@ Element::SetAttrAndNotify(int32_t aNamespaceID,
       OnSetDirAttr(this, &aValueForAfterSetAttr,
                    hadValidDir, hadDirAuto, aNotify);
     }
+  }
+
+  if (aNotify) {
+    nsNodeUtils::AttributeChanged(this, aNamespaceID, aName, aModType);
   }
 
   if (aFireMutation) {
@@ -2451,6 +2451,11 @@ Element::MozRequestFullScreen()
 // Try to keep the size of StringBuilder close to a jemalloc bucket size.
 #define STRING_BUFFER_UNITS 1020
 
+namespace {
+
+// We put StringBuilder in the anonymous namespace to prevent anything outside
+// this file from accidentally being linked against it.
+
 class StringBuilder
 {
 private:
@@ -2713,6 +2718,8 @@ private:
   // mLength is used only in the first StringBuilder object in the linked list.
   uint32_t                                mLength;
 };
+
+} // anonymous namespace
 
 static void
 AppendEncodedCharacters(const nsTextFragment* aText, StringBuilder& aBuilder)

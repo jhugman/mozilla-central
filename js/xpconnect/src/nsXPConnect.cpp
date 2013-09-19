@@ -10,22 +10,15 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/Base64.h"
 #include "mozilla/Likely.h"
-#include "mozilla/Util.h"
 
 #include "xpcprivate.h"
 #include "XPCWrapper.h"
-#include "nsBaseHashtable.h"
-#include "nsHashKeys.h"
 #include "jsfriendapi.h"
 #include "js/OldDebugAPI.h"
-#include "dom_quickstubs.h"
-#include "nsNullPrincipal.h"
-#include "nsIURI.h"
 #include "nsJSEnvironment.h"
 #include "nsThreadUtils.h"
 #include "nsDOMJSUtils.h"
 
-#include "XrayWrapper.h"
 #include "WrapperFactory.h"
 #include "AccessCheck.h"
 
@@ -47,9 +40,6 @@
 #include "mozilla/dom/TextEncoderBinding.h"
 #include "mozilla/dom/DOMErrorBinding.h"
 
-#include "nsWrapperCacheInlines.h"
-#include "nsCycleCollectionNoteRootCallback.h"
-#include "nsCycleCollector.h"
 #include "nsDOMMutationObserver.h"
 #include "nsICycleCollectorListener.h"
 #include "nsThread.h"
@@ -106,30 +96,27 @@ nsXPConnect::nsXPConnect()
 nsXPConnect::~nsXPConnect()
 {
     mRuntime->DeleteJunkScope();
-
-    JSContext *cx = nullptr;
-    if (mRuntime) {
-        // Create our own JSContext rather than an XPCCallContext, since
-        // otherwise we will create a new safe JS context and attach a
-        // components object that won't get GCed.
-        cx = JS_NewContext(mRuntime->Runtime(), 8192);
-    }
-
-    // This needs to happen exactly here, otherwise we leak at shutdown. I don't
-    // know why. :-(
     mRuntime->DestroyJSContextStack();
 
-    mShuttingDown = true;
-    if (cx) {
-        // XXX Call even if |mRuntime| null?
-        XPCWrappedNativeScope::SystemIsBeingShutDown();
+    // In order to clean up everything properly, we need to GC twice: once now,
+    // to clean anything that can go away on its own (like the Junk Scope, which
+    // we unrooted above), and once after forcing a bunch of shutdown in
+    // XPConnect, to clean the stuff we forcibly disconnected. The forced
+    // shutdown code defaults to leaking in a number of situations, so we can't
+    // get by with only the second GC. :-(
+    JS_GC(mRuntime->Runtime());
 
-        mRuntime->SystemIsBeingShutDown();
-        JS_DestroyContext(cx);
-    }
+    mShuttingDown = true;
+    XPCWrappedNativeScope::SystemIsBeingShutDown();
+    mRuntime->SystemIsBeingShutDown();
+
+    // The above causes us to clean up a bunch of XPConnect data structures,
+    // after which point we need to GC to clean everything up. We need to do
+    // this before deleting the XPCJSRuntime, because doing so destroys the
+    // maps that our finalize callback depends on.
+    JS_GC(mRuntime->Runtime());
 
     NS_IF_RELEASE(mDefaultSecurityManager);
-
     gScriptSecurityManager = nullptr;
 
     // shutdown the logging system
@@ -414,7 +401,7 @@ TraceXPCGlobal(JSTracer *trc, JSObject *obj)
 #include "mozilla/Preferences.h"
 #include "nsIXULRuntime.h"
 static void
-CheckTypeInference(JSContext *cx, JSClass *clasp, nsIPrincipal *principal)
+CheckTypeInference(JSContext *cx, const JSClass *clasp, nsIPrincipal *principal)
 {
     // Check that the global class isn't whitelisted.
     if (strcmp(clasp->name, "Sandbox") ||
@@ -453,7 +440,7 @@ CheckTypeInference(JSContext *cx, JSClass *clasp, nsIPrincipal *principal)
 namespace xpc {
 
 JSObject*
-CreateGlobalObject(JSContext *cx, JSClass *clasp, nsIPrincipal *principal,
+CreateGlobalObject(JSContext *cx, const JSClass *clasp, nsIPrincipal *principal,
                    JS::CompartmentOptions& aOptions)
 {
     // Make sure that Type Inference is enabled for everything non-chrome.
@@ -477,7 +464,7 @@ CreateGlobalObject(JSContext *cx, JSClass *clasp, nsIPrincipal *principal,
     // Verify that the right trace hook is called. Note that this doesn't
     // work right for wrapped globals, since the tracing situation there is
     // more complicated. Manual inspection shows that they do the right thing.
-    if (!((js::Class*)clasp)->ext.isWrappedNative)
+    if (!((const js::Class*)clasp)->ext.isWrappedNative)
     {
         VerifyTraceXPCGlobalCalledTracer trc;
         JS_TracerInit(&trc.base, JS_GetRuntime(cx), VerifyTraceXPCGlobalCalled);

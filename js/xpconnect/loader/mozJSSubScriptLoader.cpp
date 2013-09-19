@@ -9,20 +9,15 @@
 #include "mozJSComponentLoader.h"
 #include "mozJSLoaderUtils.h"
 
-#include "nsIServiceManager.h"
-#include "nsIXPConnect.h"
-
 #include "nsIURI.h"
 #include "nsIIOService.h"
 #include "nsIChannel.h"
 #include "nsIInputStream.h"
 #include "nsNetCID.h"
-#include "nsDependentString.h"
-#include "nsAutoPtr.h"
 #include "nsNetUtil.h"
-#include "nsIProtocolHandler.h"
 #include "nsIFileURL.h"
 #include "nsScriptLoader.h"
+#include "nsIScriptSecurityManager.h"
 
 #include "jsapi.h"
 #include "jsfriendapi.h"
@@ -32,7 +27,6 @@
 
 #include "mozilla/scache/StartupCache.h"
 #include "mozilla/scache/StartupCacheUtils.h"
-#include "mozilla/Preferences.h"
 
 using namespace mozilla::scache;
 using namespace JS;
@@ -68,7 +62,8 @@ NS_IMPL_ISUPPORTS1(mozJSSubScriptLoader, mozIJSSubScriptLoader)
 static nsresult
 ReportError(JSContext *cx, const char *msg)
 {
-    JS_SetPendingException(cx, STRING_TO_JSVAL(JS_NewStringCopyZ(cx, msg)));
+    RootedValue exn(cx, JS::StringValue(JS_NewStringCopyZ(cx, msg)));
+    JS_SetPendingException(cx, exn);
     return NS_OK;
 }
 

@@ -408,7 +408,7 @@ let SessionStoreInternal = {
 
       // Let everyone know we're done.
       this._deferredInitialized.resolve();
-    });
+    }, Cu.reportError);
   },
 
   initSession: function ssi_initSession() {
@@ -678,12 +678,12 @@ let SessionStoreInternal = {
         break;
       case "TabPinned":
         // If possible, update cached data without having to invalidate it
-        TabStateCache.update(aEvent.originalTarget, "pinned", true);
+        TabStateCache.updateField(aEvent.originalTarget, "pinned", true);
         this.saveStateDelayed(win);
         break;
       case "TabUnpinned":
         // If possible, update cached data without having to invalidate it
-        TabStateCache.update(aEvent.originalTarget, "pinned", false);
+        TabStateCache.updateField(aEvent.originalTarget, "pinned", false);
         this.saveStateDelayed(win);
         break;
     }
@@ -1044,7 +1044,6 @@ let SessionStoreInternal = {
         TabStateCache.delete(aTab);
         delete aTab.linkedBrowser.__SS_data;
         delete aTab.linkedBrowser.__SS_tabStillLoading;
-        delete aTab.linkedBrowser.__SS_formDataSaved;
         if (aTab.linkedBrowser.__SS_restoreState)
           this._resetTabRestoringState(aTab);
       }, this);
@@ -1194,7 +1193,6 @@ let SessionStoreInternal = {
 
     delete browser.__SS_data;
     delete browser.__SS_tabStillLoading;
-    delete browser.__SS_formDataSaved;
 
     // If this tab was in the middle of restoring or still needs to be restored,
     // we need to reset that state. If the tab was restoring, we will attempt to
@@ -1273,7 +1271,6 @@ let SessionStoreInternal = {
 
     delete aBrowser.__SS_data;
     delete aBrowser.__SS_tabStillLoading;
-    delete aBrowser.__SS_formDataSaved;
     this.saveStateDelayed(aWindow);
 
     // attempt to update the current URL we send in a crash report
@@ -1288,11 +1285,7 @@ let SessionStoreInternal = {
    *        Browser reference
    */
   onTabInput: function ssi_onTabInput(aWindow, aBrowser) {
-    // deleting __SS_formDataSaved will cause us to recollect form data
-    delete aBrowser.__SS_formDataSaved;
-
     TabStateCache.delete(aBrowser);
-
     this.saveStateDelayed(aWindow);
   },
 
@@ -1330,7 +1323,7 @@ let SessionStoreInternal = {
     }
 
     // If possible, update cached data without having to invalidate it
-    TabStateCache.update(aTab, "hidden", false);
+    TabStateCache.updateField(aTab, "hidden", false);
 
     // Default delay of 2 seconds gives enough time to catch multiple TabShow
     // events due to changing groups in Panorama.
@@ -1345,7 +1338,7 @@ let SessionStoreInternal = {
     }
 
     // If possible, update cached data without having to invalidate it
-    TabStateCache.update(aTab, "hidden", true);
+    TabStateCache.updateField(aTab, "hidden", true);
 
     // Default delay of 2 seconds gives enough time to catch multiple TabHide
     // events due to changing groups in Panorama.
@@ -1619,6 +1612,9 @@ let SessionStoreInternal = {
   },
 
   getWindowValue: function ssi_getWindowValue(aWindow, aKey) {
+    if (this._disabledForMultiProcess)
+      return "";
+
     if ("__SSi" in aWindow) {
       var data = this._windows[aWindow.__SSi].extData || {};
       return data[aKey] || "";
@@ -1665,7 +1661,6 @@ let SessionStoreInternal = {
   },
 
   setTabValue: function ssi_setTabValue(aTab, aKey, aStringValue) {
-    TabStateCache.delete(aTab);
     // If the tab hasn't been restored, then set the data there, otherwise we
     // could lose newly added data.
     let saveTo;
@@ -1679,12 +1674,13 @@ let SessionStoreInternal = {
       aTab.__SS_extdata = {};
       saveTo = aTab.__SS_extdata;
     }
+
     saveTo[aKey] = aStringValue;
+    TabStateCache.updateField(aTab, "extData", saveTo);
     this.saveStateDelayed(aTab.ownerDocument.defaultView);
   },
 
   deleteTabValue: function ssi_deleteTabValue(aTab, aKey) {
-    TabStateCache.delete(aTab);
     // We want to make sure that if data is accessed early, we attempt to delete
     // that data from __SS_data as well. Otherwise we'll throw in cases where
     // data can be set or read.
@@ -1696,9 +1692,19 @@ let SessionStoreInternal = {
       deleteFrom = aTab.linkedBrowser.__SS_data.extData;
     }
 
-    if (deleteFrom && deleteFrom[aKey])
+    if (deleteFrom && aKey in deleteFrom) {
       delete deleteFrom[aKey];
-    this.saveStateDelayed(aTab.ownerDocument.defaultView);
+
+      // Keep the extData object only if it is not empty, to save
+      // a little disk space when serializing the tab state later.
+      if (Object.keys(deleteFrom).length) {
+        TabStateCache.updateField(aTab, "extData", deleteFrom);
+      } else {
+        TabStateCache.removeField(aTab, "extData");
+      }
+
+      this.saveStateDelayed(aTab.ownerDocument.defaultView);
+    }
   },
 
   persistTabAttribute: function ssi_persistTabAttribute(aName) {
@@ -2225,9 +2231,8 @@ let SessionStoreInternal = {
 
     this._updateTextAndScrollDataForFrame(window, browser.contentWindow,
                                           aTabData.entries[tabIndex],
-                                          !browser.__SS_formDataSaved, includePrivateData,
+                                          includePrivateData,
                                           !!aTabData.pinned);
-    browser.__SS_formDataSaved = true;
     if (browser.currentURI.spec == "about:config")
       aTabData.entries[tabIndex].formdata = {
         id: {
@@ -2247,8 +2252,6 @@ let SessionStoreInternal = {
    *        frame reference
    * @param aData
    *        part of a tabData object to add the information to
-   * @param aUpdateFormData
-   *        update all form data for this tab
    * @param aIncludePrivateData
    *        always return privacy sensitive data (use with care)
    * @param aIsPinned
@@ -2256,11 +2259,11 @@ let SessionStoreInternal = {
    */
   _updateTextAndScrollDataForFrame:
     function ssi_updateTextAndScrollDataForFrame(aWindow, aContent, aData,
-                                                 aUpdateFormData, aIncludePrivateData, aIsPinned) {
+                                                 aIncludePrivateData, aIsPinned) {
     for (var i = 0; i < aContent.frames.length; i++) {
       if (aData.children && aData.children[i])
         this._updateTextAndScrollDataForFrame(aWindow, aContent.frames[i],
-                                              aData.children[i], aUpdateFormData,
+                                              aData.children[i],
                                               aIncludePrivateData, aIsPinned);
     }
     var isHTTPS = this._getURIFromString((aContent.parent || aContent).
@@ -2268,22 +2271,20 @@ let SessionStoreInternal = {
     let topURL = aContent.top.document.location.href;
     let isAboutSR = topURL == "about:sessionrestore" || topURL == "about:welcomeback";
     if (aIncludePrivateData || this.checkPrivacyLevel(isHTTPS, aIsPinned) || isAboutSR) {
-      if (aIncludePrivateData || aUpdateFormData) {
-        let formData = DocumentUtils.getFormData(aContent.document);
+      let formData = DocumentUtils.getFormData(aContent.document);
 
-        // We want to avoid saving data for about:sessionrestore as a string.
-        // Since it's stored in the form as stringified JSON, stringifying further
-        // causes an explosion of escape characters. cf. bug 467409
-        if (formData && isAboutSR) {
-          formData.id["sessionData"] = JSON.parse(formData.id["sessionData"]);
-        }
+      // We want to avoid saving data for about:sessionrestore as a string.
+      // Since it's stored in the form as stringified JSON, stringifying further
+      // causes an explosion of escape characters. cf. bug 467409
+      if (formData && isAboutSR) {
+        formData.id["sessionData"] = JSON.parse(formData.id["sessionData"]);
+      }
 
-        if (Object.keys(formData.id).length ||
-            Object.keys(formData.xpath).length) {
-          aData.formdata = formData;
-        } else if (aData.formdata) {
-          delete aData.formdata;
-        }
+      if (Object.keys(formData.id).length ||
+          Object.keys(formData.xpath).length) {
+        aData.formdata = formData;
+      } else if (aData.formdata) {
+        delete aData.formdata;
       }
 
       // designMode is undefined e.g. for XUL documents (as about:config)
@@ -2595,6 +2596,13 @@ let SessionStoreInternal = {
         tabbrowser.unpinTab(tabbrowser.tabs[t]);
     }
 
+    // We need to keep track of the initially open tabs so that they
+    // can be moved to the end of the restored tabs.
+    let initialTabs = [];
+    if (!overwriteTabs && firstWindow) {
+      initialTabs = Array.slice(tabbrowser.tabs);
+    }
+
     // make sure that the selected tab won't be closed in order to
     // prevent unnecessary flickering
     if (overwriteTabs && tabbrowser.selectedTab._tPos >= newTabCount)
@@ -2606,10 +2614,6 @@ let SessionStoreInternal = {
       tabs.push(t < openTabCount ?
                 tabbrowser.tabs[t] :
                 tabbrowser.addTab("about:blank", {skipAnimation: true}));
-      // when resuming at startup: add additionally requested pages to the end
-      if (!overwriteTabs && firstWindow) {
-        tabbrowser.moveTabTo(tabs[t], t);
-      }
 
       if (winData.tabs[t].pinned)
         tabbrowser.pinTab(tabs[t]);
@@ -2620,6 +2624,14 @@ let SessionStoreInternal = {
       else {
         tabbrowser.showTab(tabs[t]);
         numVisibleTabs++;
+      }
+    }
+
+    if (!overwriteTabs && firstWindow) {
+      // Move the originally open tabs to the end
+      let endPosition = tabbrowser.tabs.length - 1;
+      for (let i = 0; i < initialTabs.length; i++) {
+        tabbrowser.moveTabTo(initialTabs[i], endPosition);
       }
     }
 
@@ -4639,11 +4651,27 @@ let TabStateCache = {
    * @param {string} aField The field to update.
    * @param {*} aValue The new value to place in the field.
    */
-  update: function(aKey, aField, aValue) {
+  updateField: function(aKey, aField, aValue) {
     let key = this._normalizeToBrowser(aKey);
     let data = this._data.get(key);
     if (data) {
       data[aField] = aValue;
+    }
+    TabStateCacheTelemetry.recordAccess(!!data);
+  },
+
+  /**
+   * Remove a given field from a cached tab state.
+   *
+   * @param {XULElement} aKey The tab or the associated browser.
+   * If the tab/browser is not present, do nothing.
+   * @param {string} aField The field to remove.
+   */
+  removeField: function(aKey, aField) {
+    let key = this._normalizeToBrowser(aKey);
+    let data = this._data.get(key);
+    if (data && aField in data) {
+      delete data[aField];
     }
     TabStateCacheTelemetry.recordAccess(!!data);
   },

@@ -22,6 +22,7 @@
 #include "nsStringBuffer.h"
 #include "nsTArray.h"
 #include "nsAutoPtr.h" // for nsRefPtr member variables
+#include "mozilla/dom/OwningNonNull.h"
 
 class nsWrapperCache;
 
@@ -257,6 +258,13 @@ public:
     mImpl.construct(t1, t2);
   }
 
+  void Reset()
+  {
+    if (WasPassed()) {
+      mImpl.destroy();
+    }
+  }
+
   const T& Value() const
   {
     return mImpl.ref();
@@ -417,7 +425,6 @@ public:
 
 // A specialization of Optional for OwningNonNull that lets us get a
 // T& from Value()
-template<typename U> class OwningNonNull;
 template<typename T>
 class Optional<OwningNonNull<T> > : public Optional_base<T, OwningNonNull<T> >
 {

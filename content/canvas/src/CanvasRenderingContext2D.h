@@ -20,7 +20,6 @@
 #include "mozilla/dom/CanvasRenderingContext2DBinding.h"
 #include "mozilla/dom/CanvasPattern.h"
 #include "mozilla/gfx/Rect.h"
-#include "imgIEncoder.h"
 
 class nsXULElement;
 
@@ -33,7 +32,7 @@ namespace dom {
 class HTMLImageElementOrHTMLCanvasElementOrHTMLVideoElement;
 class ImageData;
 class StringOrCanvasGradientOrCanvasPattern;
-class StringOrCanvasGradientOrCanvasPatternReturnValue;
+class OwningStringOrCanvasGradientOrCanvasPattern;
 class TextMetrics;
 
 extern const mozilla::gfx::Float SIGMA_MAX;
@@ -95,7 +94,7 @@ public:
   void SetGlobalCompositeOperation(const nsAString& op,
                                    mozilla::ErrorResult& error);
 
-  void GetStrokeStyle(StringOrCanvasGradientOrCanvasPatternReturnValue& value)
+  void GetStrokeStyle(OwningStringOrCanvasGradientOrCanvasPattern& value)
   {
     GetStyleAsUnion(value, STYLE_STROKE);
   }
@@ -105,7 +104,7 @@ public:
     SetStyleFromUnion(value, STYLE_STROKE);
   }
 
-  void GetFillStyle(StringOrCanvasGradientOrCanvasPatternReturnValue& value)
+  void GetFillStyle(OwningStringOrCanvasGradientOrCanvasPattern& value)
   {
     GetStyleAsUnion(value, STYLE_FILL);
   }
@@ -449,8 +448,6 @@ public:
 
   friend class CanvasRenderingContext2DUserData;
 
-  virtual void GetImageBuffer(uint8_t** aImageBuffer, int32_t* aFormat);
-
 protected:
   nsresult GetImageDataArray(JSContext* aCx, int32_t aX, int32_t aY,
                              uint32_t aWidth, uint32_t aHeight,
@@ -502,7 +499,7 @@ protected:
     CurrentState().SetPatternStyle(whichStyle, &pattern);
   }
 
-  void GetStyleAsUnion(StringOrCanvasGradientOrCanvasPatternReturnValue& aValue,
+  void GetStyleAsUnion(OwningStringOrCanvasGradientOrCanvasPattern& aValue,
                        Style aWhichStyle);
 
   // Returns whether a color was successfully parsed.

@@ -494,8 +494,10 @@ interface TestInterface {
   void passNullableUnionWithDefaultValue12(optional (unrestricted float or DOMString)? arg = null);
 
   (CanvasPattern or CanvasGradient) receiveUnion();
+  (object or long) receiveUnion2();
   (CanvasPattern? or CanvasGradient) receiveUnionContainingNull();
   (CanvasPattern or CanvasGradient)? receiveNullableUnion();
+  (object or long)? receiveNullableUnion2();
 
   attribute (CanvasPattern or CanvasGradient) writableUnion;
   attribute (CanvasPattern? or CanvasGradient) writableUnionContainingNull;
@@ -536,6 +538,8 @@ interface TestInterface {
   void dontEnforceRangeOrClamp(byte arg);
   void doEnforceRange([EnforceRange] byte arg);
   void doClamp([Clamp] byte arg);
+  [EnforceRange] attribute byte enforcedByte;
+  [Clamp] attribute byte clampedByte;
 
   // Typedefs
   const myLong myLongConstant = 5;
@@ -707,6 +711,8 @@ dictionary Dict : ParentDict {
   long a;
   long b = 8;
   long z = 9;
+  [EnforceRange] unsigned long enforcedUnsignedLong;
+  [Clamp] unsigned long clampedUnsignedLong;
   DOMString str;
   DOMString empty = "";
   TestEnum otherEnum = "b";
@@ -736,6 +742,9 @@ dictionary Dict : ParentDict {
   unrestricted double  negativeInfUrDouble = -Infinity;
   unrestricted double  nanUrDouble = NaN;
 
+  (float or DOMString) floatOrString = "str";
+  (object or long) objectOrLong;
+
   ArrayBuffer arrayBuffer;
   ArrayBuffer? nullableArrayBuffer;
   Uint8Array uint8Array;
@@ -764,6 +773,7 @@ dictionary DictContainingSequence {
   sequence<object?>? ourSequence7;
   sequence<object>? ourSequence8 = null;
   sequence<object?>? ourSequence9 = null;
+  sequence<(float or DOMString)> ourSequence10;
 };
 
 dictionary DictForConstructor {

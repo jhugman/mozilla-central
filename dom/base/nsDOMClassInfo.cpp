@@ -38,7 +38,6 @@
 #include "xptcall.h"
 #include "nsTArray.h"
 #include "nsDOMEventTargetHelper.h"
-#include "nsIDOMHTMLCanvasElement.h"
 #include "nsContentList.h"
 #include "nsHTMLDocument.h"
 #include "nsDOMBlobBuilder.h"
@@ -158,7 +157,6 @@
 #include "nsWrapperCacheInlines.h"
 #include "mozilla/dom/HTMLCollectionBinding.h"
 
-#include "nsIDOMPowerManager.h"
 #include "nsIDOMWakeLock.h"
 #include "nsIDOMMobileMessageManager.h"
 #include "nsIDOMMozSmsMessage.h"
@@ -200,9 +198,6 @@ using namespace mozilla::dom;
 using mozilla::dom::workers::ResolveWorkerClasses;
 
 static NS_DEFINE_CID(kDOMSOF_CID, NS_DOM_SCRIPT_OBJECT_FACTORY_CID);
-
-static const char kDOMStringBundleURL[] =
-  "chrome://global/locale/dom/dom.properties";
 
 // NOTE: DEFAULT_SCRIPTABLE_FLAGS and DOM_DEFAULT_SCRIPTABLE_FLAGS
 //       are defined in nsIDOMClassInfo.h.
@@ -357,8 +352,6 @@ static nsDOMClassInfoData sClassInfoData[] = {
                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
   NS_DEFINE_CLASSINFO_DATA(CSSRuleList, nsCSSRuleListSH,
                            ARRAY_SCRIPTABLE_FLAGS)
-  NS_DEFINE_CLASSINFO_DATA(CSSGroupRuleRuleList, nsCSSRuleListSH,
-                           ARRAY_SCRIPTABLE_FLAGS)
   NS_DEFINE_CLASSINFO_DATA(MediaList, nsMediaListSH,
                            ARRAY_SCRIPTABLE_FLAGS)
   NS_DEFINE_CLASSINFO_DATA(StyleSheetList, nsStyleSheetListSH,
@@ -424,9 +417,6 @@ static nsDOMClassInfoData sClassInfoData[] = {
   NS_DEFINE_CLASSINFO_DATA(SVGNumber, nsDOMGenericSH,
                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
 
-  NS_DEFINE_CLASSINFO_DATA(MozCanvasPrintState, nsDOMGenericSH,
-                           DOM_DEFAULT_SCRIPTABLE_FLAGS)
-
   NS_DEFINE_CLASSINFO_DATA(WindowUtils, nsDOMGenericSH,
                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
 
@@ -463,9 +453,6 @@ static nsDOMClassInfoData sClassInfoData[] = {
   NS_DEFINE_CLASSINFO_DATA(ModalContentWindow, nsWindowSH,
                            DEFAULT_SCRIPTABLE_FLAGS |
                            WINDOW_SCRIPTABLE_FLAGS)
-
-  NS_DEFINE_CLASSINFO_DATA(MozPowerManager, nsDOMGenericSH,
-                           DOM_DEFAULT_SCRIPTABLE_FLAGS)
 
   NS_DEFINE_CLASSINFO_DATA(MozWakeLock, nsDOMGenericSH,
                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
@@ -716,50 +703,6 @@ WrapNative(JSContext *cx, JSObject *scope, nsISupports *native,
                     aAllowWrapping);
 }
 
-// Used for cases where PreCreate needs to wrap the native parent, and the
-// native parent is likely to have been wrapped already.  |native| must
-// implement nsWrapperCache, and nativeWrapperCache must be |native|'s
-// nsWrapperCache.
-static inline nsresult
-WrapNativeParent(JSContext *cx, JS::Handle<JSObject*> scope, nsISupports *native,
-                 nsWrapperCache *nativeWrapperCache, JSObject **parentObj)
-{
-  // In the common case, |native| is a wrapper cache with an existing wrapper
-#ifdef DEBUG
-  nsWrapperCache* cache = nullptr;
-  CallQueryInterface(native, &cache);
-  NS_PRECONDITION(nativeWrapperCache &&
-                  cache == nativeWrapperCache, "What happened here?");
-#endif
-
-  JS::Rooted<JSObject*> obj(cx, nativeWrapperCache->GetWrapper());
-  if (obj) {
-#ifdef DEBUG
-    JS::Rooted<JS::Value> debugVal(cx);
-    nsresult rv = WrapNative(cx, scope, native, nativeWrapperCache, false,
-                             debugVal.address());
-    NS_ASSERTION(NS_SUCCEEDED(rv) && JSVAL_TO_OBJECT(debugVal) == obj,
-                 "Unexpected object in nsWrapperCache");
-#endif
-    *parentObj = obj;
-    return NS_OK;
-  }
-
-  JS::Rooted<JS::Value> v(cx);
-  nsresult rv = WrapNative(cx, scope, native, nativeWrapperCache, false, v.address());
-  NS_ENSURE_SUCCESS(rv, rv);
-  *parentObj = v.toObjectOrNull();
-  return NS_OK;
-}
-
-template<class P>
-static inline nsresult
-WrapNativeParent(JSContext *cx, JS::Handle<JSObject*> scope, P *parent,
-                 JSObject **parentObj)
-{
-  return WrapNativeParent(cx, scope, ToSupports(parent), parent, parentObj);
-}
-
 // Helper to handle torn-down inner windows.
 static inline nsresult
 SetParentToWindow(nsGlobalWindow *win, JSObject **parent)
@@ -857,7 +800,7 @@ NS_INTERFACE_MAP_BEGIN(nsDOMClassInfo)
 NS_INTERFACE_MAP_END
 
 
-static JSClass sDOMConstructorProtoClass = {
+static const JSClass sDOMConstructorProtoClass = {
   "DOM Constructor.prototype", 0,
   JS_PropertyStub, JS_DeletePropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
   JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub, nullptr
@@ -1137,10 +1080,6 @@ nsDOMClassInfo::Init()
     DOM_CLASSINFO_MAP_ENTRY(nsIDOMCSSRuleList)
   DOM_CLASSINFO_MAP_END
 
-  DOM_CLASSINFO_MAP_BEGIN_NO_CLASS_IF(CSSGroupRuleRuleList, nsIDOMCSSRuleList)
-    DOM_CLASSINFO_MAP_ENTRY(nsIDOMCSSRuleList)
-  DOM_CLASSINFO_MAP_END
-
   DOM_CLASSINFO_MAP_BEGIN(MediaList, nsIDOMMediaList)
     DOM_CLASSINFO_MAP_ENTRY(nsIDOMMediaList)
   DOM_CLASSINFO_MAP_END
@@ -1237,10 +1176,6 @@ nsDOMClassInfo::Init()
     DOM_CLASSINFO_MAP_ENTRY(nsIDOMSVGNumber)
   DOM_CLASSINFO_MAP_END
 
-  DOM_CLASSINFO_MAP_BEGIN(MozCanvasPrintState, nsIDOMMozCanvasPrintState)
-    DOM_CLASSINFO_MAP_ENTRY(nsIDOMMozCanvasPrintState)
-  DOM_CLASSINFO_MAP_END
-
   DOM_CLASSINFO_MAP_BEGIN(XSLTProcessor, nsIXSLTProcessor)
     DOM_CLASSINFO_MAP_ENTRY(nsIXSLTProcessor)
     DOM_CLASSINFO_MAP_ENTRY(nsIXSLTProcessorPrivate)
@@ -1278,10 +1213,6 @@ nsDOMClassInfo::Init()
 #ifdef MOZ_WEBSPEECH
     DOM_CLASSINFO_MAP_ENTRY(nsISpeechSynthesisGetter)
 #endif
-  DOM_CLASSINFO_MAP_END
-
-  DOM_CLASSINFO_MAP_BEGIN(MozPowerManager, nsIDOMMozPowerManager)
-     DOM_CLASSINFO_MAP_ENTRY(nsIDOMMozPowerManager)
   DOM_CLASSINFO_MAP_END
 
   DOM_CLASSINFO_MAP_BEGIN(MozWakeLock, nsIDOMMozWakeLock)
@@ -2631,7 +2562,7 @@ nsDOMConstructor::HasInstance(nsIXPConnectWrappedNative *wrapper,
   if (wrapped_obj)
       dom_obj = wrapped_obj;
 
-  JSClass *dom_class = JS_GetClass(dom_obj);
+  const JSClass *dom_class = JS_GetClass(dom_obj);
   if (!dom_class) {
     NS_ERROR("nsDOMConstructor::HasInstance can't get class.");
     return NS_ERROR_UNEXPECTED;
@@ -3599,7 +3530,7 @@ nsWindowSH::NewResolve(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
         // Trust the JS engine (or the script security manager) to set
         // the exception in the JS engine.
 
-        if (!JS_GetPendingException(my_cx, exn.address())) {
+        if (!JS_GetPendingException(my_cx, &exn)) {
           return NS_ERROR_UNEXPECTED;
         }
 
@@ -4171,7 +4102,7 @@ nsStringListSH::GetStringAt(nsISupports *aNative, int32_t aIndex,
 
 // HTMLAllCollection
 
-JSClass sHTMLDocumentAllClass = {
+const JSClass sHTMLDocumentAllClass = {
   "HTML document.all class",
   JSCLASS_HAS_PRIVATE | JSCLASS_PRIVATE_IS_NSISUPPORTS | JSCLASS_NEW_RESOLVE |
   JSCLASS_EMULATES_UNDEFINED | JSCLASS_HAS_RESERVED_SLOTS(1),

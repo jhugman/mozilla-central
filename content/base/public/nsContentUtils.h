@@ -89,6 +89,7 @@ class nsNodeInfoManager;
 class nsPIDOMWindow;
 class nsPresContext;
 class nsScriptObjectTracer;
+class nsStringBuffer;
 class nsStringHashKey;
 class nsTextFragment;
 class nsViewportInfo;
@@ -1534,6 +1535,7 @@ public:
 
   static JSContext *GetCurrentJSContext();
   static JSContext *GetSafeJSContext();
+  static JSContext *GetDefaultJSContextForThread();
 
   /**
    * Case insensitive comparison between two strings. However it only ignores
@@ -1684,6 +1686,14 @@ public:
    * @param aString the string to convert the newlines inside [in/out]
    */
   static void PlatformToDOMLineBreaks(nsString &aString);
+
+  /**
+   * Populates aResultString with the contents of the string-buffer aBuf, up
+   * to aBuf's null-terminator.  aBuf must not be null. Ownership of the string
+   * is not transferred.
+   */
+  static void PopulateStringFromStringBuffer(nsStringBuffer* aBuf,
+                                             nsAString& aResultString);
 
   static bool IsHandlingKeyBoardEvent()
   {
@@ -2176,14 +2186,6 @@ private:
   static bool sDOMWindowDumpEnabled;
 #endif
 };
-
-#define NS_HOLD_JS_OBJECTS(obj, clazz)                                         \
-  nsContentUtils::HoldJSObjects(NS_CYCLE_COLLECTION_UPCAST(obj, clazz),        \
-                                NS_CYCLE_COLLECTION_PARTICIPANT(clazz))
-
-#define NS_DROP_JS_OBJECTS(obj, clazz)                                         \
-  nsContentUtils::DropJSObjects(NS_CYCLE_COLLECTION_UPCAST(obj, clazz))
-
 
 class MOZ_STACK_CLASS nsAutoScriptBlocker {
 public:

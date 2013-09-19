@@ -390,8 +390,10 @@ interface TestExampleInterface {
   void passNullableUnionWithDefaultValue12(optional (unrestricted float or DOMString)? arg = null);
 
   //(CanvasPattern or CanvasGradient) receiveUnion();
+  //(object or long) receiveUnion2();
   //(CanvasPattern? or CanvasGradient) receiveUnionContainingNull();
   //(CanvasPattern or CanvasGradient)? receiveNullableUnion();
+  //(object or long)? receiveNullableUnion2();
 
   //attribute (CanvasPattern or CanvasGradient) writableUnion;
   //attribute (CanvasPattern? or CanvasGradient) writableUnionContainingNull;
@@ -433,6 +435,8 @@ interface TestExampleInterface {
   void dontEnforceRangeOrClamp(byte arg);
   void doEnforceRange([EnforceRange] byte arg);
   void doClamp([Clamp] byte arg);
+  [EnforceRange] attribute byte enforcedByte;
+  [Clamp] attribute byte clampedByte;
 
   // Typedefs
   const myLong myLongConstant = 5;

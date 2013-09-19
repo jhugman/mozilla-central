@@ -12,7 +12,6 @@
 #include "nsArrayEnumerator.h"
 #include "nsContentUtils.h"
 #include "nsWrapperCache.h"
-#include "XPCWrapper.h"
 #include "AccessCheck.h"
 #include "nsJSUtils.h"
 #include "mozilla/Attributes.h"
@@ -253,13 +252,10 @@ nsXPCWrappedJSClass::CallQueryInterfaceOnJSObject(JSContext* cx,
 
         JS_SetOptions(cx, oldOpts);
 
-        if (!success) {
-            MOZ_ASSERT(JS_IsExceptionPending(cx),
-                       "JS failed without setting an exception!");
-
+        if (!success && JS_IsExceptionPending(cx)) {
             RootedValue jsexception(cx, NullValue());
 
-            if (JS_GetPendingException(cx, jsexception.address())) {
+            if (JS_GetPendingException(cx, &jsexception)) {
                 nsresult rv;
                 if (jsexception.isObject()) {
                     // XPConnect may have constructed an object to represent a
@@ -291,6 +287,8 @@ nsXPCWrappedJSClass::CallQueryInterfaceOnJSObject(JSContext* cx,
             // Don't report if reporting was disabled by someone else.
             if (!(oldOpts & JSOPTION_DONT_REPORT_UNCAUGHT))
                 JS_ReportPendingException(cx);
+        } else if (!success) {
+            NS_WARNING("QI hook ran OOMed - this is probably a bug!");
         }
     }
 
@@ -569,22 +567,6 @@ nsXPCWrappedJSClass::DelegatedQueryInterface(nsXPCWrappedJS* self,
                                              REFNSIID aIID,
                                              void** aInstancePtr)
 {
-    if (MOZ_UNLIKELY(!NS_IsMainThread())) {
-        printf("Uh oh! DelegatedQueryInterface called off-main-thread!\n");
-        printf("Name: %s\n", GetInterfaceName());
-        JSCompartment *c = js::GetObjectCompartment(self->GetJSObjectPreserveColor());
-        char *origin = nullptr;
-        nsresult rv = xpc::GetCompartmentPrincipal(c)->GetOrigin(&origin);
-        if (NS_SUCCEEDED(rv)) {
-            printf("Principal origin: %s\n", origin);
-            NS_Free(origin);
-        } else {
-            printf("Unable to get origin from principal :-(\n");
-        }
-        nsAutoCString loc(EnsureCompartmentPrivate(c)->GetLocation());
-        printf("Global's Location: %s\n", loc.get());
-        MOZ_CRASH();
-    }
     if (aIID.Equals(NS_GET_IID(nsIXPConnectJSObjectHolder))) {
         NS_ADDREF(self);
         *aInstancePtr = (void*) static_cast<nsIXPConnectJSObjectHolder*>(self);
@@ -959,7 +941,7 @@ nsXPCWrappedJSClass::CheckForException(XPCCallContext & ccx,
     nsresult pending_result = xpcc->GetPendingResult();
 
     RootedValue js_exception(cx);
-    bool is_js_exception = JS_GetPendingException(cx, js_exception.address());
+    bool is_js_exception = JS_GetPendingException(cx, &js_exception);
 
     /* JS might throw an expection whether the reporter was called or not */
     if (is_js_exception) {
@@ -1659,7 +1641,7 @@ FinalizeStub(JSFreeOp *fop, JSObject *obj)
 {
 }
 
-static JSClass XPCOutParamClass = {
+static const JSClass XPCOutParamClass = {
     "XPCOutParam",
     0,
     JS_PropertyStub,

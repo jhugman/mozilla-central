@@ -26,6 +26,12 @@ SetElemICInspector::sawOOBDenseWrite() const
         if (stub->isSetElem_DenseAdd())
             return true;
     }
+
+    // Check for a write hole bit on the SetElem_Fallback stub.
+    ICStub *stub = icEntry_->fallbackStub();
+    if (stub->isSetElem_Fallback())
+        return stub->toSetElem_Fallback()->hasArrayWriteHole();
+
     return false;
 }
 
@@ -54,6 +60,20 @@ SetElemICInspector::sawDenseWrite() const
     // Check for a SetElem_DenseAdd or SetElem_Dense stub.
     for (ICStub *stub = icEntry_->firstStub(); stub; stub = stub->next()) {
         if (stub->isSetElem_DenseAdd() || stub->isSetElem_Dense())
+            return true;
+    }
+    return false;
+}
+
+bool
+SetElemICInspector::sawTypedArrayWrite() const
+{
+    if (!icEntry_)
+        return false;
+
+    // Check for a SetElem_TypedArray stub.
+    for (ICStub *stub = icEntry_->firstStub(); stub; stub = stub->next()) {
+        if (stub->isSetElem_TypedArray())
             return true;
     }
     return false;

@@ -352,6 +352,10 @@ pref("browser.download.panel.shown", false);
 // enabled has been completed already.
 pref("browser.download.panel.firstSessionCompleted", false);
 
+#ifndef XP_MACOSX
+pref("browser.helperApps.deleteTempFileOnExit", true);
+#endif
+
 // search engines URL
 pref("browser.search.searchEnginesURL",      "https://addons.mozilla.org/%LOCALE%/firefox/search-engines/");
 
@@ -1067,7 +1071,8 @@ pref("devtools.gcli.allowSet", false);
 pref("devtools.commands.dir", "");
 
 // Disable the app manager
-pref("devtools.appmanager.enabled", false);
+pref("devtools.appmanager.enabled", true);
+pref("devtools.appmanager.firstrun", true);
 
 // Toolbox preferences
 pref("devtools.toolbox.footer.height", 250);
@@ -1076,6 +1081,7 @@ pref("devtools.toolbox.host", "bottom");
 pref("devtools.toolbox.selectedTool", "webconsole");
 pref("devtools.toolbox.toolbarSpec", '["paintflashing toggle","tilt toggle","scratchpad","resize toggle"]');
 pref("devtools.toolbox.sideEnabled", true);
+pref("devtools.toolbox.zoomValue", "1");
 
 // Enable the Inspector
 pref("devtools.inspector.enabled", true);
@@ -1084,12 +1090,10 @@ pref("devtools.inspector.markupPreview", false);
 pref("devtools.inspector.remote", false);
 pref("devtools.inspector.show_pseudo_elements", true);
 
-// Enable the Layout View
-pref("devtools.layoutview.enabled", true);
-pref("devtools.layoutview.open", false);
+// DevTools default color unit
+pref("devtools.defaultColorUnit", "hex");
 
 // Enable the Responsive UI tool
-pref("devtools.responsiveUI.enabled", true);
 pref("devtools.responsiveUI.no-reload-notification", false);
 
 // Enable the Debugger
@@ -1100,6 +1104,7 @@ pref("devtools.debugger.chrome-debugging-port", 6080);
 pref("devtools.debugger.remote-host", "localhost");
 pref("devtools.debugger.remote-timeout", 20000);
 pref("devtools.debugger.pause-on-exceptions", false);
+pref("devtools.debugger.ignore-caught-exceptions", true);
 pref("devtools.debugger.source-maps-enabled", true);
 
 // The default Debugger UI settings
@@ -1127,9 +1132,6 @@ pref("devtools.netmonitor.panes-network-details-height", 450);
 pref("devtools.tilt.enabled", true);
 pref("devtools.tilt.intro_transition", true);
 pref("devtools.tilt.outro_transition", true);
-
-// Enable the Scratchpad tool.
-pref("devtools.scratchpad.enabled", true);
 
 // The maximum number of recently-opened files stored.
 // Setting this preference to 0 will not clear any recent files, but rather hide

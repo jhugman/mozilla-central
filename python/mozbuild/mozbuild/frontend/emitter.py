@@ -15,13 +15,18 @@ from .data import (
     ConfigFileSubstitution,
     DirectoryTraversal,
     Exports,
+    GeneratedEventWebIDLFile,
+    GeneratedWebIDLFile,
     IPDLFile,
     LocalInclude,
+    PreprocessedWebIDLFile,
     Program,
     ReaderSummary,
+    TestWebIDLFile,
     VariablePassthru,
     XPIDLFile,
     XpcshellManifests,
+    WebIDLFile,
 )
 
 from .reader import (
@@ -71,7 +76,6 @@ class TreeMetadataEmitter(LoggingMixin):
 
         This is a generator of mozbuild.frontend.data.SandboxDerived instances.
         """
-
         # We always emit a directory traversal descriptor. This is needed by
         # the recursive make backend.
         for o in self._emit_directory_traversal_from_sandbox(sandbox): yield o
@@ -141,6 +145,7 @@ class TreeMetadataEmitter(LoggingMixin):
             MODULE='MODULE',
             MSVC_ENABLE_PGO='MSVC_ENABLE_PGO',
             NO_DIST_INSTALL='NO_DIST_INSTALL',
+            OS_LIBS='OS_LIBS',
             SDK_LIBRARY='SDK_LIBRARY',
             SHARED_LIBRARY_LIBS='SHARED_LIBRARY_LIBS',
             SIMPLE_PROGRAMS='SIMPLE_PROGRAMS',
@@ -162,14 +167,19 @@ class TreeMetadataEmitter(LoggingMixin):
         if program:
             yield Program(sandbox, program, sandbox['CONFIG']['BIN_SUFFIX'])
 
-        for manifest in sandbox.get('XPCSHELL_TESTS_MANIFESTS', []):
-            yield XpcshellManifests(sandbox, manifest)
-
-        for ipdl in sandbox.get('IPDL_SOURCES', []):
-            yield IPDLFile(sandbox, ipdl)
-
-        for local_include in sandbox.get('LOCAL_INCLUDES', []):
-            yield LocalInclude(sandbox, local_include)
+        simple_lists = [
+            ('GENERATED_EVENTS_WEBIDL_FILES', GeneratedEventWebIDLFile),
+            ('GENERATED_WEBIDL_FILES', GeneratedWebIDLFile),
+            ('IPDL_SOURCES', IPDLFile),
+            ('LOCAL_INCLUDES', LocalInclude),
+            ('PREPROCESSED_WEBIDL_FILES', PreprocessedWebIDLFile),
+            ('TEST_WEBIDL_FILES', TestWebIDLFile),
+            ('WEBIDL_FILES', WebIDLFile),
+            ('XPCSHELL_TESTS_MANIFESTS', XpcshellManifests),
+        ]
+        for sandbox_var, klass in simple_lists:
+            for name in sandbox.get(sandbox_var, []):
+                yield klass(sandbox, name)
 
     def _emit_directory_traversal_from_sandbox(self, sandbox):
         o = DirectoryTraversal(sandbox)
@@ -180,6 +190,7 @@ class TreeMetadataEmitter(LoggingMixin):
         o.test_tool_dirs = sandbox.get('TEST_TOOL_DIRS', [])
         o.external_make_dirs = sandbox.get('EXTERNAL_MAKE_DIRS', [])
         o.parallel_external_make_dirs = sandbox.get('PARALLEL_EXTERNAL_MAKE_DIRS', [])
+        o.is_tool_dir = sandbox.get('IS_TOOL_DIR', False)
 
         if 'TIERS' in sandbox:
             for tier in sandbox['TIERS']:

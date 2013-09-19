@@ -103,6 +103,7 @@
 #include <algorithm>
 #include "nsDOMEvent.h"
 #include "nsGlobalWindow.h"
+#include "nsDOMMutationObserver.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -2144,6 +2145,22 @@ nsINode::UnbindObject(nsISupports* aObject)
   }
 }
 
+void
+nsINode::GetBoundMutationObservers(nsTArray<nsRefPtr<nsDOMMutationObserver> >& aResult)
+{
+  nsCOMArray<nsISupports>* objects =
+    static_cast<nsCOMArray<nsISupports>*>(GetProperty(nsGkAtoms::keepobjectsalive));
+  if (objects) {
+    for (int32_t i = 0; i < objects->Count(); ++i) {
+      nsCOMPtr<nsDOMMutationObserver> mo = do_QueryInterface(objects->ObjectAt(i));
+      if (mo) {
+        MOZ_ASSERT(!aResult.Contains(mo));
+        aResult.AppendElement(mo.forget());
+      }
+    }
+  }
+}
+
 size_t
 nsINode::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
 {
@@ -2171,14 +2188,11 @@ nsINode::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
     return elm ? elm->GetEventHandler(nsGkAtoms::on##name_, EmptyString())   \
                : nullptr;                                                    \
   }                                                                          \
-  void nsINode::SetOn##name_(EventHandlerNonNull* handler,                   \
-                             ErrorResult& error) {                           \
+  void nsINode::SetOn##name_(EventHandlerNonNull* handler)                   \
+  {                                                                          \
     nsEventListenerManager *elm = GetListenerManager(true);                  \
     if (elm) {                                                               \
-      error = elm->SetEventHandler(nsGkAtoms::on##name_,                     \
-                                   EmptyString(), handler);                  \
-    } else {                                                                 \
-      error.Throw(NS_ERROR_OUT_OF_MEMORY);                                   \
+      elm->SetEventHandler(nsGkAtoms::on##name_, EmptyString(), handler);    \
     }                                                                        \
   }                                                                          \
   NS_IMETHODIMP nsINode::GetOn##name_(JSContext *cx, JS::Value *vp) {        \
@@ -2193,9 +2207,8 @@ nsINode::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
         JS_ObjectIsCallable(cx, callable = &v.toObject())) {                 \
       handler = new EventHandlerNonNull(callable);                           \
     }                                                                        \
-    ErrorResult rv;                                                          \
-    SetOn##name_(handler, rv);                                               \
-    return rv.ErrorCode();                                                   \
+    SetOn##name_(handler);                                                   \
+    return NS_OK;                                                            \
   }
 #define TOUCH_EVENT EVENT
 #define DOCUMENT_ONLY_EVENT EVENT

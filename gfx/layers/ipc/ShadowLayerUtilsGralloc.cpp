@@ -184,13 +184,13 @@ ContentTypeFromPixelFormat(android::PixelFormat aFormat)
   return gfxASurface::ContentFromFormat(ImageFormatForPixelFormat(aFormat));
 }
 
-class GrallocReporter MOZ_FINAL : public MemoryReporterBase
+class GrallocReporter MOZ_FINAL : public MemoryUniReporter
 {
   friend class GrallocBufferActor;
 
 public:
   GrallocReporter()
-    : MemoryReporterBase("gralloc", KIND_OTHER, UNITS_BYTES,
+    : MemoryUniReporter("gralloc", KIND_OTHER, UNITS_BYTES,
 "Special RAM that can be shared between processes and directly accessed by "
 "both the CPU and GPU.  Gralloc memory is usually a relatively precious "
 "resource, with much less available than generic RAM.  When it's exhausted, "
@@ -216,7 +216,6 @@ int64_t GrallocReporter::sAmount = 0;
 
 GrallocBufferActor::GrallocBufferActor()
 : mAllocBytes(0)
-, mDeprecatedTextureHost(nullptr)
 {
   static bool registered;
   if (!registered) {
@@ -267,18 +266,27 @@ GrallocBufferActor::Create(const gfxIntSize& aSize,
   return actor;
 }
 
-// used only for hacky fix in gecko 23 for bug 862324
+// used only for hacky fix for bug 862324
 void GrallocBufferActor::ActorDestroy(ActorDestroyReason)
 {
-  if (mDeprecatedTextureHost) {
-    mDeprecatedTextureHost->ForgetBuffer();
+  for (size_t i = 0; i < mDeprecatedTextureHosts.Length(); i++) {
+    mDeprecatedTextureHosts[i]->ForgetBuffer();
   }
 }
 
-// used only for hacky fix in gecko 23 for bug 862324
-void GrallocBufferActor::SetDeprecatedTextureHost(DeprecatedTextureHost* aDeprecatedTextureHost)
+// used only for hacky fix for bug 862324
+void GrallocBufferActor::AddDeprecatedTextureHost(DeprecatedTextureHost* aDeprecatedTextureHost)
 {
-  mDeprecatedTextureHost = aDeprecatedTextureHost;
+  mDeprecatedTextureHosts.AppendElement(aDeprecatedTextureHost);
+}
+
+// used only for hacky fix for bug 862324
+void GrallocBufferActor::RemoveDeprecatedTextureHost(DeprecatedTextureHost* aDeprecatedTextureHost)
+{
+  mDeprecatedTextureHosts.RemoveElement(aDeprecatedTextureHost);
+  // that should be the only occurence, otherwise we'd leak this TextureHost...
+  // assert that that's not happening.
+  MOZ_ASSERT(!mDeprecatedTextureHosts.Contains(aDeprecatedTextureHost));
 }
 
 /*static*/ already_AddRefed<TextureImage>

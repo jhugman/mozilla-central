@@ -37,6 +37,9 @@ if CONFIG['MOZ_MEDIA_PLUGINS']:
 if CONFIG['MOZ_WMF']:
     PARALLEL_DIRS += ['wmf']
 
+if CONFIG['MOZ_APPLEMEDIA']:
+    PARALLEL_DIRS += ['apple']
+
 PARALLEL_DIRS += ['webrtc']
 
 if CONFIG['MOZ_OMX_DECODER']:
@@ -66,6 +69,7 @@ EXPORTS += [
     'DecoderTraits.h',
     'EncodedBufferCache.h',
     'FileBlockCache.h',
+    'Latency.h',
     'MP3FrameParser.h',
     'MediaCache.h',
     'MediaDecoder.h',
@@ -94,6 +98,8 @@ EXPORTS.mozilla.dom += [
     'TextTrackCue.h',
     'TextTrackCueList.h',
     'TextTrackList.h',
+    'TextTrackRegion.h',
+    'TextTrackRegionList.h',
     'VideoPlaybackQuality.h',
     'VideoStreamTrack.h',
 ]
@@ -112,6 +118,7 @@ CPP_SOURCES += [
     'DecoderTraits.cpp',
     'EncodedBufferCache.cpp',
     'FileBlockCache.cpp',
+    'Latency.cpp',
     'MP3FrameParser.cpp',
     'MediaCache.cpp',
     'MediaDecoder.cpp',
@@ -126,6 +133,8 @@ CPP_SOURCES += [
     'TextTrackCue.cpp',
     'TextTrackCueList.cpp',
     'TextTrackList.cpp',
+    'TextTrackRegion.cpp',
+    'TextTrackRegionList.cpp',
     'VideoFrameContainer.cpp',
     'VideoPlaybackQuality.cpp',
     'VideoSegment.cpp',

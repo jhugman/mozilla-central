@@ -33,17 +33,12 @@
 #include "frontend/ParseMaps.h"
 #include "frontend/TokenStream.h"
 #include "jit/AsmJS.h"
-#include "vm/RegExpStatics.h"
 #include "vm/Shape.h"
 
 #include "jsatominlines.h"
-#include "jsfuninlines.h"
-#include "jsobjinlines.h"
 #include "jsscriptinlines.h"
 
-#include "frontend/ParseMaps-inl.h"
 #include "frontend/ParseNode-inl.h"
-#include "vm/ScopeObject-inl.h"
 
 using namespace js;
 using namespace js::gc;
@@ -2254,7 +2249,6 @@ Parser<FullParseHandler>::standaloneLazyFunction(HandleFunction fun, unsigned st
         return null();
     }
 
-
     if (fun->isNamedLambda()) {
         if (AtomDefnPtr p = pc->lexdeps->lookup(fun->name())) {
             Definition *dn = p.value().get<FullParseHandler>();
@@ -2266,6 +2260,9 @@ Parser<FullParseHandler>::standaloneLazyFunction(HandleFunction fun, unsigned st
     InternalHandle<Bindings*> bindings =
         InternalHandle<Bindings*>::fromMarkedLocation(&funbox->bindings);
     if (!pc->generateFunctionBindings(context, alloc, bindings))
+        return null();
+
+    if (!FoldConstants(context, &pn, this))
         return null();
 
     return pn;
@@ -3001,7 +2998,8 @@ Parser<FullParseHandler>::makeSetCall(ParseNode *pn, unsigned msg)
 {
     JS_ASSERT(pn->isKind(PNK_CALL));
     JS_ASSERT(pn->isArity(PN_LIST));
-    JS_ASSERT(pn->isOp(JSOP_CALL) || pn->isOp(JSOP_EVAL) ||
+    JS_ASSERT(pn->isOp(JSOP_CALL) || pn->isOp(JSOP_SPREADCALL) ||
+              pn->isOp(JSOP_EVAL) || pn->isOp(JSOP_SPREADEVAL) ||
               pn->isOp(JSOP_FUNCALL) || pn->isOp(JSOP_FUNAPPLY));
 
     if (!report(ParseStrictError, pc->sc->strict, pn, msg))
@@ -5436,8 +5434,8 @@ Parser<FullParseHandler>::checkAndMarkAsIncOperand(ParseNode *kid, TokenKind tt,
         !kid->isKind(PNK_DOT) &&
         !kid->isKind(PNK_ELEM) &&
         !(kid->isKind(PNK_CALL) &&
-          (kid->isOp(JSOP_CALL) ||
-           kid->isOp(JSOP_EVAL) ||
+          (kid->isOp(JSOP_CALL) || kid->isOp(JSOP_SPREADCALL) ||
+           kid->isOp(JSOP_EVAL) || kid->isOp(JSOP_SPREADEVAL) ||
            kid->isOp(JSOP_FUNCALL) ||
            kid->isOp(JSOP_FUNAPPLY))))
     {
@@ -6197,7 +6195,7 @@ Parser<ParseHandler>::assignExprWithoutYield(unsigned msg)
 
 template <typename ParseHandler>
 bool
-Parser<ParseHandler>::argumentList(Node listNode)
+Parser<ParseHandler>::argumentList(Node listNode, bool *isSpread)
 {
     if (tokenStream.matchToken(TOK_RP, TokenStream::Operand))
         return true;
@@ -6206,9 +6204,22 @@ Parser<ParseHandler>::argumentList(Node listNode)
     bool arg0 = true;
 
     do {
+        bool spread = false;
+        uint32_t begin = 0;
+        if (tokenStream.matchToken(TOK_TRIPLEDOT, TokenStream::Operand)) {
+            spread = true;
+            begin = pos().begin;
+            *isSpread = true;
+        }
+
         Node argNode = assignExpr();
         if (!argNode)
             return false;
+        if (spread) {
+            argNode = handler.newUnary(PNK_SPREAD, JSOP_NOP, begin, argNode);
+            if (!argNode)
+                return null();
+        }
 
         if (handler.isOperationWithoutParens(argNode, PNK_YIELD) &&
             tokenStream.peekToken() == TOK_COMMA) {
@@ -6216,7 +6227,7 @@ Parser<ParseHandler>::argumentList(Node listNode)
             return false;
         }
 #if JS_HAS_GENERATOR_EXPRS
-        if (tokenStream.matchToken(TOK_FOR)) {
+        if (!spread && tokenStream.matchToken(TOK_FOR)) {
             if (pc->lastYieldOffset != startYieldOffset) {
                 reportWithOffset(ParseError, false, pc->lastYieldOffset,
                                  JSMSG_BAD_GENEXP_BODY, js_yield_str);
@@ -6266,8 +6277,13 @@ Parser<ParseHandler>::memberExpr(TokenKind tt, bool allowCallSyntax)
 
         handler.addList(lhs, ctorExpr);
 
-        if (tokenStream.matchToken(TOK_LP) && !argumentList(lhs))
-            return null();
+        if (tokenStream.matchToken(TOK_LP)) {
+            bool isSpread = false;
+            if (!argumentList(lhs, &isSpread))
+                return null();
+            if (isSpread)
+                handler.setOp(lhs, JSOP_SPREADNEW);
+        }
     } else {
         lhs = primaryExpr(tt);
         if (!lhs)
@@ -6300,6 +6316,7 @@ Parser<ParseHandler>::memberExpr(TokenKind tt, bool allowCallSyntax)
             if (!nextMember)
                 return null();
         } else if (allowCallSyntax && tt == TOK_LP) {
+            JSOp op = JSOP_CALL;
             nextMember = handler.newList(PNK_CALL, null(), JSOP_CALL);
             if (!nextMember)
                 return null();
@@ -6307,7 +6324,7 @@ Parser<ParseHandler>::memberExpr(TokenKind tt, bool allowCallSyntax)
             if (JSAtom *atom = handler.isName(lhs)) {
                 if (atom == context->names().eval) {
                     /* Select JSOP_EVAL and flag pc as heavyweight. */
-                    handler.setOp(nextMember, JSOP_EVAL);
+                    op = JSOP_EVAL;
                     pc->sc->setBindingsAccessedDynamically();
 
                     /*
@@ -6320,19 +6337,23 @@ Parser<ParseHandler>::memberExpr(TokenKind tt, bool allowCallSyntax)
             } else if (JSAtom *atom = handler.isGetProp(lhs)) {
                 /* Select JSOP_FUNAPPLY given foo.apply(...). */
                 if (atom == context->names().apply) {
-                    handler.setOp(nextMember, JSOP_FUNAPPLY);
+                    op = JSOP_FUNAPPLY;
                     if (pc->sc->isFunctionBox())
                         pc->sc->asFunctionBox()->usesApply = true;
                 } else if (atom == context->names().call) {
-                    handler.setOp(nextMember, JSOP_FUNCALL);
+                    op = JSOP_FUNCALL;
                 }
             }
 
             handler.setBeginPosition(nextMember, lhs);
             handler.addList(nextMember, lhs);
 
-            if (!argumentList(nextMember))
+            bool isSpread = false;
+            if (!argumentList(nextMember, &isSpread))
                 return null();
+            if (isSpread)
+                op = (op == JSOP_EVAL ? JSOP_SPREADEVAL : JSOP_SPREADCALL);
+            handler.setOp(nextMember, op);
         } else {
             tokenStream.ungetToken();
             return lhs;
@@ -6517,6 +6538,14 @@ Parser<ParseHandler>::arrayInitializer()
     return literal;
 }
 
+static JSAtom*
+DoubleToAtom(ExclusiveContext *cx, double value)
+{
+    // This is safe because doubles can not be moved.
+    Value tmp = DoubleValue(value);
+    return ToAtom<CanGC>(cx, HandleValue::fromMarkedLocation(&tmp));
+}
+
 template <typename ParseHandler>
 typename ParseHandler::Node
 Parser<ParseHandler>::objectLiteral()
@@ -6540,7 +6569,6 @@ Parser<ParseHandler>::objectLiteral()
         return null();
 
     RootedAtom atom(context);
-    Value tmp;
     for (;;) {
         TokenKind ltok = tokenStream.getToken(TokenStream::KeywordIsName);
         if (ltok == TOK_RC)
@@ -6550,8 +6578,7 @@ Parser<ParseHandler>::objectLiteral()
         Node propname;
         switch (ltok) {
           case TOK_NUMBER:
-            tmp = DoubleValue(tokenStream.currentToken().number());
-            atom = ToAtom<CanGC>(context, HandleValue::fromMarkedLocation(&tmp));
+            atom = DoubleToAtom(context, tokenStream.currentToken().number());
             if (!atom)
                 return null();
             propname = newNumber(tokenStream.currentToken());
@@ -6586,8 +6613,7 @@ Parser<ParseHandler>::objectLiteral()
                     propname = handler.newNumber(index, NoDecimal, pos());
                     if (!propname)
                         return null();
-                    tmp = DoubleValue(index);
-                    atom = ToAtom<CanGC>(context, HandleValue::fromMarkedLocation(&tmp));
+                    atom = DoubleToAtom(context, index);
                     if (!atom)
                         return null();
                 } else {
@@ -6596,9 +6622,7 @@ Parser<ParseHandler>::objectLiteral()
                         return null();
                 }
             } else if (tt == TOK_NUMBER) {
-                double number = tokenStream.currentToken().number();
-                tmp = DoubleValue(number);
-                atom = ToAtom<CanGC>(context, HandleValue::fromMarkedLocation(&tmp));
+                atom = DoubleToAtom(context, tokenStream.currentToken().number());
                 if (!atom)
                     return null();
                 propname = newNumber(tokenStream.currentToken());

@@ -4,6 +4,9 @@
 
 MOCHITEST_FILES = \
     bug421622-referer.sjs \
+    nochrome_bug765993.html \
+    nochrome_bug765993.js \
+    nochrome_bug765993.js^headers^ \
     $(NULL)
 
 MOCHITEST_CHROME_FILES = \
@@ -51,6 +54,8 @@ MOCHITEST_CHROME_FILES = \
     host_bug814638.xul \
     test_document_register.xul \
     frame_bug814638.xul \
+    test_bug914381.html \
+    test_bug765993.html \
     $(NULL)
 
 ifneq ($(MOZ_WIDGET_TOOLKIT),cocoa)

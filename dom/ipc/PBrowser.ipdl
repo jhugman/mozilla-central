@@ -44,7 +44,7 @@ using nsIntSize;
 using nsKeyEvent;
 using nsMouseEvent;
 using nsMouseScrollEvent;
-using mozilla::widget::WheelEvent;
+using mozilla::WheelEvent;
 using nsQueryContentEvent;
 using nsRect;
 using nsSelectionEvent;
@@ -251,7 +251,7 @@ parent:
     POfflineCacheUpdate(URIParams manifestURI, URIParams documentURI,
                         bool stickDocument);
 
-    sync PIndexedDB(nsCString asciiOrigin)
+    sync PIndexedDB(nsCString group, nsCString asciiOrigin)
         returns (bool allowed);
 
     /**

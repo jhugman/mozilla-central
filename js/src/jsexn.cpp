@@ -30,9 +30,7 @@
 #include "vm/GlobalObject.h"
 #include "vm/StringBuffer.h"
 
-#include "jsfuninlines.h"
 #include "jsobjinlines.h"
-#include "jsscriptinlines.h"
 
 using namespace js;
 using namespace js::gc;
@@ -56,7 +54,7 @@ static bool
 exn_resolve(JSContext *cx, HandleObject obj, HandleId id, unsigned flags,
             MutableHandleObject objp);
 
-Class ErrorObject::class_ = {
+const Class ErrorObject::class_ = {
     js_Error_str,
     JSCLASS_HAS_PRIVATE | JSCLASS_IMPLEMENTS_BARRIERS | JSCLASS_NEW_RESOLVE |
     JSCLASS_HAS_CACHED_PROTO(JSProto_Error),
@@ -983,7 +981,8 @@ js_ErrorToException(JSContext *cx, const char *message, JSErrorReport *reportp,
         return false;
     }
 
-    JS_SetPendingException(cx, OBJECT_TO_JSVAL(errObject));
+    RootedValue errValue(cx, OBJECT_TO_JSVAL(errObject));
+    JS_SetPendingException(cx, errValue);
 
     /* Flag the error report passed in to indicate an exception was raised. */
     reportp->flags |= JSREPORT_EXCEPTION;
@@ -1021,7 +1020,7 @@ js_ReportUncaughtException(JSContext *cx)
         return true;
 
     RootedValue exn(cx);
-    if (!JS_GetPendingException(cx, exn.address()))
+    if (!JS_GetPendingException(cx, &exn))
         return false;
 
     AutoValueVector roots(cx);

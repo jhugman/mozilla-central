@@ -5,12 +5,14 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "AudioContext.h"
+
 #include "nsPIDOMWindow.h"
 #include "mozilla/ErrorResult.h"
 #include "mozilla/dom/AnalyserNode.h"
 #include "mozilla/dom/AudioContextBinding.h"
 #include "mozilla/dom/HTMLMediaElement.h"
 #include "mozilla/dom/OfflineAudioContextBinding.h"
+#include "mozilla/dom/OwningNonNull.h"
 #include "MediaStreamGraph.h"
 #include "AudioDestinationNode.h"
 #include "AudioBufferSourceNode.h"
@@ -57,15 +59,22 @@ AudioContext::AudioContext(nsPIDOMWindow* aWindow,
                                           aLength, aSampleRate))
   , mNumberOfChannels(aNumberOfChannels)
   , mIsOffline(aIsOffline)
+  , mIsStarted(!aIsOffline)
+  , mIsShutDown(false)
 {
   // Actually play audio
   mDestination->Stream()->AddAudioOutput(&gWebAudioOutputKey);
   nsDOMEventTargetHelper::BindToOwner(aWindow);
+  aWindow->AddAudioContext(this);
   SetIsDOMBinding();
 }
 
 AudioContext::~AudioContext()
 {
+  nsPIDOMWindow* window = GetOwner();
+  if (window) {
+    window->RemoveAudioContext(this);
+  }
 }
 
 JSObject*
@@ -89,7 +98,6 @@ AudioContext::Constructor(const GlobalObject& aGlobal,
   }
 
   nsRefPtr<AudioContext> object = new AudioContext(window, false);
-  window->AddAudioContext(object);
   return object.forget();
 }
 
@@ -121,7 +129,6 @@ AudioContext::Constructor(const GlobalObject& aGlobal,
                                                    aNumberOfChannels,
                                                    aLength,
                                                    aSampleRate);
-  window->AddAudioContext(object);
   return object.forget();
 }
 
@@ -389,8 +396,11 @@ AudioContext::CreatePeriodicWave(const Float32Array& aRealData,
   }
 
   nsRefPtr<PeriodicWave> periodicWave =
-    new PeriodicWave(this, aRealData.Data(), aRealData.Length(),
-                     aImagData.Data(), aImagData.Length());
+    new PeriodicWave(this, aRealData.Data(), aImagData.Data(),
+                     aImagData.Length(), aRv);
+  if (aRv.Failed()) {
+    return nullptr;
+  }
   return periodicWave.forget();
 }
 
@@ -432,6 +442,20 @@ void
 AudioContext::RemoveFromDecodeQueue(WebAudioDecodeJob* aDecodeJob)
 {
   mDecodeJobs.RemoveElement(aDecodeJob);
+}
+
+void
+AudioContext::RegisterActiveNode(AudioNode* aNode)
+{
+  if (!mIsShutDown) {
+    mActiveNodes.PutEntry(aNode);
+  }
+}
+
+void
+AudioContext::UnregisterActiveNode(AudioNode* aNode)
+{
+  mActiveNodes.RemoveEntry(aNode);
 }
 
 void
@@ -490,7 +514,10 @@ AudioContext::Graph() const
 MediaStream*
 AudioContext::DestinationStream() const
 {
-  return Destination()->Stream();
+  if (Destination()) {
+    return Destination()->Stream();
+  }
+  return nullptr;
 }
 
 double
@@ -516,24 +543,16 @@ GetHashtableElements(nsTHashtable<nsPtrHashKey<T> >& aHashtable, nsTArray<T*>& a
 }
 
 void
-AudioContext::ShutdownDecoder()
-{
-  mDecoder.Shutdown();
-}
-
-void
 AudioContext::Shutdown()
 {
+  mIsShutDown = true;
+
   Suspend();
 
-  // We need to hold the AudioContext object alive here to make sure that
-  // it doesn't get destroyed before our decoder shutdown runnable has had
-  // a chance to run.
-  nsCOMPtr<nsIRunnable> threadShutdownEvent =
-    NS_NewRunnableMethod(this, &AudioContext::ShutdownDecoder);
-  if (threadShutdownEvent) {
-    NS_DispatchToCurrentThread(threadShutdownEvent);
-  }
+  // Release references to active nodes.
+  // Active AudioNodes don't unregister in destructors, at which point the
+  // Node is already unregistered.
+  mActiveNodes.Clear();
 
   // Stop all audio buffer source nodes, to make sure that they release
   // their self-references.
@@ -564,8 +583,8 @@ AudioContext::Shutdown()
   }
 
   // For offline contexts, we can destroy the MediaStreamGraph at this point.
-  if (mIsOffline) {
-    mDestination->DestroyGraph();
+  if (mIsOffline && mDestination) {
+    mDestination->OfflineShutdown();
   }
 }
 
@@ -605,10 +624,15 @@ AudioContext::GetJSContext() const
 }
 
 void
-AudioContext::StartRendering()
+AudioContext::StartRendering(ErrorResult& aRv)
 {
   MOZ_ASSERT(mIsOffline, "This should only be called on OfflineAudioContext");
+  if (mIsStarted) {
+    aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+    return;
+  }
 
+  mIsStarted = true;
   mDestination->StartRendering();
 }
 

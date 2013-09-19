@@ -5,20 +5,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
-
 #include "AccessCheck.h"
 
 #include "nsJSPrincipals.h"
-#include "nsIDocument.h"
 #include "nsIDOMWindow.h"
-#include "nsPIDOMWindow.h"
 #include "nsIDOMWindowCollection.h"
-#include "nsJSUtils.h"
 
 #include "XPCWrapper.h"
 #include "XrayWrapper.h"
-#include "FilteringWrapper.h"
 
 #include "jsfriendapi.h"
 #include "mozilla/dom/BindingUtils.h"
@@ -171,49 +165,6 @@ IsPermitted(const char *name, JSFlatString *prop, bool set)
 #undef R
 #undef W
 
-static bool
-IsFrameId(JSContext *cx, JSObject *objArg, jsid idArg)
-{
-    RootedObject obj(cx, objArg);
-    RootedId id(cx, idArg);
-
-    obj = JS_ObjectToInnerObject(cx, obj);
-    MOZ_ASSERT(!js::IsWrapper(obj));
-    XPCWrappedNative *wn = IS_WN_REFLECTOR(obj) ? XPCWrappedNative::Get(obj)
-                                                : nullptr;
-    if (!wn) {
-        return false;
-    }
-
-    nsCOMPtr<nsIDOMWindow> domwin(do_QueryWrappedNative(wn));
-    if (!domwin) {
-        return false;
-    }
-
-    nsCOMPtr<nsIDOMWindowCollection> col;
-    domwin->GetFrames(getter_AddRefs(col));
-    if (!col) {
-        return false;
-    }
-
-    if (JSID_IS_INT(id)) {
-        col->Item(JSID_TO_INT(id), getter_AddRefs(domwin));
-    } else if (JSID_IS_STRING(id)) {
-        nsAutoString str(JS_GetInternedStringChars(JSID_TO_STRING(id)));
-        col->NamedItem(str, getter_AddRefs(domwin));
-    } else {
-        return false;
-    }
-
-    return domwin != nullptr;
-}
-
-static bool
-IsWindow(const char *name)
-{
-    return name[0] == 'W' && !strcmp(name, "Window");
-}
-
 bool
 AccessCheck::isCrossOriginAccessPermitted(JSContext *cx, JSObject *wrapperArg, jsid idArg,
                                           Wrapper::Action act)
@@ -237,7 +188,7 @@ AccessCheck::isCrossOriginAccessPermitted(JSContext *cx, JSObject *wrapperArg, j
         return false;
 
     const char *name;
-    js::Class *clasp = js::GetObjectClass(obj);
+    const js::Class *clasp = js::GetObjectClass(obj);
     MOZ_ASSERT(Jsvalify(clasp) != &XrayUtils::HolderClass, "shouldn't have a holder here");
     if (clasp->ext.innerObject)
         name = "Window";
@@ -249,19 +200,6 @@ AccessCheck::isCrossOriginAccessPermitted(JSContext *cx, JSObject *wrapperArg, j
             return true;
     }
 
-    // Check for frame IDs. If we're resolving named frames, make sure to only
-    // resolve ones that don't shadow native properties. See bug 860494.
-    if (IsWindow(name)) {
-        if (JSID_IS_STRING(id) && !XrayUtils::IsXrayResolving(cx, wrapper, id)) {
-            bool wouldShadow = false;
-            if (!XrayUtils::HasNativeProperty(cx, wrapper, id, &wouldShadow) ||
-                wouldShadow)
-            {
-                return false;
-            }
-        }
-        return IsFrameId(cx, obj, id);
-    }
     return false;
 }
 

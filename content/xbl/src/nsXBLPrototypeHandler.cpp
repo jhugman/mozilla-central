@@ -51,9 +51,6 @@
 using namespace mozilla;
 using namespace mozilla::dom;
 
-static NS_DEFINE_CID(kDOMScriptObjectFactoryCID,
-                     NS_DOM_SCRIPT_OBJECT_FACTORY_CID);
-
 uint32_t nsXBLPrototypeHandler::gRefCnt = 0;
 
 int32_t nsXBLPrototypeHandler::kMenuAccessKey = -1;
@@ -550,7 +547,7 @@ nsXBLPrototypeHandler::DispatchXULKeyCommand(nsIDOMEvent* aEvent)
     return NS_ERROR_FAILURE;
   }
 
-  // XXX We should use widget::Modifiers for supporting all modifiers.
+  // XXX We should use mozilla::Modifiers for supporting all modifiers.
 
   bool isAlt = false;
   bool isControl = false;

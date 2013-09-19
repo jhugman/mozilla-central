@@ -40,7 +40,7 @@ public:
 
   MediaResource* GetResource() const MOZ_FINAL MOZ_OVERRIDE;
 
-  void NotifyBytesConsumed(int64_t aBytes) MOZ_FINAL MOZ_OVERRIDE;
+  void NotifyBytesConsumed(int64_t aBytes, int64_t aOffset) MOZ_FINAL MOZ_OVERRIDE;
 
   void NotifyDecodedFrames(uint32_t aParsed, uint32_t aDecoded) MOZ_FINAL MOZ_OVERRIDE;
 
@@ -50,7 +50,7 @@ public:
 
   void SetMediaDuration(int64_t aDuration) MOZ_OVERRIDE;
 
-  void UpdateMediaDuration(int64_t aDuration) MOZ_OVERRIDE;
+  void UpdateEstimatedMediaDuration(int64_t aDuration) MOZ_OVERRIDE;
 
   void SetMediaSeekable(bool aMediaSeekable) MOZ_OVERRIDE;
 

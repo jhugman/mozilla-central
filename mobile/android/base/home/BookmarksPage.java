@@ -5,7 +5,7 @@
 
 package org.mozilla.gecko.home;
 
-import org.mozilla.gecko.Favicons;
+import org.mozilla.gecko.favicons.Favicons;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.Tabs;
 import org.mozilla.gecko.animation.PropertyAnimator;
@@ -179,7 +179,7 @@ public class BookmarksPage extends HomeFragment {
         BrowserDB.invalidateCachedState();
 
         // Create callbacks before the initial loader is started.
-        mLoaderCallbacks = new CursorLoaderCallbacks(activity, getLoaderManager());
+        mLoaderCallbacks = new CursorLoaderCallbacks();
         mThumbnailsLoaderCallbacks = new ThumbnailsLoaderCallbacks();
         loadIfVisible();
     }
@@ -453,11 +453,7 @@ public class BookmarksPage extends HomeFragment {
     /**
      * Loader callbacks for the LoaderManager of this fragment.
      */
-    private class CursorLoaderCallbacks extends HomeCursorLoaderCallbacks {
-        public CursorLoaderCallbacks(Context context, LoaderManager loaderManager) {
-            super(context, loaderManager);
-        }
-
+    private class CursorLoaderCallbacks implements LoaderCallbacks<Cursor> {
         @Override
         public Loader<Cursor> onCreateLoader(int id, Bundle args) {
             switch(id) {
@@ -472,11 +468,9 @@ public class BookmarksPage extends HomeFragment {
                 case LOADER_ID_TOP_BOOKMARKS: {
                     return new TopBookmarksLoader(getActivity());
                 }
-
-                default: {
-                    return super.onCreateLoader(id, args);
-                }
             }
+
+            return null;
         }
 
         @Override
@@ -485,7 +479,6 @@ public class BookmarksPage extends HomeFragment {
             switch(loaderId) {
                 case LOADER_ID_BOOKMARKS_LIST: {
                     mListAdapter.swapCursor(c);
-                    loadFavicons(c);
                     mList.setHeaderDividersEnabled(c != null && c.getCount() > 0);
                     break;
                 }
@@ -509,11 +502,6 @@ public class BookmarksPage extends HomeFragment {
                     }
                     break;
                 }
-
-                default: {
-                    super.onLoadFinished(loader, c);
-                    break;
-                }
             }
         }
 
@@ -534,17 +522,7 @@ public class BookmarksPage extends HomeFragment {
                         break;
                     }
                 }
-
-                default: {
-                    super.onLoaderReset(loader);
-                    break;
-                }
             }
-        }
-
-        @Override
-        public void onFaviconsLoaded() {
-            mListAdapter.notifyDataSetChanged();
         }
     }
 
@@ -598,7 +576,7 @@ public class BookmarksPage extends HomeFragment {
                     if (bitmap != null) {
                         // Favicons.scaleImage can return several different size favicons,
                         // but will at least prevent this from being too large.
-                        thumbnails.put(url, new Thumbnail(Favicons.getInstance().scaleImage(bitmap), false));
+                        thumbnails.put(url, new Thumbnail(Favicons.scaleImage(bitmap), false));
                     }
                 }
             }

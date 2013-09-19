@@ -25,9 +25,9 @@
 #include "../d3d9/Nv3DVUtils.h"
 
 #include "gfxCrashReporterUtils.h"
+#include "nsWindowsHelpers.h"
 #ifdef MOZ_METRO
 #include "DXGI1_2.h"
-#include "nsWindowsHelpers.h"
 #endif
 
 using namespace std;
@@ -62,6 +62,7 @@ cairo_user_data_key_t gKeyD3D10Texture;
 
 LayerManagerD3D10::LayerManagerD3D10(nsIWidget *aWidget)
   : mWidget(aWidget)
+  , mDisableSequenceForNextFrame(false)
 {
 }
 
@@ -245,7 +246,7 @@ LayerManagerD3D10::Initialize(bool force, HRESULT* aHresultPtr)
     swapDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     // Use double buffering to enable flip
     swapDesc.BufferCount = 2;
-    swapDesc.Scaling = DXGI_SCALING_STRETCH;
+    swapDesc.Scaling = DXGI_SCALING_NONE;
     // All Metro style apps must use this SwapEffect
     swapDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
     swapDesc.Flags = 0;
@@ -639,16 +640,15 @@ LayerManagerD3D10::VerifyBufferSize()
     }
 
     mRTView = nullptr;
-    if (gfxWindowsPlatform::IsOptimus()) { 
-      mSwapChain->ResizeBuffers(1, rect.width, rect.height,
-                                DXGI_FORMAT_B8G8R8A8_UNORM,
-                                0);
-#ifdef MOZ_METRO
-    } else if (IsRunningInWindowsMetro()) {
+    if (IsRunningInWindowsMetro()) {
       mSwapChain->ResizeBuffers(2, rect.width, rect.height,
                                 DXGI_FORMAT_B8G8R8A8_UNORM,
                                 0);
-#endif
+      mDisableSequenceForNextFrame = true;
+    } else if (gfxWindowsPlatform::IsOptimus()) {
+      mSwapChain->ResizeBuffers(1, rect.width, rect.height,
+                                DXGI_FORMAT_B8G8R8A8_UNORM,
+                                0);
     } else {
       mSwapChain->ResizeBuffers(1, rect.width, rect.height,
                                 DXGI_FORMAT_B8G8R8A8_UNORM,
@@ -730,7 +730,8 @@ LayerManagerD3D10::Render(EndTransactionFlags aFlags)
   if (mTarget) {
     PaintToTarget();
   } else {
-    mSwapChain->Present(0, 0);
+    mSwapChain->Present(0, mDisableSequenceForNextFrame ? DXGI_PRESENT_DO_NOT_SEQUENCE : 0);
+    mDisableSequenceForNextFrame = false;
   }
   LayerManager::PostPresent();
 }

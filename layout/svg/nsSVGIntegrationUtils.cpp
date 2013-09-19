@@ -382,7 +382,7 @@ public:
       mOffset(aOffset) {}
 
   virtual void Paint(nsRenderingContext *aContext, nsIFrame *aTarget,
-                     const nsIntRect* aDirtyRect)
+                     const nsIntRect* aDirtyRect, nsIFrame* aTransformRoot)
   {
     BasicLayerManager* basic = static_cast<BasicLayerManager*>(mLayerManager);
     basic->SetTarget(aContext->ThebesContext());
@@ -494,7 +494,8 @@ nsSVGIntegrationUtils::PaintFramesWithEffects(nsRenderingContext* aCtx,
   bool complexEffects = false;
   /* Check if we need to do additional operations on this child's
    * rendering, which necessitates rendering into another surface. */
-  if (opacity != 1.0f || maskFrame || (clipPathFrame && !isTrivialClip)) {
+  if (opacity != 1.0f || maskFrame || (clipPathFrame && !isTrivialClip)
+      || aFrame->StyleDisplay()->mMixBlendMode != NS_STYLE_BLEND_NORMAL) {
     complexEffects = true;
     gfx->Save();
     aCtx->IntersectClip(aFrame->GetVisualOverflowRectRelativeToSelf() +
@@ -515,7 +516,7 @@ nsSVGIntegrationUtils::PaintFramesWithEffects(nsRenderingContext* aCtx,
     RegularFramePaintCallback callback(aBuilder, aLayerManager,
                                        offsetWithoutSVGGeomFramePos);
     nsRect dirtyRect = aDirtyRect - offset;
-    filterFrame->PaintFilteredFrame(aCtx, aFrame, &callback, &dirtyRect);
+    filterFrame->PaintFilteredFrame(aCtx, aFrame, &callback, &dirtyRect, nullptr);
   } else {
     gfx->SetMatrix(matrixAutoSaveRestore.Matrix());
     aLayerManager->EndTransaction(FrameLayerBuilder::DrawThebesLayer, aBuilder);

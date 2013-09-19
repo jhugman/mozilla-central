@@ -36,7 +36,6 @@
 #include "vm/ArgumentsObject-inl.h"
 #include "vm/ArrayObject-inl.h"
 #include "vm/Interpreter-inl.h"
-#include "vm/ObjectImpl-inl.h"
 #include "vm/Runtime-inl.h"
 
 using namespace js;
@@ -768,7 +767,7 @@ js::ObjectMayHaveExtraIndexedProperties(JSObject *obj)
     return false;
 }
 
-Class ArrayObject::class_ = {
+const Class ArrayObject::class_ = {
     "Array",
     JSCLASS_HAS_CACHED_PROTO(JSProto_Array),
     array_addProperty,
@@ -1995,10 +1994,14 @@ js::array_pop(JSContext *cx, unsigned argc, Value *vp)
             return false;
     }
 
-    // Keep dense initialized length optimal, if possible.  Note that this just
-    // reflects the possible deletion above: in particular, it's okay to do
-    // this even if the length is non-writable and SetLengthProperty throws.
-    if (obj->isNative() && obj->getDenseInitializedLength() > index)
+    // If this was an array, then there are no elements above the one we just
+    // deleted (if we deleted an element).  Thus we can shrink the dense
+    // initialized length accordingly.  (This is fine even if the array length
+    // is non-writable: length-changing occurs after element-deletion effects.)
+    // Don't do anything if this isn't an array, as any deletion above has no
+    // effect on any elements after the "last" one indicated by the "length"
+    // property.
+    if (obj->is<ArrayObject>() && obj->getDenseInitializedLength() > index)
         obj->setDenseInitializedLength(index);
 
     /* Steps 4a, 5d. */

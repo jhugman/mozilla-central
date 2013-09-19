@@ -32,18 +32,12 @@
 #include "jsarray.h"
 #include "jsatom.h"
 #include "jscntxt.h"
-#include "jsdate.h"
 #include "jsfun.h"
-#include "jsgc.h"
-#include "jsiter.h"
 #ifdef JS_THREADSAFE
 #include "jslock.h"
 #endif
-#include "jsnum.h"
 #include "jsobj.h"
-#include "json.h"
 #include "jsprf.h"
-#include "jsreflect.h"
 #include "jsscript.h"
 #include "jstypes.h"
 #include "jsutil.h"
@@ -58,7 +52,6 @@
 #endif
 
 #include "builtin/TestingFunctions.h"
-#include "frontend/BytecodeEmitter.h"
 #include "frontend/Parser.h"
 #include "jit/Ion.h"
 #include "js/OldDebugAPI.h"
@@ -66,15 +59,13 @@
 #include "perf/jsperf.h"
 #include "shell/jsheaptools.h"
 #include "shell/jsoptparse.h"
+#include "vm/ArgumentsObject.h"
 #include "vm/Shape.h"
 #include "vm/TypedArrayObject.h"
 #include "vm/WrapperObject.h"
 
-#include "jsfuninlines.h"
-#include "jsinferinlines.h"
-#include "jsscriptinlines.h"
-
-#include "vm/Interpreter-inl.h"
+#include "jscompartmentinlines.h"
+#include "jsobjinlines.h"
 
 #ifdef XP_WIN
 # define PATH_MAX (MAX_PATH > _MAX_DIR ? MAX_PATH : _MAX_DIR)
@@ -620,7 +611,7 @@ MapContextOptionNameToFlag(JSContext* cx, const char* name)
     return 0;
 }
 
-extern JSClass global_class;
+extern const JSClass global_class;
 
 static bool
 Version(JSContext *cx, unsigned argc, jsval *vp)
@@ -859,7 +850,7 @@ class AutoNewContext
             RootedValue exc(oldcx);
             bool throwing = JS_IsExceptionPending(newcx);
             if (throwing)
-                JS_GetPendingException(newcx, exc.address());
+                JS_GetPendingException(newcx, &exc);
             newCompartment.destroy();
             newRequest.destroy();
             if (throwing)
@@ -1063,12 +1054,11 @@ Evaluate(JSContext *cx, unsigned argc, jsval *vp)
         if (!script)
             return false;
 
-        if (sourceMapURL && !script->scriptSource()->hasSourceMap()) {
+        if (sourceMapURL && !script->scriptSource()->hasSourceMapURL()) {
             const jschar *smurl = JS_GetStringCharsZ(cx, sourceMapURL);
             if (!smurl)
                 return false;
-            jschar *smurl_copy = js_strdup(cx, smurl);
-            if (!smurl_copy || !script->scriptSource()->setSourceMap(cx, smurl_copy))
+            if (!script->scriptSource()->setSourceMapURL(cx, smurl))
                 return false;
         }
         if (!JS_ExecuteScript(cx, global, script, vp)) {
@@ -2491,7 +2481,7 @@ sandbox_resolve(JSContext *cx, HandleObject obj, HandleId id, unsigned flags,
     return true;
 }
 
-static JSClass sandbox_class = {
+static const JSClass sandbox_class = {
     "sandbox",
     JSCLASS_NEW_RESOLVE | JSCLASS_GLOBAL_FLAGS,
     JS_PropertyStub,   JS_DeletePropertyStub,
@@ -2754,7 +2744,7 @@ resolver_enumerate(JSContext *cx, HandleObject obj)
     return ok;
 }
 
-static JSClass resolver_class = {
+static const JSClass resolver_class = {
     "resolver",
     JSCLASS_NEW_RESOLVE | JSCLASS_HAS_RESERVED_SLOTS(1),
     JS_PropertyStub,   JS_DeletePropertyStub,
@@ -3614,12 +3604,12 @@ NewGlobal(JSContext *cx, unsigned argc, jsval *vp)
         if (!JS_GetProperty(cx, opts, "sameZoneAs", &v))
             return false;
         if (v.isObject())
-            options.zoneSpec = JS::SameZoneAs(UncheckedUnwrap(&v.toObject()));
+            options.setSameZoneAs(UncheckedUnwrap(&v.toObject()));
 
         if (!JS_GetProperty(cx, opts, "invisibleToDebugger", &v))
             return false;
         if (v.isBoolean())
-            options.invisibleToDebugger = v.toBoolean();
+            options.setInvisibleToDebugger(v.toBoolean());
     }
 
     RootedObject global(cx, NewGlobalObject(cx, options));
@@ -3660,7 +3650,7 @@ GetMaxArgs(JSContext *cx, unsigned arg, jsval *vp)
 static bool
 ObjectEmulatingUndefined(JSContext *cx, unsigned argc, jsval *vp)
 {
-    static JSClass cls = {
+    static const JSClass cls = {
         "ObjectEmulatingUndefined",
         JSCLASS_EMULATES_UNDEFINED,
         JS_PropertyStub,
@@ -4030,6 +4020,10 @@ static const JSFunctionSpecWithHelp fuzzing_unsafe_functions[] = {
 "trap([fun, [pc,]] exp)",
 "  Trap bytecode execution."),
 
+    JS_FN_HELP("assertFloat32", testingFunc_assertFloat32, 2, 0,
+"assertFloat32(value, isFloat32)",
+"  In IonMonkey only, asserts that value has (resp. hasn't) the MIRType_Float32 if isFloat32 is true (resp. false)."),
+
     JS_FN_HELP("untrap", Untrap, 2, 0,
 "untrap(fun[, pc])",
 "  Remove a trap."),
@@ -4129,248 +4123,6 @@ Help(JSContext *cx, unsigned argc, jsval *vp)
         }
     }
 
-    JS_SET_RVAL(cx, vp, UndefinedValue());
-    return true;
-}
-
-/*
- * Define a JS object called "it".  Give it class operations that printf why
- * they're being called for tutorial purposes.
- */
-enum its_tinyid {
-    ITS_COLOR, ITS_HEIGHT, ITS_WIDTH, ITS_FUNNY, ITS_ARRAY, ITS_RDONLY,
-    ITS_CUSTOM, ITS_CUSTOMRDONLY
-};
-
-static bool
-its_getter(JSContext *cx, HandleObject obj, HandleId id, MutableHandleValue vp);
-
-static bool
-its_setter(JSContext *cx, HandleObject obj, HandleId id, bool strict, MutableHandleValue vp);
-
-static bool
-its_get_customNative(JSContext *cx, unsigned argc, jsval *vp);
-
-static bool
-its_set_customNative(JSContext *cx, unsigned argc, jsval *vp);
-
-static const JSPropertySpec its_props[] = {
-    {"color",           ITS_COLOR,      JSPROP_ENUMERATE,       JSOP_NULLWRAPPER, JSOP_NULLWRAPPER},
-    {"height",          ITS_HEIGHT,     JSPROP_ENUMERATE,       JSOP_NULLWRAPPER, JSOP_NULLWRAPPER},
-    {"width",           ITS_WIDTH,      JSPROP_ENUMERATE,       JSOP_NULLWRAPPER, JSOP_NULLWRAPPER},
-    {"funny",           ITS_FUNNY,      JSPROP_ENUMERATE,       JSOP_NULLWRAPPER, JSOP_NULLWRAPPER},
-    {"array",           ITS_ARRAY,      JSPROP_ENUMERATE,       JSOP_NULLWRAPPER, JSOP_NULLWRAPPER},
-    {"rdonly",          ITS_RDONLY,     JSPROP_READONLY,        JSOP_NULLWRAPPER, JSOP_NULLWRAPPER},
-    {"custom",          ITS_CUSTOM,     JSPROP_ENUMERATE,
-                        JSOP_WRAPPER(its_getter),     JSOP_WRAPPER(its_setter)},
-    {"customRdOnly",    ITS_CUSTOMRDONLY, JSPROP_ENUMERATE | JSPROP_READONLY,
-                        JSOP_WRAPPER(its_getter),     JSOP_WRAPPER(its_setter)},
-    JS_PSGS("customNative", its_get_customNative, its_set_customNative, JSPROP_ENUMERATE),
-    JS_PS_END
-};
-
-static bool its_noisy;    /* whether to be noisy when finalizing it */
-static bool its_enum_fail;/* whether to fail when enumerating it */
-
-static bool
-its_addProperty(JSContext *cx, HandleObject obj, HandleId id, MutableHandleValue vp)
-{
-    if (!its_noisy)
-        return true;
-
-    ToStringHelper idString(cx, id);
-    fprintf(gOutFile, "adding its property %s,", idString.getBytes());
-    ToStringHelper valueString(cx, vp);
-    fprintf(gOutFile, " initial value %s\n", valueString.getBytes());
-    return true;
-}
-
-static bool
-its_delProperty(JSContext *cx, HandleObject obj, HandleId id, bool *succeeded)
-{
-    if (!its_noisy) {
-        *succeeded = true;
-        return true;
-    }
-
-    ToStringHelper idString(cx, id);
-    if (idString.threw())
-        return false;
-
-    fprintf(gOutFile, "deleting its property %s,", idString.getBytes());
-
-    *succeeded = true;
-    return true;
-}
-
-static bool
-its_getProperty(JSContext *cx, HandleObject obj, HandleId id, MutableHandleValue vp)
-{
-    if (!its_noisy)
-        return true;
-
-    ToStringHelper idString(cx, id);
-    fprintf(gOutFile, "getting its property %s,", idString.getBytes());
-    ToStringHelper valueString(cx, vp);
-    fprintf(gOutFile, " initial value %s\n", valueString.getBytes());
-    return true;
-}
-
-static bool
-its_setProperty(JSContext *cx, HandleObject obj, HandleId id, bool strict, MutableHandleValue vp)
-{
-    ToStringHelper idString(cx, id);
-    if (its_noisy) {
-        fprintf(gOutFile, "setting its property %s,", idString.getBytes());
-        ToStringHelper valueString(cx, vp);
-        fprintf(gOutFile, " new value %s\n", valueString.getBytes());
-    }
-
-    if (!JSID_IS_ATOM(id))
-        return true;
-
-    if (!strcmp(idString.getBytes(), "noisy"))
-        JS_ValueToBoolean(cx, vp, &its_noisy);
-    else if (!strcmp(idString.getBytes(), "enum_fail"))
-        JS_ValueToBoolean(cx, vp, &its_enum_fail);
-
-    return true;
-}
-
-/*
- * Its enumerator, implemented using the "new" enumerate API,
- * see class flags.
- */
-static bool
-its_enumerate(JSContext *cx, HandleObject obj, JSIterateOp enum_op,
-              jsval *statep, jsid *idp)
-{
-    RootedObject iterator(cx);
-
-    switch (enum_op) {
-      case JSENUMERATE_INIT:
-      case JSENUMERATE_INIT_ALL:
-        if (its_noisy)
-            fprintf(gOutFile, "enumerate its properties\n");
-
-        iterator = JS_NewPropertyIterator(cx, obj);
-        if (!iterator)
-            return false;
-
-        *statep = OBJECT_TO_JSVAL(iterator);
-        if (idp)
-            *idp = INT_TO_JSID(0);
-        break;
-
-      case JSENUMERATE_NEXT:
-        if (its_enum_fail) {
-            JS_ReportError(cx, "its enumeration failed");
-            return false;
-        }
-
-        iterator = (JSObject *) JSVAL_TO_OBJECT(*statep);
-        if (!JS_NextProperty(cx, iterator, idp))
-            return false;
-
-        if (!JSID_IS_VOID(*idp))
-            break;
-        /* Fall through. */
-
-      case JSENUMERATE_DESTROY:
-        /* Allow our iterator object to be GC'd. */
-        *statep = NullValue();
-        break;
-    }
-
-    return true;
-}
-
-static bool
-its_resolve(JSContext *cx, HandleObject obj, HandleId id, unsigned flags,
-            MutableHandleObject objp)
-{
-    if (its_noisy) {
-        ToStringHelper idString(cx, id);
-        fprintf(gOutFile, "resolving its property %s, flags {%s}\n",
-               idString.getBytes(),
-               (flags & JSRESOLVE_ASSIGNING) ? "assigning" : "");
-    }
-    return true;
-}
-
-static bool
-its_convert(JSContext *cx, HandleObject obj, JSType type, MutableHandleValue vp)
-{
-    if (its_noisy)
-        fprintf(gOutFile, "converting it to %s type\n", JS_GetTypeName(cx, type));
-    return JS_ConvertStub(cx, obj, type, vp);
-}
-
-static void
-its_finalize(JSFreeOp *fop, JSObject *obj)
-{
-    if (its_noisy)
-        fprintf(gOutFile, "finalizing it\n");
-}
-
-static JSClass its_class = {
-    "It", JSCLASS_NEW_RESOLVE | JSCLASS_NEW_ENUMERATE | JSCLASS_HAS_RESERVED_SLOTS(1),
-    its_addProperty,  its_delProperty,  its_getProperty,  its_setProperty,
-    (JSEnumerateOp)its_enumerate, (JSResolveOp)its_resolve,
-    its_convert,      its_finalize,
-};
-
-static bool
-its_getter(JSContext *cx, HandleObject obj, HandleId id, MutableHandleValue vp)
-{
-    if (JS_GetClass(obj) != &its_class) {
-        vp.set(UndefinedValue());
-        return true;
-    }
-
-    vp.set(JS_GetReservedSlot(obj, 0));
-    return true;
-}
-
-static bool
-its_setter(JSContext *cx, HandleObject obj, HandleId id, bool strict, MutableHandleValue vp)
-{
-    if (JS_GetClass(obj) != &its_class)
-        return true;
-
-    JS_SetReservedSlot(obj, 0, vp);
-
-    vp.set(UndefinedValue());
-    return true;
-}
-
-static bool
-its_get_customNative(JSContext *cx, unsigned argc, jsval *vp)
-{
-    JSObject *obj = JS_THIS_OBJECT(cx, vp);
-    if (!obj)
-        return false;
-
-    if (JS_GetClass(obj) != &its_class) {
-        JS_SET_RVAL(cx, vp, UndefinedValue());
-        return true;
-    }
-
-    JS_SET_RVAL(cx, vp, JS_GetReservedSlot(obj, 0));
-    return true;
-}
-
-static bool
-its_set_customNative(JSContext *cx, unsigned argc, jsval *vp)
-{
-    JSObject *obj = JS_THIS_OBJECT(cx, vp);
-    if (!obj)
-        return false;
-
-    if (JS_GetClass(obj) != &its_class)
-        return true;
-
-    JS_SetReservedSlot(obj, 0, argc >= 1 ? JS_ARGV(cx, vp)[0] : UndefinedValue());
     JS_SET_RVAL(cx, vp, UndefinedValue());
     return true;
 }
@@ -4546,7 +4298,7 @@ global_resolve(JSContext *cx, HandleObject obj, HandleId id, unsigned flags,
 #endif
 }
 
-JSClass global_class = {
+const JSClass global_class = {
     "global", JSCLASS_NEW_RESOLVE | JSCLASS_GLOBAL_FLAGS,
     JS_PropertyStub,  JS_DeletePropertyStub,
     JS_PropertyStub,  JS_StrictPropertyStub,
@@ -4652,7 +4404,7 @@ env_resolve(JSContext *cx, HandleObject obj, HandleId id, unsigned flags,
     return true;
 }
 
-static JSClass env_class = {
+static const JSClass env_class = {
     "environment", JSCLASS_HAS_PRIVATE | JSCLASS_NEW_RESOLVE,
     JS_PropertyStub,  JS_DeletePropertyStub,
     JS_PropertyStub,  env_setProperty,
@@ -4677,7 +4429,7 @@ static bool
 dom_genericMethod(JSContext *cx, unsigned argc, JS::Value *vp);
 
 #ifdef DEBUG
-static JSClass *GetDomClass();
+static const JSClass *GetDomClass();
 #endif
 
 static bool
@@ -4749,7 +4501,7 @@ static const JSFunctionSpec dom_methods[] = {
     JS_FS_END
 };
 
-static JSClass dom_class = {
+static const JSClass dom_class = {
     "FakeDOMObject", JSCLASS_IS_DOMJSCLASS | JSCLASS_HAS_RESERVED_SLOTS(2),
     JS_PropertyStub,       /* addProperty */
     JS_DeletePropertyStub, /* delProperty */
@@ -4768,7 +4520,7 @@ static JSClass dom_class = {
 };
 
 #ifdef DEBUG
-static JSClass *GetDomClass() {
+static const JSClass *GetDomClass() {
     return &dom_class;
 }
 #endif
@@ -4972,27 +4724,6 @@ NewGlobalObject(JSContext *cx, JS::CompartmentOptions &options)
 
         if (!fuzzingSafe && !JS_DefineFunctionsWithHelp(cx, glob, fuzzing_unsafe_functions))
             return NULL;
-
-        RootedObject it(cx, JS_DefineObject(cx, glob, "it", &its_class, NULL, 0));
-        if (!it)
-            return NULL;
-        if (!JS_DefineProperties(cx, it, its_props))
-            return NULL;
-
-        if (!JS_DefineProperty(cx, glob, "custom", UndefinedValue(), its_getter,
-                               its_setter, 0))
-            return NULL;
-        if (!JS_DefineProperty(cx, glob, "customRdOnly", UndefinedValue(), its_getter,
-                               its_setter, JSPROP_READONLY))
-            return NULL;
-
-        if (!JS_DefineProperty(cx, glob, "customNative", UndefinedValue(),
-                               JS_CAST_NATIVE_TO(its_get_customNative, JSPropertyOp),
-                               JS_CAST_NATIVE_TO(its_set_customNative, JSStrictPropertyOp),
-                               JSPROP_SHARED | JSPROP_NATIVE_ACCESSORS))
-        {
-            return NULL;
-        }
 
         /* Initialize FakeDOMObject. */
         static const js::DOMCallbacks DOMcallbacks = {
@@ -5330,7 +5061,7 @@ CheckObjectAccess(JSContext *cx, HandleObject obj, HandleId id, JSAccessMode mod
     return true;
 }
 
-JSSecurityCallbacks securityCallbacks = {
+const JSSecurityCallbacks securityCallbacks = {
     CheckObjectAccess,
     NULL
 };

@@ -90,6 +90,14 @@ CodeGeneratorX86Shared::visitDouble(LDouble *ins)
 }
 
 bool
+CodeGeneratorX86Shared::visitFloat32(LFloat32 *ins)
+{
+    const LDefinition *out = ins->getDef(0);
+    masm.loadConstantFloat32(ins->getFloat(), ToFloatRegister(out));
+    return true;
+}
+
+bool
 CodeGeneratorX86Shared::visitTestIAndBranch(LTestIAndBranch *test)
 {
     const LAllocation *opd = test->input();
@@ -242,7 +250,7 @@ CodeGeneratorX86Shared::generateOutOfLineCode()
         masm.push(Imm32(frameSize()));
 
         IonCode *handler = gen->ionRuntime()->getGenericBailoutHandler();
-        masm.jmp(handler->raw(), Relocation::IONCODE);
+        masm.jmp(ImmPtr(handler->raw()), Relocation::IONCODE);
     }
 
     return true;
@@ -256,7 +264,7 @@ class BailoutJump {
     { }
 #ifdef JS_CPU_X86
     void operator()(MacroAssembler &masm, uint8_t *code) const {
-        masm.j(cond_, code, Relocation::HARDCODED);
+        masm.j(cond_, ImmPtr(code), Relocation::HARDCODED);
     }
 #endif
     void operator()(MacroAssembler &masm, Label *label) const {
@@ -272,7 +280,7 @@ class BailoutLabel {
     { }
 #ifdef JS_CPU_X86
     void operator()(MacroAssembler &masm, uint8_t *code) const {
-        masm.retarget(label_, code, Relocation::HARDCODED);
+        masm.retarget(label_, ImmPtr(code), Relocation::HARDCODED);
     }
 #endif
     void operator()(MacroAssembler &masm, Label *label) const {
@@ -1277,6 +1285,34 @@ CodeGeneratorX86Shared::visitMathD(LMathD *math)
 }
 
 bool
+CodeGeneratorX86Shared::visitMathF(LMathF *math)
+{
+    FloatRegister lhs = ToFloatRegister(math->lhs());
+    Operand rhs = ToOperand(math->rhs());
+
+    JS_ASSERT(ToFloatRegister(math->output()) == lhs);
+
+    switch (math->jsop()) {
+      case JSOP_ADD:
+        masm.addss(rhs, lhs);
+        break;
+      case JSOP_SUB:
+        masm.subss(rhs, lhs);
+        break;
+      case JSOP_MUL:
+        masm.mulss(rhs, lhs);
+        break;
+      case JSOP_DIV:
+        masm.divss(rhs, lhs);
+        break;
+      default:
+        MOZ_ASSUME_UNREACHABLE("unexpected opcode");
+        return false;
+    }
+    return true;
+}
+
+bool
 CodeGeneratorX86Shared::visitFloor(LFloor *lir)
 {
     FloatRegister input = ToFloatRegister(lir->input());
@@ -1329,7 +1365,7 @@ CodeGeneratorX86Shared::visitFloor(LFloor *lir)
                 return false;
 
             // Test whether the input double was integer-valued.
-            masm.cvtsi2sd(output, scratch);
+            masm.convertInt32ToDouble(output, scratch);
             masm.branchDouble(Assembler::DoubleEqualOrUnordered, input, scratch, &end);
 
             // Input is not integer-valued, so we rounded off-by-one in the
@@ -1354,8 +1390,7 @@ CodeGeneratorX86Shared::visitRound(LRound *lir)
     Label negative, end;
 
     // Load 0.5 in the temp register.
-    static const double PointFive = 0.5;
-    masm.loadStaticDouble(&PointFive, temp);
+    masm.loadConstantDouble(0.5, temp);
 
     // Branch to a slow path for negative inputs. Doesn't catch NaN or -0.
     masm.xorpd(scratch, scratch);
@@ -1418,7 +1453,7 @@ CodeGeneratorX86Shared::visitRound(LRound *lir)
                 return false;
 
             // Test whether the truncated double was integer-valued.
-            masm.cvtsi2sd(output, scratch);
+            masm.convertInt32ToDouble(output, scratch);
             masm.branchDouble(Assembler::DoubleEqualOrUnordered, temp, scratch, &end);
 
             // Input is not integer-valued, so we rounded off-by-one in the
@@ -1459,7 +1494,7 @@ CodeGeneratorX86Shared::visitGuardClass(LGuardClass *guard)
     Register tmp = ToRegister(guard->tempInt());
 
     masm.loadPtr(Address(obj, JSObject::offsetOfType()), tmp);
-    masm.cmpPtr(Operand(tmp, offsetof(types::TypeObject, clasp)), ImmWord(guard->mir()->getClass()));
+    masm.cmpPtr(Operand(tmp, offsetof(types::TypeObject, clasp)), ImmPtr(guard->mir()->getClass()));
     if (!bailoutIf(Assembler::NotEqual, guard->snapshot()))
         return false;
     return true;
@@ -1524,6 +1559,16 @@ CodeGeneratorX86Shared::visitNegD(LNegD *ins)
     JS_ASSERT(input == ToFloatRegister(ins->output()));
 
     masm.negateDouble(input);
+    return true;
+}
+
+bool
+CodeGeneratorX86Shared::visitNegF(LNegF *ins)
+{
+    FloatRegister input = ToFloatRegister(ins->input());
+    JS_ASSERT(input == ToFloatRegister(ins->output()));
+
+    masm.negateFloat(input);
     return true;
 }
 

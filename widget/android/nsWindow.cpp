@@ -40,6 +40,7 @@ using mozilla::unused;
 #include "LayerManagerOGL.h"
 #include "mozilla/layers/LayerManagerComposite.h"
 #include "mozilla/layers/AsyncCompositionManager.h"
+#include "mozilla/layers/APZCTreeManager.h"
 #include "GLContext.h"
 #include "GLContextProvider.h"
 
@@ -340,15 +341,21 @@ nsWindow::GetDPI()
 double
 nsWindow::GetDefaultScaleInternal()
 {
-    float dpi = GetDPI();
-    if (dpi < 200) { // includes desktop displays, LDPI, and MDPI Android devices
-        return 1.0;
+    static double density = 0.0;
+
+    if (density != 0.0) {
+        return density;
     }
-    if (dpi < 300) { // includes Nokia N900, HDPI Android devices
-        return 1.5;
+
+    if (AndroidBridge::Bridge()) {
+        density = AndroidBridge::Bridge()->GetDensity();
     }
-    // for very high-density displays calculate an integer ratio.
-    return floor(dpi / 150);
+
+    if (!density) {
+        density = 1.0;
+    }
+
+    return density;
 }
 
 NS_IMETHODIMP
@@ -2255,8 +2262,7 @@ nsWindow::FlushIMEChanges()
         if (!event.mSucceeded)
             return;
 
-        AndroidBridge::NotifyIMEChange(event.mReply.mString.get(),
-                                       event.mReply.mString.Length(),
+        AndroidBridge::NotifyIMEChange(event.mReply.mString,
                                        change.mStart,
                                        change.mOldEnd,
                                        change.mNewEnd);
@@ -2271,9 +2277,9 @@ nsWindow::FlushIMEChanges()
         if (!event.mSucceeded)
             return;
 
-        AndroidBridge::NotifyIMEChange(nullptr, 0,
-                                       event.GetSelectionStart(),
-                                       event.GetSelectionEnd(), -1);
+        AndroidBridge::NotifyIMEChange(EmptyString(),
+                             (int32_t) event.GetSelectionStart(),
+                             (int32_t) event.GetSelectionEnd(), -1);
         mIMESelectionChanged = false;
     }
 }

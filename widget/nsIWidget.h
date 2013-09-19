@@ -18,6 +18,7 @@
 #include "nsXULAppAPI.h"
 #include "mozilla/layers/LayersTypes.h"
 #include "mozilla/RefPtr.h"
+#include "Units.h"
 
 // forward declarations
 class   nsFontMetrics;
@@ -434,6 +435,21 @@ struct SizeConstraints {
   nsIntSize mMaxSize;
 };
 
+// NotificationToIME is shared by nsIMEStateManager and TextComposition.
+enum NotificationToIME {
+  // XXX We should replace NOTIFY_IME_OF_CURSOR_POS_CHANGED with
+  //     NOTIFY_IME_OF_SELECTION_CHANGE later.
+  NOTIFY_IME_OF_CURSOR_POS_CHANGED,
+  // An editable content is getting focus
+  NOTIFY_IME_OF_FOCUS,
+  // An editable content is losing focus
+  NOTIFY_IME_OF_BLUR,
+  // Selection in the focused editable content is changed
+  NOTIFY_IME_OF_SELECTION_CHANGE,
+  REQUEST_TO_COMMIT_COMPOSITION,
+  REQUEST_TO_CANCEL_COMPOSITION
+};
+
 } // namespace widget
 } // namespace mozilla
 
@@ -636,7 +652,7 @@ class nsIWidget : public nsISupports {
      * or Windows' "font DPI". This will take into account Gecko preferences
      * overriding the system setting.
      */
-    double GetDefaultScale();
+    mozilla::CSSToLayoutDeviceScale GetDefaultScale();
 
     /**
      * Return the Gecko override of the system default scale, if any;

@@ -110,9 +110,11 @@ class LIRGenerator : public LIRGeneratorSpecific
     bool visitGetArgumentsObjectArg(MGetArgumentsObjectArg *ins);
     bool visitSetArgumentsObjectArg(MSetArgumentsObjectArg *ins);
     bool visitReturnFromCtor(MReturnFromCtor *ins);
+    bool visitComputeThis(MComputeThis *ins);
     bool visitCall(MCall *call);
     bool visitApplyArgs(MApplyArgs *apply);
     bool visitBail(MBail *bail);
+    bool visitAssertFloat32(MAssertFloat32 *ins);
     bool visitGetDynamicName(MGetDynamicName *ins);
     bool visitFilterArguments(MFilterArguments *ins);
     bool visitCallDirectEval(MCallDirectEval *ins);
@@ -153,6 +155,7 @@ class LIRGenerator : public LIRGeneratorSpecific
     bool visitOsrValue(MOsrValue *value);
     bool visitOsrScopeChain(MOsrScopeChain *object);
     bool visitToDouble(MToDouble *convert);
+    bool visitToFloat32(MToFloat32 *convert);
     bool visitToInt32(MToInt32 *convert);
     bool visitTruncateToInt32(MTruncateToInt32 *truncate);
     bool visitToString(MToString *convert);
@@ -195,6 +198,8 @@ class LIRGenerator : public LIRGeneratorSpecific
     bool visitLoadTypedArrayElement(MLoadTypedArrayElement *ins);
     bool visitLoadTypedArrayElementHole(MLoadTypedArrayElementHole *ins);
     bool visitLoadTypedArrayElementStatic(MLoadTypedArrayElementStatic *ins);
+    bool visitStoreTypedArrayElement(MStoreTypedArrayElement *ins);
+    bool visitStoreTypedArrayElementHole(MStoreTypedArrayElementHole *ins);
     bool visitClampToUint8(MClampToUint8 *ins);
     bool visitLoadFixedSlot(MLoadFixedSlot *ins);
     bool visitStoreFixedSlot(MStoreFixedSlot *ins);

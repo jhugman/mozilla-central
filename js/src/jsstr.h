@@ -235,7 +235,7 @@ js_strncpy(jschar *dst, const jschar *src, size_t nelem)
 }
 
 extern jschar *
-js_strdup(JSContext *cx, const jschar *s);
+js_strdup(js::ThreadSafeContext *cx, const jschar *s);
 
 namespace js {
 
@@ -266,7 +266,7 @@ InflateStringToBuffer(JSContext *maybecx, const char *bytes, size_t length,
  * number of copied bytes.
  */
 extern bool
-DeflateStringToBuffer(JSContext *cx, const jschar *chars,
+DeflateStringToBuffer(JSContext *maybecx, const jschar *chars,
                       size_t charsLength, char *bytes, size_t *length);
 
 /*

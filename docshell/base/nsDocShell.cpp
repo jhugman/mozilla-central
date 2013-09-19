@@ -187,8 +187,6 @@
 #include "nsIWebBrowserFind.h"
 #include "nsIWidget.h"
 
-static NS_DEFINE_CID(kDOMScriptObjectFactoryCID,
-                     NS_DOM_SCRIPT_OBJECT_FACTORY_CID);
 static NS_DEFINE_CID(kAppShellCID, NS_APPSHELL_CID);
 
 #if defined(DEBUG_bryner) || defined(DEBUG_chb)
@@ -5048,7 +5046,7 @@ NS_IMETHODIMP
 nsDocShell::GetUnscaledDevicePixelsPerCSSPixel(double *aScale)
 {
     if (mParentWidget) {
-        *aScale = mParentWidget->GetDefaultScale();
+        *aScale = mParentWidget->GetDefaultScale().scale;
         return NS_OK;
     }
 
@@ -9214,18 +9212,23 @@ nsDocShell::InternalLoad(nsIURI * aURI,
             SetDocCurrentStateObj(mOSHE);
 
             // Dispatch the popstate and hashchange events, as appropriate.
-            if (mScriptGlobal) {
+            //
+            // The event dispatch below can cause us to re-enter script and
+            // destroy the docshell, nulling out mScriptGlobal. Hold a stack
+            // reference to avoid null derefs. See bug 914521.
+            nsRefPtr<nsGlobalWindow> win = mScriptGlobal;
+            if (win) {
                 // Fire a hashchange event URIs differ, and only in their hashes.
                 bool doHashchange = sameExceptHashes && !curHash.Equals(newHash);
 
                 if (historyNavBetweenSameDoc || doHashchange) {
-                    mScriptGlobal->DispatchSyncPopState();
+                    win->DispatchSyncPopState();
                 }
 
                 if (doHashchange) {
                     // Make sure to use oldURI here, not mCurrentURI, because by
                     // now, mCurrentURI has changed!
-                    mScriptGlobal->DispatchAsyncHashchange(oldURI, aURI);
+                    win->DispatchAsyncHashchange(oldURI, aURI);
                 }
             }
 
@@ -12726,7 +12729,7 @@ nsDocShell::GetAppId(uint32_t* aAppId)
 NS_IMETHODIMP
 nsDocShell::GetAsyncPanZoomEnabled(bool* aOut)
 {
-    if (TabChild* tabChild = GetTabChildFrom(this)) {
+    if (TabChild* tabChild = TabChild::GetFrom(this)) {
         *aOut = tabChild->IsAsyncPanZoomEnabled();
         return NS_OK;
     }

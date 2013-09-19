@@ -10,6 +10,7 @@ import org.mozilla.gecko.ThumbnailHelper;
 import org.mozilla.gecko.db.BrowserDB.TopSitesCursorWrapper;
 import org.mozilla.gecko.db.BrowserDB.URLColumns;
 import org.mozilla.gecko.home.HomePager.OnUrlOpenListener;
+import org.mozilla.gecko.util.StringUtils;
 
 import android.content.Context;
 import android.content.res.TypedArray;
@@ -18,8 +19,6 @@ import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.view.ContextMenu.ContextMenuInfo;
 import android.view.View;
-import android.view.animation.AnimationUtils;
-import android.view.animation.GridLayoutAnimationController;
 import android.widget.AbsListView;
 import android.widget.AdapterView;
 import android.widget.GridView;
@@ -49,6 +48,12 @@ public class TopBookmarksView extends GridView {
 
     // Vertical spacing in between the rows.
     private final int mVerticalSpacing;
+
+    // Measured width of this view.
+    private int mMeasuredWidth;
+
+    // Measured height of this view.
+    private int mMeasuredHeight;
 
     // On URL open listener.
     private OnUrlOpenListener mUrlOpenListener;
@@ -114,9 +119,6 @@ public class TopBookmarksView extends GridView {
                 return showContextMenuForChild(TopBookmarksView.this);
             }
         });
-
-        final GridLayoutAnimationController controller = new GridLayoutAnimationController(AnimationUtils.loadAnimation(getContext(), R.anim.grow_fade_in_center));
-        setLayoutAnimation(controller);
     }
 
     @Override
@@ -147,52 +149,45 @@ public class TopBookmarksView extends GridView {
         super.onMeasure(widthMeasureSpec, heightMeasureSpec);
 
         final int measuredWidth = getMeasuredWidth();
+        if (measuredWidth == mMeasuredWidth) {
+            // Return the cached values as the width is the same.
+            setMeasuredDimension(mMeasuredWidth, mMeasuredHeight);
+            return;
+        }
+
         final int childWidth = getColumnWidth();
-        int childHeight = 0;
 
         // Set the column width as the thumbnail width.
         ThumbnailHelper.getInstance().setThumbnailWidth(childWidth);
 
-        // If there's an adapter, use it to calculate the height of this view.
-        final TopBookmarksAdapter adapter = (TopBookmarksAdapter) getAdapter();
-        final int count;
-
-        // There shouldn't be any inherent size (due to padding) if there are no child views.
-        if (adapter == null || (count = adapter.getCount()) == 0) {
-            setMeasuredDimension(0, 0);
-            return;
-        }
-
         // Get the first child from the adapter.
-        final View child = adapter.getView(0, null, this);
-        if (child != null) {
-            // Set a default LayoutParams on the child, if it doesn't have one on its own.
-            AbsListView.LayoutParams params = (AbsListView.LayoutParams) child.getLayoutParams();
-            if (params == null) {
-                params = new AbsListView.LayoutParams(AbsListView.LayoutParams.WRAP_CONTENT,
-                                                      AbsListView.LayoutParams.WRAP_CONTENT);
-                child.setLayoutParams(params);
-            }
+        final View child = new TopBookmarkItemView(getContext());
 
-            // Measure the exact width of the child, and the height based on the width.
-            // Note: the child (and BookmarkThumbnailView) takes care of calculating its height.
-            int childWidthSpec = MeasureSpec.makeMeasureSpec(childWidth, MeasureSpec.EXACTLY);
-            int childHeightSpec = MeasureSpec.makeMeasureSpec(0,  MeasureSpec.UNSPECIFIED);
-            child.measure(childWidthSpec, childHeightSpec);
-            childHeight = child.getMeasuredHeight();
+        // Set a default LayoutParams on the child, if it doesn't have one on its own.
+        AbsListView.LayoutParams params = (AbsListView.LayoutParams) child.getLayoutParams();
+        if (params == null) {
+            params = new AbsListView.LayoutParams(AbsListView.LayoutParams.WRAP_CONTENT,
+                                                  AbsListView.LayoutParams.WRAP_CONTENT);
+            child.setLayoutParams(params);
         }
 
-        // Find the minimum of bookmarks we need to show, and the one given by the cursor.
-        final int total = Math.min(count > 0 ? count : Integer.MAX_VALUE, mMaxBookmarks);
+        // Measure the exact width of the child, and the height based on the width.
+        // Note: the child (and BookmarkThumbnailView) takes care of calculating its height.
+        int childWidthSpec = MeasureSpec.makeMeasureSpec(childWidth, MeasureSpec.EXACTLY);
+        int childHeightSpec = MeasureSpec.makeMeasureSpec(0,  MeasureSpec.UNSPECIFIED);
+        child.measure(childWidthSpec, childHeightSpec);
+        final int childHeight = child.getMeasuredHeight();
 
         // Number of rows required to show these bookmarks.
-        final int rows = (int) Math.ceil((double) total / mNumColumns);
+        final int rows = (int) Math.ceil((double) mMaxBookmarks / mNumColumns);
         final int childrenHeight = childHeight * rows;
         final int totalVerticalSpacing = rows > 0 ? (rows - 1) * mVerticalSpacing : 0;
 
         // Total height of this view.
         final int measuredHeight = childrenHeight + getPaddingTop() + getPaddingBottom() + totalVerticalSpacing;
         setMeasuredDimension(measuredWidth, measuredHeight);
+        mMeasuredWidth = measuredWidth;
+        mMeasuredHeight = measuredHeight;
     }
 
     @Override
@@ -223,9 +218,6 @@ public class TopBookmarksView extends GridView {
      */
     public static class TopBookmarksContextMenuInfo extends AdapterContextMenuInfo {
 
-        // URL to Title replacement regex.
-        private static final String REGEX_URL_TO_TITLE = "^([a-z]+://)?(www\\.)?";
-
         public String url;
         public String title;
         public boolean isPinned;
@@ -243,7 +235,8 @@ public class TopBookmarksView extends GridView {
         }
 
         public String getDisplayTitle() {
-            return TextUtils.isEmpty(title) ? url.replaceAll(REGEX_URL_TO_TITLE, "") : title;
+            return TextUtils.isEmpty(title) ?
+                StringUtils.stripCommonSubdomains(StringUtils.stripScheme(url, StringUtils.UrlFlags.STRIP_HTTPS)) : title;
         }
     }
 }

@@ -305,7 +305,7 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     static void finalize(FreeOp *fop, JSObject *obj);
     void markKeysInCompartment(JSTracer *tracer);
 
-    static Class jsclass;
+    static const Class jsclass;
 
     static Debugger *fromThisValue(JSContext *cx, const CallArgs &ca, const char *fnname);
     static bool getEnabled(JSContext *cx, unsigned argc, Value *vp);
@@ -334,6 +334,7 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     static bool clearAllBreakpoints(JSContext *cx, unsigned argc, Value *vp);
     static bool findScripts(JSContext *cx, unsigned argc, Value *vp);
     static bool findAllGlobals(JSContext *cx, unsigned argc, Value *vp);
+    static bool makeGlobalObjectReference(JSContext *cx, unsigned argc, Value *vp);
     static bool construct(JSContext *cx, unsigned argc, Value *vp);
     static const JSPropertySpec properties[];
     static const JSFunctionSpec methods[];

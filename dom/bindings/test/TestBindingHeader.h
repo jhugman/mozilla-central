@@ -490,15 +490,16 @@ public:
   void PassUnion(JSContext*, const ObjectOrLong& arg);
   void PassUnionWithNullable(JSContext* cx, const ObjectOrNullOrLong& arg)
   {
-    ObjectOrLong returnValue;
+    OwningObjectOrLong returnValue;
     if (arg.IsNull()) {
     } else if (arg.IsObject()) {
       JS::Rooted<JSObject*> obj(cx, arg.GetAsObject());
       JS_GetClass(obj);
-      //returnValue.SetAsObject(&obj);
+      returnValue.SetAsObject() = obj;
     } else {
       int32_t i = arg.GetAsLong();
       i += 1;
+      returnValue.SetAsLong() = i;
     }
   }
   void PassNullableUnion(JSContext*, const Nullable<ObjectOrLong>&);
@@ -541,14 +542,16 @@ public:
   void PassNullableUnionWithDefaultValue11(const Nullable<UnrestrictedFloatOrString>& arg);
   void PassNullableUnionWithDefaultValue12(const Nullable<UnrestrictedFloatOrString>& arg);
 
-  void ReceiveUnion(const CanvasPatternOrCanvasGradientReturnValue&);
-  void ReceiveUnionContainingNull(const CanvasPatternOrNullOrCanvasGradientReturnValue&);
-  void ReceiveNullableUnion(const Nullable<CanvasPatternOrCanvasGradientReturnValue>&);
-  void GetWritableUnion(const CanvasPatternOrCanvasGradientReturnValue&);
+  void ReceiveUnion(OwningCanvasPatternOrCanvasGradient&);
+  void ReceiveUnion2(JSContext*, OwningObjectOrLong&);
+  void ReceiveUnionContainingNull(OwningCanvasPatternOrNullOrCanvasGradient&);
+  void ReceiveNullableUnion(Nullable<OwningCanvasPatternOrCanvasGradient>&);
+  void ReceiveNullableUnion2(JSContext*, Nullable<OwningObjectOrLong>&);
+  void GetWritableUnion(OwningCanvasPatternOrCanvasGradient&);
   void SetWritableUnion(const CanvasPatternOrCanvasGradient&);
-  void GetWritableUnionContainingNull(const CanvasPatternOrNullOrCanvasGradientReturnValue&);
+  void GetWritableUnionContainingNull(OwningCanvasPatternOrNullOrCanvasGradient&);
   void SetWritableUnionContainingNull(const CanvasPatternOrNullOrCanvasGradient&);
-  void GetWritableNullableUnion(const Nullable<CanvasPatternOrCanvasGradientReturnValue>&);
+  void GetWritableNullableUnion(Nullable<OwningCanvasPatternOrCanvasGradient>&);
   void SetWritableNullableUnion(const Nullable<CanvasPatternOrCanvasGradient>&);
 
   // Date types
@@ -686,6 +689,10 @@ public:
   void DontEnforceRangeOrClamp(int8_t);
   void DoEnforceRange(int8_t);
   void DoClamp(int8_t);
+  void SetEnforcedByte(int8_t);
+  int8_t EnforcedByte();
+  void SetClampedByte(int8_t);
+  int8_t ClampedByte();
 
 private:
   // We add signatures here that _could_ start matching if the codegen

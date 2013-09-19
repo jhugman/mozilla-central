@@ -327,11 +327,15 @@ XPCOMUtils.defineLazyModuleGetter(this, "AppCacheUtils",
           let name = representAddon(addon);
           let message = "";
 
-          if (addon.userDisabled) {
-            message = gcli.lookupFormat("addonAlreadyDisabled", [name]);
-          } else {
+          // If the addon is not disabled or is set to "click to play" then
+          // disable it. Otherwise display the message "Add-on is already
+          // disabled."
+          if (!addon.userDisabled ||
+              addon.userDisabled === AddonManager.STATE_ASK_TO_ACTIVATE) {
             addon.userDisabled = true;
             message = gcli.lookupFormat("addonDisabled", [name]);
+          } else {
+            message = gcli.lookupFormat("addonAlreadyDisabled", [name]);
           }
           this.resolve(message);
         }
@@ -1747,7 +1751,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "AppCacheUtils",
           width = window.innerWidth;
           height = window.innerHeight;
         } else {
-          let rect = LayoutHelpers.getRect(node, window);
+          let lh = new LayoutHelpers(window);
+          let rect = lh.getRect(node, window);
           top = rect.top;
           left = rect.left;
           width = rect.width;

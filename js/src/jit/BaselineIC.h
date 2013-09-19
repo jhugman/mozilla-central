@@ -3375,6 +3375,13 @@ class ICSetElem_Fallback : public ICFallbackStub
         return space->allocate<ICSetElem_Fallback>(code);
     }
 
+    void noteArrayWriteHole() {
+        extra_ = 1;
+    }
+    bool hasArrayWriteHole() const {
+        return extra_;
+    }
+
     // Compiler for this stub kind.
     class Compiler : public ICStubCompiler {
       protected:
@@ -5358,7 +5365,7 @@ class ICCall_ScriptedApplyArray : public ICMonitoredStub
     // The maximum length of an inlineable funcall array.
     // Keep this small to avoid controllable stack overflows by attackers passing large
     // arrays to fun.apply.
-    const static uint32_t MAX_ARGS_ARRAY_LENGTH = 16;
+    static const uint32_t MAX_ARGS_ARRAY_LENGTH = 16;
 
   protected:
     uint32_t pcOffset_;

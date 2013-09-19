@@ -209,7 +209,7 @@ class JSAPITest
         if (JS_IsExceptionPending(cx)) {
             js::gc::AutoSuppressGC gcoff(cx);
             JS::RootedValue v(cx);
-            JS_GetPendingException(cx, v.address());
+            JS_GetPendingException(cx, &v);
             JS_ClearPendingException(cx);
             JSString *s = JS_ValueToString(cx, v);
             if (s) {
@@ -225,8 +225,8 @@ class JSAPITest
 
     JSAPITestString messages() const { return msgs; }
 
-    static JSClass * basicGlobalClass() {
-        static JSClass c = {
+    static const JSClass * basicGlobalClass() {
+        static const JSClass c = {
             "global", JSCLASS_GLOBAL_FLAGS,
             JS_PropertyStub, JS_DeletePropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
             JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub
@@ -306,7 +306,7 @@ class JSAPITest
         return cx;
     }
 
-    virtual JSClass * getGlobalClass() {
+    virtual const JSClass * getGlobalClass() {
         return basicGlobalClass();
     }
 
