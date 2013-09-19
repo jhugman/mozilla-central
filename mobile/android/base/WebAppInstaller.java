@@ -11,14 +11,13 @@ import java.net.URL;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import org.mozilla.gecko.GeckoThread.LaunchState;
+import org.mozilla.gecko.gfx.BitmapUtils;
 import org.mozilla.gecko.webapps.Logger;
 
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
-import android.graphics.Bitmap;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
@@ -65,7 +64,11 @@ public class WebAppInstaller extends GeckoApp {
         }
 
         if (message != null) {
-            GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Webapps:AutoInstall", message.toString()));
+            if ("hosted".equals(message.optString("type"))) {
+                GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Webapps:AutoInstall", message.toString()));
+            } else {
+                GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Webapps:AutoInstallPackage", message.toString()));
+            }
         }
 
     }
@@ -123,17 +126,25 @@ public class WebAppInstaller extends GeckoApp {
             Logger.i("WebApps:PostInstall: About to run " + message.toString());
             GeckoAppShell.getEventDispatcher().unregisterEventListener("WebApps:PostInstall", this);
 
-            Intent intent = new Intent();
+            String name = message.optString("name");
+            String manifestUrl = message.optString("manifestURL");
             String origin = message.optString("origin");
-            int index = WebAppAllocator.getInstance().getIndexForApp(origin);
-            if (index >= 0) {
-                Log.i(LOGTAG, "Webapp action is: " + "org.mozilla.gecko.WEBAPP" + index);
-                intent.putExtra("appAction", "org.mozilla.gecko.WEBAPP" + index);
-                intent.putExtra("appUri", origin);
+            String iconUrl = message.optString("iconURL");
+            String originalOrigin = message.optString("originalOrigin");
+            int index = this.postInstallWebApp(name, manifestUrl, origin, iconUrl, originalOrigin);
 
-                intent.putExtra("fennecPackageName", getPackageName());
-                intent.putExtra("slotClassName", getPackageName() + ".WebApps$WebApp" + index);
-            }
+            Intent intent = new Intent();
+
+            Log.i(LOGTAG, "Webapp action is: " + "org.mozilla.gecko.WEBAPP" + index);
+            intent.putExtra("appAction", "org.mozilla.gecko.WEBAPP" + index);
+
+            // Set appUri to originalOrigin because origin will be changed to
+            // an app: URL for a packaged app, but the registry still indexes it
+            // by the original origin (i.e. URL of the mini-manifest).
+            intent.putExtra("appUri", originalOrigin);
+
+            intent.putExtra("fennecPackageName", getPackageName());
+            intent.putExtra("slotClassName", getPackageName() + ".WebApps$WebApp" + index);
 
             if (getParent() == null) {
                 setResult(RESULT_OK, intent);
@@ -144,7 +155,19 @@ public class WebAppInstaller extends GeckoApp {
         }
     }
 
-
+    /**
+     * Update the app allocation with the new origin, in case it has changed
+     * (i.e. to an app: URL); and set an icon.
+     *
+     * @see GeckoAppShell::postInstallWebApp
+     */
+    public static int postInstallWebApp(String aTitle, String aURI, String aOrigin, String aIconURL, String aOriginalOrigin) {
+    	WebAppAllocator allocator = WebAppAllocator.getInstance();
+        int index = allocator.getIndexForApp(aOriginalOrigin);
+    	assert index != -1 && aIconURL != null;
+    	allocator.updateAppAllocation(aOrigin, index, BitmapUtils.getBitmapFromDataURI(aIconURL));
+        return index;
+    }
 
     @Override
     protected void loadStartupTab(String uri) {

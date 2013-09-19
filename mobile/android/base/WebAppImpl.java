@@ -73,8 +73,8 @@ public class WebAppImpl extends GeckoApp {
         } catch (java.net.MalformedURLException ex) {
             Log.w(LOGTAG, "Unable to parse origin: ", ex);
 
-            // If we can't parse the this is an app protocol, just settle for not having an origin
-            if (!origin.startsWith("app://")) {
+            // If we can't parse the origin and this is an app protocol, just settle for not having an origin
+            if (origin != null && !origin.startsWith("app://")) {
                 return;
             }
 
