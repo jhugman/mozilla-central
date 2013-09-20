@@ -116,7 +116,7 @@ public class WebAppInstaller extends GeckoApp {
             sb.append(":").append(port);
         }
 
-        return url.toString();//sb.toString();
+        return sb.toString();
     }
 
     @Override
@@ -138,10 +138,7 @@ public class WebAppInstaller extends GeckoApp {
             Log.i(LOGTAG, "Webapp action is: " + "org.mozilla.gecko.WEBAPP" + index);
             intent.putExtra("appAction", "org.mozilla.gecko.WEBAPP" + index);
 
-            // Set appUri to originalOrigin because origin will be changed to
-            // an app: URL for a packaged app, but the registry still indexes it
-            // by the original origin (i.e. URL of the mini-manifest).
-            intent.putExtra("appUri", originalOrigin);
+            intent.putExtra("appUri", manifestUrl);
 
             intent.putExtra("fennecPackageName", getPackageName());
             intent.putExtra("slotClassName", getPackageName() + ".WebApps$WebApp" + index);

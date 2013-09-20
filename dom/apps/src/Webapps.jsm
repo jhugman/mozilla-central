@@ -31,7 +31,7 @@ XPCOMUtils.defineLazyGetter(this, "libcutils", function() {
 #endif
 
 function debug(aMsg) {
-  //dump("-*-*- Webapps.jsm : " + aMsg + "\n");
+  dump("-*-*- Webapps.jsm : " + aMsg + "\n");
 }
 
 function supportUseCurrentProfile() {
@@ -841,10 +841,10 @@ this.DOMApplicationRegistry = {
       cpmm = null;
       ppmm = null;
     } else if (aTopic === "Webapps:AutoInstall") {
-      debug("Webapps.jsm: Webapps:AutoInstall: aSubject=" + JSON.stringify(aSubject) + "; aData=" + JSON.stringify(aData));
+      debug("Webapps:AutoInstall: aSubject=" + JSON.stringify(aSubject) + "; aData=" + aData);
       this._autoInstall(aData);
     } else if (aTopic === "Webapps:AutoInstallPackage") {
-      debug("Webapps.jsm: Webapps:AutoInstallPackage: aSubject=" + JSON.stringify(aSubject) + "; aData=" + JSON.stringify(aData));
+      debug("Webapps:AutoInstallPackage: aSubject=" + JSON.stringify(aSubject) + "; aData=" + aData);
       this._autoInstallPackage(aData);
     }
   },
@@ -855,7 +855,7 @@ this.DOMApplicationRegistry = {
 
     let mm = {
       sendAsyncMessage: function (messageName, data) {
-        debug("Webapps.jsm: " + messageName + ": " + JSON.stringify(data));
+        debug("sendAsyncMessage " + messageName + ": " + JSON.stringify(data));
       }
     };
 
@@ -876,22 +876,20 @@ this.DOMApplicationRegistry = {
   _autoInstallPackage: function (aData) {
     debug("AutoInstalling package from Webapps.jsm");
 
-
     let data = JSON.parse(aData);
     let type = data.type; // can be hosted or packaged.
-    let manifestURL = data.manifestUrl;
 
     let mm = {
       sendAsyncMessage: function (messageName, data) {
-        debug("Webapps.jsm: " + messageName + ": " + JSON.stringify(data));
+        debug("sendAsyncMessage " + messageName + ": " + JSON.stringify(data));
       }
     };
     this.doInstallPackage({
       isPackage: true,
       app: {
-        origin: manifestURL,
-        installOrigin: manifestURL,
-        manifestURL: manifestURL
+        origin: data.origin,
+        installOrigin: data.origin,
+        manifestURL: data.manifestUrl
       },
       silentInstall: true,
       mm: mm
@@ -914,6 +912,10 @@ this.DOMApplicationRegistry = {
     let manifestURL = aData.app.manifestURL;
 
     generatorUrl += manifestURL;
+
+    if (aData.isPackage) {
+      generatorUrl += "&appType=packaged"
+    }
 
     dump("Webapps.jsm: _downloadApk from " + generatorUrl);
 
@@ -1076,17 +1078,15 @@ this.DOMApplicationRegistry = {
     msg.mm = mm;
 
     switch (aMessage.name) {
-      case "Webapps:Install":
-
+      case "Webapps:Install": {
         let prefName = "dom.mozApps.installSynthesizedApk";
         if (!Services.prefs.prefHasUserValue(prefName) || Services.prefs.getBoolPref(prefName, true)) {
           this._downloadApk(msg, mm);
         } else {
           this.doInstall(msg, mm);
         }
-
-
         break;
+      }
       case "Webapps:GetSelf":
         this.getSelf(msg, mm);
         break;
@@ -1108,9 +1108,16 @@ this.DOMApplicationRegistry = {
       case "Webapps:GetAll":
         this.doGetAll(msg, mm);
         break;
-      case "Webapps:InstallPackage":
-        this.doInstallPackage(msg, mm);
+      case "Webapps:InstallPackage": {
+        let prefName = "dom.mozApps.installSynthesizedApk";
+        if (!Services.prefs.prefHasUserValue(prefName) || Services.prefs.getBoolPref(prefName, true)) {
+          msg.isPackage = true;
+          this._downloadApk(msg, mm);
+        } else {
+          this.doInstallPackage(msg, mm);
+        }
         break;
+      }
       case "Webapps:RegisterForMessages":
         this.addMessageListener(msg.messages, msg.app, mm);
         break;
