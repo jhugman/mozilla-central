@@ -19,6 +19,7 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
 import android.os.Bundle;
+import android.os.Process;
 import android.util.Log;
 import android.view.View;
 
@@ -149,6 +150,7 @@ public class WebAppInstaller extends GeckoApp {
                 getParent().setResult(RESULT_OK, intent);
             }
             finish();
+            Process.killProcess(Process.myPid());
         }
     }
 
