@@ -907,20 +907,22 @@ this.DOMApplicationRegistry = {
       }
     }
 
+    // Get the endpoint URL and convert it to an nsIURI/nsIURL object.
     let prefName = "dom.mozApps.apkGeneratorEndpoint";
-    let generatorUrl = getStringPref(prefName, null);
-    let manifestURL = aData.app.manifestURL;
+    let generatorUrl =
+      Services.io.newURI(getStringPref(prefName, null), null, null)
+              .QueryInterface(Ci.nsIURL);
 
-    generatorUrl += manifestURL;
+    // Populate the query part of the URL with the manifest URL parameter.
+    let params = {
+      manifestUrl: aData.app.manifestURL,
+    };
+    generatorUrl.query =
+      [p + "=" + encodeURIComponent(params[p]) for (p in params)].join("&");
 
-    if (aData.isPackage) {
-      generatorUrl += "&appType=packaged"
-    }
-
-    dump("Webapps.jsm: _downloadApk from " + generatorUrl);
-
-    aData.generatorUrl = generatorUrl;
-
+    // Trigger the download.
+    debug("_downloadApk from " + generatorUrl.spec);
+    aData.generatorUrl = generatorUrl.spec;
     Services.obs.notifyObservers(aMm, "webapps-download-apk",
                                  JSON.stringify(aData));
   },
