@@ -137,7 +137,7 @@ public class WebAppInstaller extends GeckoApp {
             String iconUrl = message.optString("iconURL");
             String originalOrigin = message.optString("originalOrigin");
             WebAppAllocator allocator = WebAppAllocator.getInstance();
-            int index = allocator.getIndexForApp(originalOrigin);
+            int index = allocator.getIndexForApp(origin);
 
             Intent intent = new Intent();
 
