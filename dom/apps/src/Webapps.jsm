@@ -2377,6 +2377,7 @@ this.DOMApplicationRegistry = {
     let responseStatus;
     let listener;
     let hash;
+    let bufferedOutputStream, outputStream;
 
     debug("Task.spawn");
 
@@ -2520,11 +2521,11 @@ this.DOMApplicationRegistry = {
       debug("zip file: " + zipFile);
 
       // We need an output stream to write the channel content to the zip file.
-      let outputStream = Cc["@mozilla.org/network/file-output-stream;1"]
+      outputStream = Cc["@mozilla.org/network/file-output-stream;1"]
                            .createInstance(Ci.nsIFileOutputStream);
       // write, create, truncate
       outputStream.init(zipFile, 0x02 | 0x08 | 0x20, parseInt("0664", 8), 0);
-      let bufferedOutputStream = Cc['@mozilla.org/network/buffered-output-stream;1']
+      bufferedOutputStream = Cc['@mozilla.org/network/buffered-output-stream;1']
                                    .createInstance(Ci.nsIBufferedOutputStream);
       bufferedOutputStream.init(outputStream, 1024);
 
@@ -2532,9 +2533,9 @@ this.DOMApplicationRegistry = {
       listener = Cc["@mozilla.org/network/simple-stream-listener;1"]
                        .createInstance(Ci.nsISimpleStreamListener);
 
-      let deferredListenerStop = Promise.defer();
+      let deferred  = Promise.defer();
       
-      let statusCode;
+
       listener.init(bufferedOutputStream, {
         onStartRequest: function(aRequest, aContext) {
           // Nothing to do there anymore.
@@ -2542,19 +2543,22 @@ this.DOMApplicationRegistry = {
 
         onStopRequest: function(aRequest, aContext, aStatusCode) {
           debug("onStopRequest " + aStatusCode);
-          statusCode = aStatusCode;
-          deferredListenerStop.resolve();
+          deferred.resolve(aStatusCode);
         }
       });
       debug("before yeild"); 
+      requestChannel.asyncOpen(listener, null);
+      // send a first progress event to correctly set the DOM object's properties
+      self._sendDownloadProgressEvent(aNewApp, oldApp);
 
-      yield deferredListenerStop.promise;
+      return deferred.promise;
+    }, null).then(function(aStatusCode) {
       debug("after yeild");
-      /*
+
       bufferedOutputStream.close();
       outputStream.close();
 
-      if (!Components.isSuccessCode(statusCode)) {
+      if (!Components.isSuccessCode(aStatusCode)) {
         throw "NETWORK_ERROR";
         return;
       }
@@ -2567,7 +2571,7 @@ this.DOMApplicationRegistry = {
         oldApp.downloadAvailable = false;
         throw "NETWORK_ERROR";
         return;
-      }*/
+      }
       debug("end of download function");
     }, null).then(function() {
       debug("computeFileHash");
