@@ -22,6 +22,9 @@ import android.os.Bundle;
 import android.os.Process;
 import android.util.Log;
 import android.view.View;
+import android.view.animation.Animation;
+import android.view.animation.AnimationUtils;
+import android.widget.ImageView;
 
 public class WebAppInstaller extends GeckoApp {
     private static final String LOGTAG = "GeckoWebAppInstaller";
@@ -33,7 +36,7 @@ public class WebAppInstaller extends GeckoApp {
     protected int getIndex() { return 0; }
 
     @Override
-    public int getLayout() { return R.layout.web_app; }
+    public int getLayout() { return R.layout.web_app_installer; }
 
     @Override
     public boolean hasTabsSideBar() { return false; }
@@ -51,6 +54,7 @@ public class WebAppInstaller extends GeckoApp {
 //            }
 //        }
 
+
         if (mProfileName == null) {
             // something bad has happened;
             mProfileName = "webapp-installer";
@@ -59,10 +63,10 @@ public class WebAppInstaller extends GeckoApp {
         super.onCreate(savedInstanceState);
 
         mSplashscreen = findViewById(R.id.splashscreen);
-        if (!GeckoThread.checkLaunchState(GeckoThread.LaunchState.GeckoRunning)) {
+        //if (!GeckoThread.checkLaunchState(GeckoThread.LaunchState.GeckoRunning)) {
             overridePendingTransition(R.anim.grow_fade_in_center, android.R.anim.fade_out);
             showSplash();
-        }
+        //}
 
         if (message != null) {
             if ("hosted".equals(message.optString("type"))) {
@@ -132,7 +136,8 @@ public class WebAppInstaller extends GeckoApp {
             String origin = message.optString("origin");
             String iconUrl = message.optString("iconURL");
             String originalOrigin = message.optString("originalOrigin");
-            int index = this.postInstallWebApp(name, manifestUrl, origin, iconUrl, originalOrigin);
+            WebAppAllocator allocator = WebAppAllocator.getInstance();
+            int index = allocator.getIndexForApp(originalOrigin);
 
             Intent intent = new Intent();
 
@@ -160,7 +165,7 @@ public class WebAppInstaller extends GeckoApp {
      *
      * @see GeckoAppShell::postInstallWebApp
      */
-    public static int postInstallWebApp(String aTitle, String aURI, String aOrigin, String aIconURL, String aOriginalOrigin) {
+    public int postInstallWebApp(String aTitle, String aURI, String aOrigin, String aIconURL, String aOriginalOrigin) {
     	WebAppAllocator allocator = WebAppAllocator.getInstance();
         int index = allocator.getIndexForApp(aOriginalOrigin);
     	assert index != -1 && aIconURL != null;
@@ -175,6 +180,17 @@ public class WebAppInstaller extends GeckoApp {
 
     private void showSplash() {
         // NOP
+
+        ImageView image = (ImageView)findViewById(R.id.splashscreen_icon);
+
+
+
+        Animation fadein = AnimationUtils.loadAnimation(this, R.anim.grow_fade_in_center);
+        fadein.setStartOffset(500);
+        fadein.setDuration(1000);
+        image.startAnimation(fadein);
+        image.setImageResource(R.drawable.webapp_generic_icon);
+
     }
 
     @Override

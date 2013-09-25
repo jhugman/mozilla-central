@@ -487,6 +487,7 @@ RES_LAYOUT = \
   res/layout/home_banner.xml \
   res/layout/home_suggestion_prompt.xml \
   res/layout/web_app.xml \
+  res/layout/web_app_installer.xml \
   res/layout/launch_app_list.xml \
   res/layout/launch_app_listitem.xml \
   res/layout/menu_action_bar.xml \
@@ -1137,6 +1138,8 @@ RES_DRAWABLE += \
   res/drawable/textbox_bg.xml                         \
   res/drawable/toast_button.xml                       \
   res/drawable/webapp_titlebar_bg.xml                 \
+  res/drawable/webapp_installer_background.xml        \
+  res/drawable/webapp_generic_icon.png                \
   $(NULL)
 
 RESOURCES = \
