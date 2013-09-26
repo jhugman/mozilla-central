@@ -2378,6 +2378,8 @@ this.DOMApplicationRegistry = {
     let listener;
     let hash;
     let bufferedOutputStream, outputStream;
+    let hasher;
+
 
     debug("Task.spawn");
 
@@ -2576,49 +2578,45 @@ this.DOMApplicationRegistry = {
     }, null).then(function() {
       debug("computeFileHash");
       Cu.import("resource://gre/modules/osfile.jsm");
-      const CHUNK_SIZE = 16384;
+      
+      hasher = Cc["@mozilla.org/security/hash;1"]
+                     .createInstance(Ci.nsICryptoHash);
+      // We want to use the MD5 algorithm.
+      hasher.init(hasher.MD5);
 
+      return OS.File.open(zipFile.path, { read: true })
+    }, null).then(function opened(file) {
+      const CHUNK_SIZE = 16384;
       // Return the two-digit hexadecimal code for a byte.
       function toHexString(charCode) {
         return ("0" + charCode.toString(16)).slice(-2);
       }
 
-      let hasher = Cc["@mozilla.org/security/hash;1"]
-                     .createInstance(Ci.nsICryptoHash);
-      // We want to use the MD5 algorithm.
-      hasher.init(hasher.MD5);
-
-      OS.File.open(zipFile.path, { read: true }).then(
-        function opened(file) {
-          let readChunk = function readChunk() {
-            file.read(CHUNK_SIZE).then(
-              function readSuccess(array) {
-                hasher.update(array, array.length);
-                if (array.length == CHUNK_SIZE) {
-                  readChunk();
-                } else {
-                  // We're passing false to get the binary hash and not base64.
-                  let hashData = hasher.finish(false);
-                  // convert the binary hash data to a hex string.
-                  hash = ([toHexString(hash.charCodeAt(i)) for (i in hashData)]
-                            .join(""));
-                }
-              },
-              function readError() {
-                debug("Error reading " + zipFile.path);
-               hash = null;
-              }
-            );
+      let readChunk = function readChunk() {
+        file.read(CHUNK_SIZE).then(
+          function readSuccess(array) {
+            hasher.update(array, array.length);
+            if (array.length == CHUNK_SIZE) {
+              readChunk();
+            } else {
+              // We're passing false to get the binary hash and not base64.
+              let hashData = hasher.finish(false);
+              // convert the binary hash data to a hex string.
+              hash = ([toHexString(hash.charCodeAt(i)) for (i in hashData)]
+                        .join(""));
+            }
+          },
+          function readError() {
+            debug("Error reading " + zipFile.path);
+            hash = null;
           }
-
-          readChunk();
-        },
-        function openError() {
+        );
+      }
+      readChunk();
+    }, function openError() {
           debug("Error opening " + zipFile.path);
           hash = null;
-        }
-      );
-    }, null).then(function() {
+    }).then(function() {
       debug("_onFileHashComputed " + hash);
 
       let oldPackage = (responseStatus == 304 || hash == oldApp.packageHash);
