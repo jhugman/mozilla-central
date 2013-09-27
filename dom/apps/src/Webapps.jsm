@@ -2586,6 +2586,8 @@ this.DOMApplicationRegistry = {
 
       return OS.File.open(zipFile.path, { read: true })
     }, null).then(function opened(file) {
+
+      let deferred  = Promise.defer();
       const CHUNK_SIZE = 16384;
       // Return the two-digit hexadecimal code for a byte.
       function toHexString(charCode) {
@@ -2593,33 +2595,39 @@ this.DOMApplicationRegistry = {
       }
 
       let readChunk = function readChunk() {
+        debug("read chunk");
         file.read(CHUNK_SIZE).then(
           function readSuccess(array) {
             hasher.update(array, array.length);
             if (array.length == CHUNK_SIZE) {
               readChunk();
             } else {
+              debug("YAY success!");
               // We're passing false to get the binary hash and not base64.
               let hashData = hasher.finish(false);
               // convert the binary hash data to a hex string.
-              hash = ([toHexString(hash.charCodeAt(i)) for (i in hashData)]
+              let hash = ([toHexString(hashData.charCodeAt(i)) for (i in hashData)]
                         .join(""));
+              debug("hash = " + hash);
+              deferred.resolve(hash);
             }
           },
           function readError() {
             debug("Error reading " + zipFile.path);
-            hash = null;
+            deferred.resolve(null);
+
           }
         );
       }
       readChunk();
+      return deferred.promise;
     }, function openError() {
           debug("Error opening " + zipFile.path);
           hash = null;
-    }).then(function() {
-      debug("_onFileHashComputed " + hash);
+    }).then(function(aHash) {
+      debug("_onFileHashComputed " + aHash);
 
-      let oldPackage = (responseStatus == 304 || hash == oldApp.packageHash);
+      let oldPackage = (responseStatus == 304 || aHash == oldApp.packageHash);
 
       if (oldPackage) {
         // The package's Etag or hash has not changed.
@@ -2643,17 +2651,21 @@ this.DOMApplicationRegistry = {
       let deferredOpenSignedJarFileAsync = Promise.defer();
 
       certdb.openSignedJARFileAsync(
-         aZipFile,
+         zipFile,
          function(aRv, aZipReader) {
+            debug("signed Jar callback");
            deferredOpenSignedJarFileAsync.resolve([aRv, aZipReader]);
          }
       );
 
       // maybe we can throw a new Task.resolve here to pass values in to next block?
       //  throw new Task.resolve([rv, zipreader]);
-      rv, zipReader = yield deferredOpenSignedJarFileAsync;
-    }, null).then(function() {
+      return deferredOpenSignedJarFileAsync.promise;
+    }, null).then(function(aValues) {
+      [rv, zipReader] = aValues;
       debug("_onOpenSignedJarFileAsyncCallback");
+      debug("rv: " + rv);
+      debug("zipReader: " + zipReader);
       try {
         let isSigned;
         if (Components.isSuccessCode(rv)) {
@@ -2669,7 +2681,7 @@ this.DOMApplicationRegistry = {
           zipReader.open(zipFile);
         }
 
-        this._checkSignature(aNewApp, isSigned);
+        self._checkSignature(aNewApp, isSigned, isLocalFileInstall);
 
         if (!zipReader.hasEntry("manifest.webapp")) {
           throw "MISSING_MANIFEST";
@@ -2715,12 +2727,12 @@ this.DOMApplicationRegistry = {
         if (AppsUtils.getAppManifestStatus(manifest) > maxStatus) {
           throw "INVALID_SECURITY_LEVEL";
         }
-        this._getIds(isSigned, zipReader, converter, aNewApp, oldApp, aIsUpdate);
 
         oldApp.appStatus = AppsUtils.getAppManifestStatus(manifest);
 
-        this._saveEtag(aIsUpdate, oldApp, aRequestChannel, hash, manifest);
-        this._checkOrigin(isSigned, oldApp, manifest, aIsUpdate);
+        self._saveEtag(aIsUpdate, oldApp, requestChannel, hash, manifest);
+        self._checkOrigin(isSigned, oldApp, manifest, aIsUpdate);
+        self._getIds(isSigned, zipReader, converter, aNewApp, oldApp, aIsUpdate);
 
         if (aOnSuccess) {
           debug("call aOnSuccess");
@@ -2750,22 +2762,6 @@ this.DOMApplicationRegistry = {
           zipReader.close();
         }
       }
-    }, null).then(function() {
-/*      try {
-        self.computeFileHash(
-          zipFile,
-          self._onFileHashComputed.bind(self, zipFile, aNewApp, oldApp,
-                                        aIsUpdate, aManifest, requestChannel,
-                                        aId, aOnSuccess, aCleanup,
-                                        responseStatus)
-        );
-      } catch (e) {
-        debug("on stop request error:" + e);
-      }*/
-
-      requestChannel.asyncOpen(listener, null);
-      // send a first progress event to correctly set the DOM object's properties
-      self._sendDownloadProgressEvent(aNewApp, oldApp);
     }, null).then(null, this._cleanup.bind(this, id, oldApp, aNewApp, aIsUpdate));
   },
 
@@ -2881,7 +2877,7 @@ this.DOMApplicationRegistry = {
   _onFileHashComputed: function(aZipFile, aNewApp, aOldApp, aIsUpdate,
                                 aManifest, requestChannel, aId, aOnSuccess, aCleanup,
                                 aResponseStatus, aHash) {
-    debug("_onFileHashComputed " + aHash);
+    debug("_onFileHashComputed " + aHash + " SHOULDN'T BE CALLED");
 
     let oldPackage = (aResponseStatus == 304 || aHash == aOldApp.packageHash);
 
@@ -3037,7 +3033,7 @@ this.DOMApplicationRegistry = {
                                               aHash, aId, aOnSuccess, aCleanup, aRv,
                                               aZipReader) {
 
-    debug("_onOpenSignedJarFileAsyncCallback");
+    debug("_onOpenSignedJarFileAsyncCallback SHOULDn'T BE CALLED");
     let zipReader;
     try {
       let isSigned;
@@ -3138,7 +3134,7 @@ this.DOMApplicationRegistry = {
     }
   },
 
-  _checkSignature: function(aNewApp, aIsSigned) {
+  _checkSignature: function(aApp, aIsSigned, aIsLocalFileInstall) {
     debug("_checkSignature");
     // XXX Security: You CANNOT safely add a new app store for
     // installing privileged apps just by modifying this pref and
@@ -3160,7 +3156,7 @@ this.DOMApplicationRegistry = {
                                "dom.mozApps.signed_apps_installable_from");
     // If it's a local install and it's signed then we assume
     // the app origin is a valid signer.
-    let isSignedAppOrigin = (aIsSigned && isLocalFileInstall) ||
+    let isSignedAppOrigin = (aIsSigned && aIsLocalFileInstall) ||
                              signedAppOriginsStr.split(",").
                                    indexOf(aApp.installOrigin) > -1;
     if(!aIsSigned && isSignedAppOrigin) {              
@@ -3193,37 +3189,37 @@ this.DOMApplicationRegistry = {
         throw "INVALID_ORIGIN";
       }
 
-                  if (aIsUpdate) {
-                    // Changing the origin during an update is not allowed.
-                    if (uri.prePath != app.origin) {
-                      throw "INVALID_ORIGIN_CHANGE";
-                    }
-                    // Nothing else to do for an update... since the
-                    // origin can't change we don't need to move the
-                    // app nor can we have a duplicated origin
-                  } else {
-                    debug("Setting origin to " + uri.prePath +
-                          " for " + app.manifestURL);
-      let newId = uri.prePath.substring(6); // "app://".length
-      if (newId in this.webapps) {
-        throw "DUPLICATE_ORIGIN";
+      if (aIsUpdate) {
+        // Changing the origin during an update is not allowed.
+        if (uri.prePath != app.origin) {
+          throw "INVALID_ORIGIN_CHANGE";
+        }
+        // Nothing else to do for an update... since the
+        // origin can't change we don't need to move the
+        // app nor can we have a duplicated origin
+      } else {
+        debug("Setting origin to " + uri.prePath +
+              " for " + app.manifestURL);
+        let newId = uri.prePath.substring(6); // "app://".length
+        if (newId in this.webapps) {
+          throw "DUPLICATE_ORIGIN";
+        }
+        aOldApp.origin = uri.prePath;
+        // Update the registry.
+        aOldApp.id = newId;
+        this.webapps[newId] = aOldApp;
+        delete this.webapps[aId];
+        // Rename the directories where the files are installed.
+        [DIRECTORY_NAME, "TmpD"].forEach(function(aDir) {
+          let parent = FileUtils.getDir(aDir, ["webapps"], true, true);
+          let dir = FileUtils.getDir(aDir, ["webapps", aId], true, true);
+          dir.moveTo(parent, newId);
+        });
+        // Signals that we need to swap the old id with the new app.
+        this.broadcastMessage("Webapps:RemoveApp", { id: aId });
+        this.broadcastMessage("Webapps:AddApp", { id: newId,
+                                                  app: aOldApp });
       }
-      aOldApp.origin = uri.prePath;
-      // Update the registry.
-      aOldApp.id = newId;
-      this.webapps[newId] = aOldApp;
-      delete this.webapps[aId];
-      // Rename the directories where the files are installed.
-      [DIRECTORY_NAME, "TmpD"].forEach(function(aDir) {
-        let parent = FileUtils.getDir(aDir, ["webapps"], true, true);
-        let dir = FileUtils.getDir(aDir, ["webapps", aId], true, true);
-        dir.moveTo(parent, newId);
-      });
-      // Signals that we need to swap the old id with the new app.
-      this.broadcastMessage("Webapps:RemoveApp", { id: aId });
-      this.broadcastMessage("Webapps:AddApp", { id: newId,
-                                                app: aOldApp });
-    }
     }
   },
 
