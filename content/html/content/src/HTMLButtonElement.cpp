@@ -227,7 +227,8 @@ HTMLButtonElement::PostHandleEvent(nsEventChainPostVisitor& aVisitor)
 
   if (aVisitor.mEventStatus != nsEventStatus_eConsumeNoDefault &&
       aVisitor.mEvent->IsLeftClickEvent()) {
-    nsUIEvent actEvent(aVisitor.mEvent->mFlags.mIsTrusted, NS_UI_ACTIVATE, 1);
+    InternalUIEvent actEvent(aVisitor.mEvent->mFlags.mIsTrusted,
+                             NS_UI_ACTIVATE, 1);
 
     nsCOMPtr<nsIPresShell> shell = aVisitor.mPresContext->GetPresShell();
     if (shell) {
@@ -259,7 +260,8 @@ HTMLButtonElement::PostHandleEvent(nsEventChainPostVisitor& aVisitor)
         {
           // For backwards compat, trigger buttons with space or enter
           // (bug 25300)
-          nsKeyEvent * keyEvent = (nsKeyEvent *)aVisitor.mEvent;
+          WidgetKeyboardEvent* keyEvent =
+            static_cast<WidgetKeyboardEvent*>(aVisitor.mEvent);
           if ((keyEvent->keyCode == NS_VK_RETURN &&
                NS_KEY_PRESS == aVisitor.mEvent->message) ||
               (keyEvent->keyCode == NS_VK_SPACE &&
@@ -347,9 +349,8 @@ HTMLButtonElement::PostHandleEvent(nsEventChainPostVisitor& aVisitor)
     if (aVisitor.mItemFlags & NS_OUTER_ACTIVATE_EVENT) {
       if (mForm && (mType == NS_FORM_BUTTON_SUBMIT ||
                     mType == NS_FORM_BUTTON_RESET)) {
-        nsFormEvent event(true,
-                          (mType == NS_FORM_BUTTON_RESET)
-                          ? NS_FORM_RESET : NS_FORM_SUBMIT);
+        InternalFormEvent event(true,
+          (mType == NS_FORM_BUTTON_RESET) ? NS_FORM_RESET : NS_FORM_SUBMIT);
         event.originator     = this;
         nsEventStatus status = nsEventStatus_eIgnore;
 

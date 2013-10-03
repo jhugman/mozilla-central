@@ -292,7 +292,7 @@ protected:
    * Update the initial drag session data transfer with any changes that occur
    * on cloned data transfer objects used for events.
    */
-  void UpdateDragDataTransfer(nsDragEvent* dragEvent);
+  void UpdateDragDataTransfer(mozilla::WidgetDragEvent* dragEvent);
 
   nsresult SetClickCount(nsPresContext* aPresContext, nsMouseEvent *aEvent, nsEventStatus* aStatus);
   nsresult CheckForAndDispatchClick(nsPresContext* aPresContext, nsMouseEvent *aEvent, nsEventStatus* aStatus);
@@ -328,7 +328,7 @@ protected:
    * @param aModifierMask modifier mask for the key event
    */
   void HandleAccessKey(nsPresContext* aPresContext,
-                       nsKeyEvent* aEvent,
+                       mozilla::WidgetKeyboardEvent* aEvent,
                        nsEventStatus* aStatus,
                        nsIDocShellTreeItem* aBubbledFrom,
                        ProcessingAccessKeyState aAccessKeyState,
@@ -655,7 +655,8 @@ protected:
    * the target element, as well as the orientation to trigger panning and
    * display visual boundary feedback. The decision is stored back in aEvent.
    */
-  void DecideGestureEvent(nsGestureNotifyEvent* aEvent, nsIFrame* targetFrame);
+  void DecideGestureEvent(mozilla::WidgetGestureNotifyEvent* aEvent,
+                          nsIFrame* targetFrame);
 
   // routines for the d&d gesture tracking state machine
   void BeginTrackingDragGesture ( nsPresContext* aPresContext, nsMouseEvent* inDownEvent,
@@ -690,10 +691,10 @@ protected:
    * aSelection - the selection to be dragged
    */
   bool DoDefaultDragStart(nsPresContext* aPresContext,
-                            nsDragEvent* aDragEvent,
-                            nsDOMDataTransfer* aDataTransfer,
-                            nsIContent* aDragTarget,
-                            nsISelection* aSelection);
+                          mozilla::WidgetDragEvent* aDragEvent,
+                          nsDOMDataTransfer* aDataTransfer,
+                          nsIContent* aDragTarget,
+                          nsISelection* aSelection);
 
   bool IsTrackingDragGesture ( ) const { return mGestureDownContent != nullptr; }
   /**
@@ -704,10 +705,11 @@ protected:
    */
   void FillInEventFromGestureDown(nsMouseEvent* aEvent);
 
-  nsresult DoContentCommandEvent(nsContentCommandEvent* aEvent);
-  nsresult DoContentCommandScrollEvent(nsContentCommandEvent* aEvent);
+  nsresult DoContentCommandEvent(mozilla::WidgetContentCommandEvent* aEvent);
+  nsresult DoContentCommandScrollEvent(
+             mozilla::WidgetContentCommandEvent* aEvent);
 
-  void DoQuerySelectedText(nsQueryContentEvent* aEvent);
+  void DoQuerySelectedText(mozilla::WidgetQueryContentEvent* aEvent);
 
   bool RemoteQueryContentEvent(nsEvent *aEvent);
   mozilla::dom::TabParent *GetCrossProcessTarget();

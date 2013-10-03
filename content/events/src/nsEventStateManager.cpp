@@ -935,7 +935,7 @@ nsEventStateManager::PreHandleEvent(nsPresContext* aPresContext,
   case NS_KEY_PRESS:
     {
 
-      nsKeyEvent* keyEvent = (nsKeyEvent*)aEvent;
+      WidgetKeyboardEvent* keyEvent = static_cast<WidgetKeyboardEvent*>(aEvent);
 
       int32_t modifierMask = 0;
       if (keyEvent->IsShift())
@@ -992,69 +992,72 @@ nsEventStateManager::PreHandleEvent(nsPresContext* aPresContext,
     }
     break;
   case NS_QUERY_SELECTED_TEXT:
-    DoQuerySelectedText(static_cast<nsQueryContentEvent*>(aEvent));
+    DoQuerySelectedText(static_cast<WidgetQueryContentEvent*>(aEvent));
     break;
   case NS_QUERY_TEXT_CONTENT:
     {
       if (RemoteQueryContentEvent(aEvent))
         break;
       nsContentEventHandler handler(mPresContext);
-      handler.OnQueryTextContent((nsQueryContentEvent*)aEvent);
+      handler.OnQueryTextContent(static_cast<WidgetQueryContentEvent*>(aEvent));
     }
     break;
   case NS_QUERY_CARET_RECT:
     {
       // XXX remote event
       nsContentEventHandler handler(mPresContext);
-      handler.OnQueryCaretRect((nsQueryContentEvent*)aEvent);
+      handler.OnQueryCaretRect(static_cast<WidgetQueryContentEvent*>(aEvent));
     }
     break;
   case NS_QUERY_TEXT_RECT:
     {
       // XXX remote event
       nsContentEventHandler handler(mPresContext);
-      handler.OnQueryTextRect((nsQueryContentEvent*)aEvent);
+      handler.OnQueryTextRect(static_cast<WidgetQueryContentEvent*>(aEvent));
     }
     break;
   case NS_QUERY_EDITOR_RECT:
     {
       // XXX remote event
       nsContentEventHandler handler(mPresContext);
-      handler.OnQueryEditorRect((nsQueryContentEvent*)aEvent);
+      handler.OnQueryEditorRect(static_cast<WidgetQueryContentEvent*>(aEvent));
     }
     break;
   case NS_QUERY_CONTENT_STATE:
     {
       // XXX remote event
       nsContentEventHandler handler(mPresContext);
-      handler.OnQueryContentState(static_cast<nsQueryContentEvent*>(aEvent));
+      handler.OnQueryContentState(static_cast<WidgetQueryContentEvent*>(aEvent));
     }
     break;
   case NS_QUERY_SELECTION_AS_TRANSFERABLE:
     {
       // XXX remote event
       nsContentEventHandler handler(mPresContext);
-      handler.OnQuerySelectionAsTransferable(static_cast<nsQueryContentEvent*>(aEvent));
+      handler.OnQuerySelectionAsTransferable(
+        static_cast<WidgetQueryContentEvent*>(aEvent));
     }
     break;
   case NS_QUERY_CHARACTER_AT_POINT:
     {
       // XXX remote event
       nsContentEventHandler handler(mPresContext);
-      handler.OnQueryCharacterAtPoint(static_cast<nsQueryContentEvent*>(aEvent));
+      handler.OnQueryCharacterAtPoint(
+        static_cast<WidgetQueryContentEvent*>(aEvent));
     }
     break;
   case NS_QUERY_DOM_WIDGET_HITTEST:
     {
       // XXX remote event
       nsContentEventHandler handler(mPresContext);
-      handler.OnQueryDOMWidgetHittest(static_cast<nsQueryContentEvent*>(aEvent));
+      handler.OnQueryDOMWidgetHittest(
+        static_cast<WidgetQueryContentEvent*>(aEvent));
     }
     break;
   case NS_SELECTION_SET:
     {
-      nsSelectionEvent *selectionEvent =
-          static_cast<nsSelectionEvent*>(aEvent);
+      WidgetSelectionEvent *selectionEvent =
+          static_cast<WidgetSelectionEvent*>(aEvent);
       if (IsTargetCrossProcess(selectionEvent)) {
         // Will not be handled locally, remote the event
         if (GetCrossProcessTarget()->SendSelectionEvent(*selectionEvent))
@@ -1062,7 +1065,7 @@ nsEventStateManager::PreHandleEvent(nsPresContext* aPresContext,
         break;
       }
       nsContentEventHandler handler(mPresContext);
-      handler.OnSelectionEvent((nsSelectionEvent*)aEvent);
+      handler.OnSelectionEvent(static_cast<WidgetSelectionEvent*>(aEvent));
     }
     break;
   case NS_CONTENT_COMMAND_CUT:
@@ -1073,17 +1076,18 @@ nsEventStateManager::PreHandleEvent(nsPresContext* aPresContext,
   case NS_CONTENT_COMMAND_REDO:
   case NS_CONTENT_COMMAND_PASTE_TRANSFERABLE:
     {
-      DoContentCommandEvent(static_cast<nsContentCommandEvent*>(aEvent));
+      DoContentCommandEvent(static_cast<WidgetContentCommandEvent*>(aEvent));
     }
     break;
   case NS_CONTENT_COMMAND_SCROLL:
     {
-      DoContentCommandScrollEvent(static_cast<nsContentCommandEvent*>(aEvent));
+      DoContentCommandScrollEvent(
+        static_cast<WidgetContentCommandEvent*>(aEvent));
     }
     break;
   case NS_TEXT_TEXT:
     {
-      nsTextEvent *textEvent = static_cast<nsTextEvent*>(aEvent);
+      WidgetTextEvent *textEvent = static_cast<WidgetTextEvent*>(aEvent);
       if (IsTargetCrossProcess(textEvent)) {
         // Will not be handled locally, remote the event
         if (GetCrossProcessTarget()->SendTextEvent(*textEvent)) {
@@ -1097,10 +1101,10 @@ nsEventStateManager::PreHandleEvent(nsPresContext* aPresContext,
     if (aEvent->mFlags.mIsTrusted) {
       // If the event is trusted event, set the selected text to data of
       // composition event.
-      nsCompositionEvent *compositionEvent =
-        static_cast<nsCompositionEvent*>(aEvent);
-      nsQueryContentEvent selectedText(true, NS_QUERY_SELECTED_TEXT,
-                                       compositionEvent->widget);
+      WidgetCompositionEvent *compositionEvent =
+        static_cast<WidgetCompositionEvent*>(aEvent);
+      WidgetQueryContentEvent selectedText(true, NS_QUERY_SELECTED_TEXT,
+                                           compositionEvent->widget);
       DoQuerySelectedText(&selectedText);
       NS_ASSERTION(selectedText.mSucceeded, "Failed to get selected text");
       compositionEvent->data = selectedText.mReply.mString;
@@ -1109,8 +1113,8 @@ nsEventStateManager::PreHandleEvent(nsPresContext* aPresContext,
   case NS_COMPOSITION_UPDATE:
   case NS_COMPOSITION_END:
     {
-      nsCompositionEvent *compositionEvent =
-          static_cast<nsCompositionEvent*>(aEvent);
+      WidgetCompositionEvent *compositionEvent =
+          static_cast<WidgetCompositionEvent*>(aEvent);
       if (IsTargetCrossProcess(compositionEvent)) {
         // Will not be handled locally, remote the event
         if (GetCrossProcessTarget()->SendCompositionEvent(*compositionEvent)) {
@@ -1277,7 +1281,7 @@ nsEventStateManager::GetAccessKeyLabelPrefix(nsAString& aPrefix)
 
 void
 nsEventStateManager::HandleAccessKey(nsPresContext* aPresContext,
-                                     nsKeyEvent *aEvent,
+                                     WidgetKeyboardEvent* aEvent,
                                      nsEventStatus* aStatus,
                                      nsIDocShellTreeItem* aBubbledFrom,
                                      ProcessingAccessKeyState aAccessKeyState,
@@ -1387,7 +1391,7 @@ nsEventStateManager::DispatchCrossProcessEvent(nsEvent* aEvent,
     return remote->SendRealMouseEvent(*mouseEvent);
   }
   case NS_KEY_EVENT: {
-    nsKeyEvent* keyEvent = static_cast<nsKeyEvent*>(aEvent);
+    WidgetKeyboardEvent* keyEvent = static_cast<WidgetKeyboardEvent*>(aEvent);
     return remote->SendRealKeyEvent(*keyEvent);
   }
   case NS_WHEEL_EVENT: {
@@ -1398,7 +1402,7 @@ nsEventStateManager::DispatchCrossProcessEvent(nsEvent* aEvent,
     // Let the child process synthesize a mouse event if needed, and
     // ensure we don't synthesize one in this process.
     *aStatus = nsEventStatus_eConsumeNoDefault;
-    nsTouchEvent* touchEvent = static_cast<nsTouchEvent*>(aEvent);
+    WidgetTouchEvent* touchEvent = static_cast<WidgetTouchEvent*>(aEvent);
     return remote->SendRealTouchEvent(*touchEvent);
   }
   default: {
@@ -1515,7 +1519,7 @@ nsEventStateManager::HandleCrossProcessEvent(nsEvent *aEvent,
     //
     // This loop is similar to the one used in
     // PresShell::DispatchTouchEvent().
-    nsTouchEvent* touchEvent = static_cast<nsTouchEvent*>(aEvent);
+    WidgetTouchEvent* touchEvent = static_cast<WidgetTouchEvent*>(aEvent);
     const nsTArray< nsRefPtr<Touch> >& touches = touchEvent->touches;
     for (uint32_t i = 0; i < touches.Length(); ++i) {
       Touch* touch = touches[i];
@@ -1924,12 +1928,12 @@ nsEventStateManager::GenerateDragGesture(nsPresContext* aPresContext,
       nsCOMPtr<nsIWidget> widget = mCurrentTarget->GetNearestWidget();
 
       // get the widget from the target frame
-      nsDragEvent startEvent(aEvent->mFlags.mIsTrusted,
-                             NS_DRAGDROP_START, widget);
+      WidgetDragEvent startEvent(aEvent->mFlags.mIsTrusted,
+                                 NS_DRAGDROP_START, widget);
       FillInEventFromGestureDown(&startEvent);
 
-      nsDragEvent gestureEvent(aEvent->mFlags.mIsTrusted,
-                               NS_DRAGDROP_GESTURE, widget);
+      WidgetDragEvent gestureEvent(aEvent->mFlags.mIsTrusted,
+                                   NS_DRAGDROP_GESTURE, widget);
       FillInEventFromGestureDown(&gestureEvent);
 
       startEvent.dataTransfer = gestureEvent.dataTransfer = dataTransfer;
@@ -1957,7 +1961,7 @@ nsEventStateManager::GenerateDragGesture(nsPresContext* aPresContext,
       nsEventDispatcher::Dispatch(targetContent, aPresContext, &startEvent, nullptr,
                                   &status);
 
-      nsDragEvent* event = &startEvent;
+      WidgetDragEvent* event = &startEvent;
       if (status != nsEventStatus_eConsumeNoDefault) {
         status = nsEventStatus_eIgnore;
         nsEventDispatcher::Dispatch(targetContent, aPresContext, &gestureEvent, nullptr,
@@ -2082,7 +2086,7 @@ nsEventStateManager::DetermineDragTarget(nsPresContext* aPresContext,
 
 bool
 nsEventStateManager::DoDefaultDragStart(nsPresContext* aPresContext,
-                                        nsDragEvent* aDragEvent,
+                                        WidgetDragEvent* aDragEvent,
                                         nsDOMDataTransfer* aDataTransfer,
                                         nsIContent* aDragTarget,
                                         nsISelection* aSelection)
@@ -2474,8 +2478,8 @@ nsEventStateManager::SendLineScrollEvent(nsIFrame* aTargetFrame,
     targetContent = targetContent->GetParent();
   }
 
-  nsMouseScrollEvent event(aEvent->mFlags.mIsTrusted, NS_MOUSE_SCROLL,
-                           aEvent->widget);
+  WidgetMouseScrollEvent event(aEvent->mFlags.mIsTrusted, NS_MOUSE_SCROLL,
+                               aEvent->widget);
   if (*aStatus == nsEventStatus_eConsumeNoDefault) {
     event.mFlags.mDefaultPrevented = true;
   }
@@ -2510,8 +2514,8 @@ nsEventStateManager::SendPixelScrollEvent(nsIFrame* aTargetFrame,
     targetContent = targetContent->GetParent();
   }
 
-  nsMouseScrollEvent event(aEvent->mFlags.mIsTrusted, NS_MOUSE_PIXEL_SCROLL,
-                           aEvent->widget);
+  WidgetMouseScrollEvent event(aEvent->mFlags.mIsTrusted, NS_MOUSE_PIXEL_SCROLL,
+                               aEvent->widget);
   if (*aStatus == nsEventStatus_eConsumeNoDefault) {
     event.mFlags.mDefaultPrevented = true;
   }
@@ -2808,7 +2812,7 @@ nsEventStateManager::DoScrollText(nsIScrollableFrame* aScrollableFrame,
 }
 
 void
-nsEventStateManager::DecideGestureEvent(nsGestureNotifyEvent* aEvent,
+nsEventStateManager::DecideGestureEvent(WidgetGestureNotifyEvent* aEvent,
                                         nsIFrame* targetFrame)
 {
 
@@ -2827,7 +2831,8 @@ nsEventStateManager::DecideGestureEvent(nsGestureNotifyEvent* aEvent,
    *
    * Note: we'll have to one-off various cases to ensure a good usable behavior
    */
-  nsGestureNotifyEvent::ePanDirection panDirection = nsGestureNotifyEvent::ePanNone;
+  WidgetGestureNotifyEvent::ePanDirection panDirection =
+    WidgetGestureNotifyEvent::ePanNone;
   bool displayPanFeedback = false;
   for (nsIFrame* current = targetFrame; current;
        current = nsLayoutUtils::GetCrossDocParentFrame(current)) {
@@ -2836,7 +2841,7 @@ nsEventStateManager::DecideGestureEvent(nsGestureNotifyEvent* aEvent,
 
     // Scrollbars should always be draggable
     if (currentFrameType == nsGkAtoms::scrollbarFrame) {
-      panDirection = nsGestureNotifyEvent::ePanNone;
+      panDirection = WidgetGestureNotifyEvent::ePanNone;
       break;
     }
 
@@ -2845,10 +2850,10 @@ nsEventStateManager::DecideGestureEvent(nsGestureNotifyEvent* aEvent,
     nsTreeBodyFrame* treeFrame = do_QueryFrame(current);
     if (treeFrame) {
       if (treeFrame->GetHorizontalOverflow()) {
-        panDirection = nsGestureNotifyEvent::ePanHorizontal;
+        panDirection = WidgetGestureNotifyEvent::ePanHorizontal;
       }
       if (treeFrame->GetVerticalOverflow()) {
-        panDirection = nsGestureNotifyEvent::ePanVertical;
+        panDirection = WidgetGestureNotifyEvent::ePanVertical;
       }
       break;
     }
@@ -2872,12 +2877,12 @@ nsEventStateManager::DecideGestureEvent(nsGestureNotifyEvent* aEvent,
         // Vertical panning has priority over horizontal panning, so
         // when vertical movement is possible we can just finish the loop.
         if (scrollRange.height > 0) {
-          panDirection = nsGestureNotifyEvent::ePanVertical;
+          panDirection = WidgetGestureNotifyEvent::ePanVertical;
           break;
         }
 
         if (canScrollHorizontally) {
-          panDirection = nsGestureNotifyEvent::ePanHorizontal;
+          panDirection = WidgetGestureNotifyEvent::ePanHorizontal;
           displayPanFeedback = false;
         }
       } else { //Not a XUL box
@@ -2885,13 +2890,13 @@ nsEventStateManager::DecideGestureEvent(nsGestureNotifyEvent* aEvent,
 
         //Check if we have visible scrollbars
         if (scrollbarVisibility & nsIScrollableFrame::VERTICAL) {
-          panDirection = nsGestureNotifyEvent::ePanVertical;
+          panDirection = WidgetGestureNotifyEvent::ePanVertical;
           displayPanFeedback = true;
           break;
         }
 
         if (scrollbarVisibility & nsIScrollableFrame::HORIZONTAL) {
-          panDirection = nsGestureNotifyEvent::ePanHorizontal;
+          panDirection = WidgetGestureNotifyEvent::ePanHorizontal;
           displayPanFeedback = true;
         }
       }
@@ -3221,7 +3226,8 @@ nsEventStateManager::PostHandleEvent(nsPresContext* aPresContext,
   case NS_GESTURENOTIFY_EVENT_START:
     {
       if (nsEventStatus_eConsumeNoDefault != *aStatus)
-        DecideGestureEvent(static_cast<nsGestureNotifyEvent*>(aEvent), mCurrentTarget);
+        DecideGestureEvent(static_cast<WidgetGestureNotifyEvent*>(aEvent),
+                           mCurrentTarget);
     }
     break;
 
@@ -3247,7 +3253,7 @@ nsEventStateManager::PostHandleEvent(nsPresContext* aPresContext,
       nsCOMPtr<nsIDOMDataTransfer> initialDataTransfer;
       dragSession->GetDataTransfer(getter_AddRefs(initialDataTransfer));
 
-      nsDragEvent *dragEvent = (nsDragEvent*)aEvent;
+      WidgetDragEvent *dragEvent = static_cast<WidgetDragEvent*>(aEvent);
 
       // collect any changes to moz cursor settings stored in the event's
       // data transfer.
@@ -3342,8 +3348,8 @@ nsEventStateManager::PostHandleEvent(nsPresContext* aPresContext,
                                            getter_AddRefs(targetContent));
 
         nsCOMPtr<nsIWidget> widget = mCurrentTarget->GetNearestWidget();
-        nsDragEvent event(aEvent->mFlags.mIsTrusted,
-                          NS_DRAGDROP_DRAGDROP, widget);
+        WidgetDragEvent event(aEvent->mFlags.mIsTrusted,
+                              NS_DRAGDROP_DRAGDROP, widget);
 
         nsMouseEvent* mouseEvent = static_cast<nsMouseEvent*>(aEvent);
         event.refPoint = mouseEvent->refPoint;
@@ -3377,7 +3383,7 @@ nsEventStateManager::PostHandleEvent(nsPresContext* aPresContext,
 
   case NS_KEY_PRESS:
     if (nsEventStatus_eConsumeNoDefault != *aStatus) {
-      nsKeyEvent* keyEvent = (nsKeyEvent*)aEvent;
+      WidgetKeyboardEvent* keyEvent = static_cast<WidgetKeyboardEvent*>(aEvent);
       //This is to prevent keyboard scrolling while alt modifier in use.
       if (!keyEvent->IsAlt()) {
         switch(keyEvent->keyCode) {
@@ -3394,10 +3400,9 @@ nsEventStateManager::PostHandleEvent(nsPresContext* aPresContext,
             nsIFocusManager* fm = nsFocusManager::GetFocusManager();
             if (fm && mDocument) {
               // Shift focus forward or back depending on shift key
-              bool isDocMove = ((nsInputEvent*)aEvent)->IsControl() ||
-                                 (keyEvent->keyCode == NS_VK_F6);
-              uint32_t dir =
-                static_cast<nsInputEvent*>(aEvent)->IsShift() ?
+              bool isDocMove =
+                keyEvent->IsControl() || keyEvent->keyCode == NS_VK_F6;
+              uint32_t dir = keyEvent->IsShift() ?
                   (isDocMove ? static_cast<uint32_t>(nsIFocusManager::MOVEFOCUS_BACKWARDDOC) :
                                static_cast<uint32_t>(nsIFocusManager::MOVEFOCUS_BACKWARD)) :
                   (isDocMove ? static_cast<uint32_t>(nsIFocusManager::MOVEFOCUS_FORWARDDOC) :
@@ -3445,8 +3450,8 @@ nsEventStateManager::PostHandleEvent(nsPresContext* aPresContext,
 bool
 nsEventStateManager::RemoteQueryContentEvent(nsEvent *aEvent)
 {
-  nsQueryContentEvent *queryEvent =
-      static_cast<nsQueryContentEvent*>(aEvent);
+  WidgetQueryContentEvent *queryEvent =
+      static_cast<WidgetQueryContentEvent*>(aEvent);
   if (!IsTargetCrossProcess(queryEvent)) {
     return false;
   }
@@ -4270,7 +4275,7 @@ nsEventStateManager::FireDragEnterOrExit(nsPresContext* aPresContext,
                                          nsWeakFrame& aTargetFrame)
 {
   nsEventStatus status = nsEventStatus_eIgnore;
-  nsDragEvent event(aEvent->mFlags.mIsTrusted, aMsg, aEvent->widget);
+  WidgetDragEvent event(aEvent->mFlags.mIsTrusted, aMsg, aEvent->widget);
   event.refPoint = aEvent->refPoint;
   event.modifiers = ((nsMouseEvent*)aEvent)->modifiers;
   event.buttons = ((nsMouseEvent*)aEvent)->buttons;
@@ -4303,7 +4308,7 @@ nsEventStateManager::FireDragEnterOrExit(nsPresContext* aPresContext,
 }
 
 void
-nsEventStateManager::UpdateDragDataTransfer(nsDragEvent* dragEvent)
+nsEventStateManager::UpdateDragDataTransfer(WidgetDragEvent* dragEvent)
 {
   NS_ASSERTION(dragEvent, "drag event is null in UpdateDragDataTransfer!");
   if (!dragEvent->dataTransfer)
@@ -4921,7 +4926,7 @@ nsEventStateManager::IsShellVisible(nsIDocShell* aShell)
 }
 
 nsresult
-nsEventStateManager::DoContentCommandEvent(nsContentCommandEvent* aEvent)
+nsEventStateManager::DoContentCommandEvent(WidgetContentCommandEvent* aEvent)
 {
   EnsureDocument(mPresContext);
   NS_ENSURE_TRUE(mDocument, NS_ERROR_FAILURE);
@@ -4996,7 +5001,8 @@ nsEventStateManager::DoContentCommandEvent(nsContentCommandEvent* aEvent)
 }
 
 nsresult
-nsEventStateManager::DoContentCommandScrollEvent(nsContentCommandEvent* aEvent)
+nsEventStateManager::DoContentCommandScrollEvent(
+                       WidgetContentCommandEvent* aEvent)
 {
   NS_ENSURE_TRUE(mPresContext, NS_ERROR_NOT_AVAILABLE);
   nsIPresShell* ps = mPresContext->GetPresShell();
@@ -5005,13 +5011,13 @@ nsEventStateManager::DoContentCommandScrollEvent(nsContentCommandEvent* aEvent)
 
   nsIScrollableFrame::ScrollUnit scrollUnit;
   switch (aEvent->mScroll.mUnit) {
-    case nsContentCommandEvent::eCmdScrollUnit_Line:
+    case WidgetContentCommandEvent::eCmdScrollUnit_Line:
       scrollUnit = nsIScrollableFrame::LINES;
       break;
-    case nsContentCommandEvent::eCmdScrollUnit_Page:
+    case WidgetContentCommandEvent::eCmdScrollUnit_Page:
       scrollUnit = nsIScrollableFrame::PAGES;
       break;
-    case nsContentCommandEvent::eCmdScrollUnit_Whole:
+    case WidgetContentCommandEvent::eCmdScrollUnit_Whole:
       scrollUnit = nsIScrollableFrame::WHOLE;
       break;
     default:
@@ -5044,7 +5050,7 @@ nsEventStateManager::DoContentCommandScrollEvent(nsContentCommandEvent* aEvent)
 }
 
 void
-nsEventStateManager::DoQuerySelectedText(nsQueryContentEvent* aEvent)
+nsEventStateManager::DoQuerySelectedText(WidgetQueryContentEvent* aEvent)
 {
   if (RemoteQueryContentEvent(aEvent)) {
     return;

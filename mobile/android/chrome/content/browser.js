@@ -1317,17 +1317,24 @@ var BrowserApp = {
         break;
 
       case "Session:Reload": {
-        let allowMixedContent = false;
+        let flags = Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_PROXY | Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_CACHE;
+
+        // Check to see if this is a message to enable/disable mixed content blocking.
         if (aData) {
-            let data = JSON.parse(aData);
-            allowMixedContent = data.allowMixedContent;
+          let allowMixedContent = JSON.parse(aData).allowMixedContent;
+          if (allowMixedContent) {
+            // Set a flag to disable mixed content blocking.
+            flags = Ci.nsIWebNavigation.LOAD_FLAGS_ALLOW_MIXED_CONTENT;
+          } else {
+            // Set mixedContentChannel to null to re-enable mixed content blocking.
+            let docShell = browser.webNavigation.QueryInterface(Ci.nsIDocShell);
+            docShell.mixedContentChannel = null;
+          }
         }
 
         // Try to use the session history to reload so that framesets are
         // handled properly. If the window has no session history, fall back
         // to using the web navigation's reload method.
-        let flags = allowMixedContent ? Ci.nsIWebNavigation.LOAD_FLAGS_ALLOW_MIXED_CONTENT :
-                    Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_PROXY | Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_CACHE;
         let webNav = browser.webNavigation;
         try {
           let sh = webNav.sessionHistory;
@@ -1402,7 +1409,9 @@ var BrowserApp = {
         break;
 
       case "keyword-search":
-        // This assumes that the user can only perform a keyword search on the selected tab.
+        // This event refers to a search via the URL bar, not a bookmarks
+        // keyword search. Note that this code assumes that the user can only
+        // perform a keyword search on the selected tab.
         this.selectedTab.userSearch = aData;
 
         let engine = aSubject.QueryInterface(Ci.nsISearchEngine);
@@ -4152,7 +4161,7 @@ var BrowserEventHandler = {
       if (this._scrollableElement != null) {
         // Discard if it's the top-level scrollable, we let Java handle this
         let doc = BrowserApp.selectedBrowser.contentDocument;
-        if (this._scrollableElement != doc.body && this._scrollableElement != doc.documentElement)
+        if (this._scrollableElement != doc.documentElement)
           sendMessageToJava({ type: "Panning:Override" });
       }
     }
@@ -4239,7 +4248,6 @@ var BrowserEventHandler = {
 
           let doc = BrowserApp.selectedBrowser.contentDocument;
           if (this._scrollableElement == null ||
-              this._scrollableElement == doc.body ||
               this._scrollableElement == doc.documentElement) {
             sendMessageToJava({ type: "Panning:CancelOverride" });
             return;
@@ -4610,15 +4618,14 @@ var BrowserEventHandler = {
     let scrollable = false;
     while (elem) {
       /* Element is scrollable if its scroll-size exceeds its client size, and:
-       * - It has overflow 'auto' or 'scroll'
-       * - It's a textarea
-       * - It's an HTML/BODY node
+       * - It has overflow 'auto' or 'scroll', or
+       * - It's a textarea or HTML node, or
        * - It's a select element showing multiple rows
        */
       if (checkElem) {
         if ((elem.scrollTopMax > 0 || elem.scrollLeftMax > 0) &&
             (this._hasScrollableOverflow(elem) ||
-             elem.mozMatchesSelector("html, body, textarea")) ||
+             elem.mozMatchesSelector("html, textarea")) ||
             (elem instanceof HTMLSelectElement && (elem.size > 1 || elem.multiple))) {
           scrollable = true;
           break;
@@ -6537,6 +6544,13 @@ var SearchEngines = {
         prompted: Services.prefs.getBoolPref(this.PREF_SUGGEST_PROMPTED)
       }
     });
+
+    // Send a speculative connection to the default engine.
+    let connector = Services.io.QueryInterface(Ci.nsISpeculativeConnect);
+    let searchURI = Services.search.defaultEngine.getSubmission("dummy").uri;
+    let callbacks = window.QueryInterface(Ci.nsIInterfaceRequestor)
+                          .getInterface(Ci.nsIWebNavigation).QueryInterface(Ci.nsILoadContext);
+    connector.speculativeConnect(searchURI, callbacks);
   },
 
   _handleSearchEnginesGetAll: function _handleSearchEnginesGetAll(rv) {

@@ -44,8 +44,9 @@ public:
   InputType mInputType;
   // Time in milliseconds that this data is relevant to. This only really
   // matters when this data is used as an event. We use uint32_t instead of
-  // TimeStamp because it is easier to convert from nsInputEvent. The time is
-  // platform-specific but it in the case of B2G and Fennec it is since startup.
+  // TimeStamp because it is easier to convert from WidgetInputEvent. The time
+  // is platform-specific but it in the case of B2G and Fennec it is since
+  // startup.
   uint32_t mTime;
 
   INPUTDATA_AS_CHILD_TYPE(MultiTouchInput, MULTITOUCH_INPUT)
@@ -125,11 +126,12 @@ public:
 };
 
 /**
- * Similar to nsTouchEvent, but for use off-main-thread. Also only stores a
- * screen touch point instead of the many different coordinate spaces nsTouchEvent
- * stores its touch point in. This includes a way to initialize itself from an
- * nsTouchEvent by copying all relevant data over. Note that this copying from
- * nsTouchEvent functionality can only be used on the main thread.
+ * Similar to WidgetTouchEvent, but for use off-main-thread. Also only stores a
+ * screen touch point instead of the many different coordinate spaces
+ * WidgetTouchEvent stores its touch point in. This includes a way to initialize
+ * itself from a WidgetTouchEvent by copying all relevant data over. Note that
+ * this copying from WidgetTouchEvent functionality can only be used on the main
+ * thread.
  *
  * Stores an array of SingleTouchData.
  */
@@ -158,7 +160,7 @@ public:
   {
   }
 
-  MultiTouchInput(const nsTouchEvent& aTouchEvent);
+  MultiTouchInput(const WidgetTouchEvent& aTouchEvent);
 
   // This conversion from nsMouseEvent to MultiTouchInput is needed because on
   // the B2G emulator we can only receive mouse events, but we need to be able
