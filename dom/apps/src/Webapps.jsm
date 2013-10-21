@@ -2946,7 +2946,7 @@ this.DOMApplicationRegistry = {
       },
       manifestURL: aNewApp.manifestURL
     });
-    self.broadcastMessage("Webapps:FireEvent", {
+    this.broadcastMessage("Webapps:FireEvent", {
       eventType: "progress",
       manifestURL: aNewApp.manifestURL
     });
