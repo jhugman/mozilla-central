@@ -62,6 +62,8 @@
 #include "nsIImageLoadingContent.h"
 
 #include "nsCSSParser.h"
+#include "nsBidiUtils.h"
+#include "nsServiceManagerUtils.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -738,10 +740,6 @@ nsPresContext::GetUserPreferences()
   // * use fonts?
   mUseDocumentFonts =
     Preferences::GetInt("browser.display.use_document_fonts") != 0;
-
-  // * replace backslashes with Yen signs? (bug 245770)
-  mEnableJapaneseTransform =
-    Preferences::GetBool("layout.enable_japanese_specific_transform");
 
   mPrefScrollbarSide = Preferences::GetInt("layout.scrollbar.side");
 

@@ -169,7 +169,7 @@ public:
    */
   NS_IMETHOD_(nsIntSize) GetSizeExternal() MOZ_OVERRIDE;
   NS_IMETHOD RenderContextsExternal(gfxContext *aContext,
-                                    gfxPattern::GraphicsFilter aFilter,
+                                    GraphicsFilter aFilter,
                                     uint32_t aFlags = RenderFlagPremultAlpha) MOZ_OVERRIDE;
 
   virtual bool ParseAttribute(int32_t aNamespaceID,
@@ -227,10 +227,9 @@ protected:
                        const JS::Value& aEncoderOptions,
                        nsAString& aParams,
                        bool* usingCustomParseOptions);
-  nsresult ExtractData(const nsAString& aType,
+  nsresult ExtractData(nsAString& aType,
                        const nsAString& aOptions,
-                       nsIInputStream** aStream,
-                       bool& aFellBackToPNG);
+                       nsIInputStream** aStream);
   nsresult ToDataURLImpl(JSContext* aCx,
                          const nsAString& aMimeType,
                          const JS::Value& aEncoderOptions,

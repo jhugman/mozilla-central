@@ -6,8 +6,11 @@
 
 #include "jit/BaselineIC.h"
 
+#include "mozilla/TemplateLib.h"
+
 #include "jsautooplen.h"
 #include "jslibmath.h"
+#include "jstypes.h"
 
 #include "builtin/Eval.h"
 #include "jit/BaselineHelpers.h"
@@ -23,6 +26,7 @@
 #include "jsboolinlines.h"
 #include "jsscriptinlines.h"
 
+#include "jit/IonFrames-inl.h"
 #include "vm/Interpreter-inl.h"
 #include "vm/ScopeObject-inl.h"
 
@@ -1367,9 +1371,6 @@ ICUpdatedStub::addUpdateStubForValue(JSContext *cx, HandleScript script, HandleO
         return true;
     }
 
-    if (!obj->getType(cx))
-        return false;
-
     types::EnsureTrackPropertyTypes(cx, obj, id);
 
     if (val.isPrimitive()) {
@@ -1536,7 +1537,7 @@ ICTypeUpdate_PrimitiveSet::Compiler::generateStubCode(MacroAssembler &masm)
 
     // Type matches, load true into R1.scratchReg() and return.
     masm.bind(&success);
-    masm.mov(Imm32(1), R1.scratchReg());
+    masm.mov(ImmWord(1), R1.scratchReg());
     EmitReturnFromIC(masm);
 
     return true;
@@ -1554,7 +1555,7 @@ ICTypeUpdate_SingleObject::Compiler::generateStubCode(MacroAssembler &masm)
     masm.branchPtr(Assembler::NotEqual, expectedObject, obj, &failure);
 
     // Identity matches, load true into R1.scratchReg() and return.
-    masm.mov(Imm32(1), R1.scratchReg());
+    masm.mov(ImmWord(1), R1.scratchReg());
     EmitReturnFromIC(masm);
 
     masm.bind(&failure);
@@ -1576,7 +1577,7 @@ ICTypeUpdate_TypeObject::Compiler::generateStubCode(MacroAssembler &masm)
     masm.branchPtr(Assembler::NotEqual, expectedType, R1.scratchReg(), &failure);
 
     // Type matches, load true into R1.scratchReg() and return.
-    masm.mov(Imm32(1), R1.scratchReg());
+    masm.mov(ImmWord(1), R1.scratchReg());
     EmitReturnFromIC(masm);
 
     masm.bind(&failure);
@@ -4064,7 +4065,7 @@ ICGetElemNativeCompiler::emitCallScripted(MacroAssembler &masm, Register objReg)
 
         masm.movePtr(ImmGCPtr(argumentsRectifier), code);
         masm.loadPtr(Address(code, IonCode::offsetOfCode()), code);
-        masm.mov(Imm32(0), ArgumentsRectifierReg);
+        masm.mov(ImmWord(0), ArgumentsRectifierReg);
     }
 
     masm.bind(&noUnderflow);
@@ -4497,7 +4498,9 @@ ICGetElem_Arguments::Compiler::generateStubCode(MacroAssembler &masm)
 
     // In tempReg, calculate index of word containing bit: (idx >> logBitsPerWord)
     masm.movePtr(idxReg, tempReg);
-    masm.rshiftPtr(Imm32(JS_BITS_PER_WORD_LOG2), tempReg);
+    const uint32_t shift = mozilla::tl::FloorLog2<(sizeof(size_t) * JS_BITS_PER_BYTE)>::value;
+    JS_ASSERT(shift == 5 || shift == 6);
+    masm.rshiftPtr(Imm32(shift), tempReg);
     masm.loadPtr(BaseIndex(scratchReg, tempReg, ScaleFromElemWidth(sizeof(size_t))), scratchReg);
 
     // Don't bother testing specific bit, if any bit is set in the word, fail.
@@ -5325,6 +5328,10 @@ TryAttachGlobalNameStub(JSContext *cx, HandleScript script, ICGetName_Fallback *
 
     RootedId id(cx, NameToId(name));
 
+    // Instantiate this global property, for use during Ion compilation.
+    if (IsIonEnabled(cx))
+        types::EnsureTrackPropertyTypes(cx, global, NameToId(name));
+
     // The property must be found, and it must be found as a normal data property.
     RootedShape shape(cx, global->nativeLookup(cx, id));
     if (!shape || !shape->hasDefaultGetter() || !shape->hasSlot())
@@ -5381,6 +5388,10 @@ TryAttachScopeNameStub(JSContext *cx, HandleScript script, ICGetName_Fallback *s
 
     if (!IsCacheableGetPropReadSlot(scopeChain, scopeChain, shape))
         return true;
+
+    // Instantiate properties on singleton scope chain objects, for use during Ion compilation.
+    if (scopeChain->hasSingletonType() && IsIonEnabled(cx))
+        types::EnsureTrackPropertyTypes(cx, scopeChain, NameToId(name));
 
     bool isFixedSlot;
     uint32_t offset;
@@ -5809,6 +5820,10 @@ TryAttachNativeGetPropStub(JSContext *cx, HandleScript script, jsbytecode *pc,
         uint32_t offset;
         GetFixedOrDynamicSlotOffset(holder, shape->slot(), &isFixedSlot, &offset);
 
+        // Instantiate this property for singleton holders, for use during Ion compilation.
+        if (IsIonEnabled(cx))
+            types::EnsureTrackPropertyTypes(cx, holder, NameToId(name));
+
         ICStub::Kind kind = (obj == holder) ? ICStub::GetProp_Native
                                             : ICStub::GetProp_NativePrototype;
 
@@ -5917,6 +5932,10 @@ TryAttachStringGetPropStub(JSContext *cx, HandleScript script, ICGetProp_Fallbac
     RootedObject stringProto(cx, script->global().getOrCreateStringPrototype(cx));
     if (!stringProto)
         return false;
+
+    // Instantiate this property, for use during Ion compilation.
+    if (IsIonEnabled(cx))
+        types::EnsureTrackPropertyTypes(cx, stringProto, NameToId(name));
 
     // For now, only look for properties directly set on String.prototype
     RootedId propId(cx, NameToId(name));
@@ -6292,7 +6311,7 @@ ICGetProp_CallScripted::Compiler::generateStubCode(MacroAssembler &masm)
 
         masm.movePtr(ImmGCPtr(argumentsRectifier), code);
         masm.loadPtr(Address(code, IonCode::offsetOfCode()), code);
-        masm.mov(Imm32(0), ArgumentsRectifierReg);
+        masm.mov(ImmWord(0), ArgumentsRectifierReg);
     }
 
     masm.bind(&noUnderflow);
@@ -7199,7 +7218,7 @@ ICSetProp_CallScripted::Compiler::generateStubCode(MacroAssembler &masm)
 
         masm.movePtr(ImmGCPtr(argumentsRectifier), code);
         masm.loadPtr(Address(code, IonCode::offsetOfCode()), code);
-        masm.mov(Imm32(1), ArgumentsRectifierReg);
+        masm.mov(ImmWord(1), ArgumentsRectifierReg);
     }
 
     masm.bind(&noUnderflow);
@@ -7463,6 +7482,11 @@ TryAttachCallStub(JSContext *cx, ICCall_Fallback *stub, HandleScript script, jsb
             stub->addNewStub(newStub);
             return true;
         }
+
+        // Keep track of the function's |prototype| property in type
+        // information, for use during Ion compilation.
+        if (IsIonEnabled(cx))
+            types::EnsureTrackPropertyTypes(cx, fun, NameToId(cx->names().prototype));
 
         IonSpew(IonSpew_BaselineIC,
                 "  Generating Call_Scripted stub (fun=%p, %s:%d, cons=%s)",
@@ -8820,6 +8844,11 @@ DoInstanceOfFallback(JSContext *cx, ICInstanceOf_Fallback *stub,
     }
 
     RootedObject obj(cx, &rhs.toObject());
+
+    // For functions, keep track of the |prototype| property in type information,
+    // for use during Ion compilation.
+    if (obj->is<JSFunction>() && IsIonEnabled(cx))
+        types::EnsureTrackPropertyTypes(cx, obj, NameToId(cx->names().prototype));
 
     bool cond = false;
     if (!HasInstance(cx, obj, lhs, &cond))

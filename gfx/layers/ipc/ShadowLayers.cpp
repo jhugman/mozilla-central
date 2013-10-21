@@ -387,20 +387,21 @@ ShadowLayerForwarder::UpdatePictureRect(CompositableClient* aCompositable,
   mTxn->AddNoSwapPaint(OpUpdatePictureRect(nullptr, aCompositable->GetIPDLActor(), aRect));
 }
 
-void
+bool
 ShadowLayerForwarder::AddTexture(CompositableClient* aCompositable,
                                  TextureClient* aTexture)
 {
   SurfaceDescriptor descriptor;
   if (!aTexture->ToSurfaceDescriptor(descriptor)) {
     NS_WARNING("Failed to serialize a TextureClient");
-    return;
+    return false;
   }
   MOZ_ASSERT(aTexture->GetFlags() != 0);
   mTxn->AddEdit(OpAddTexture(nullptr, aCompositable->GetIPDLActor(),
                              aTexture->GetID(),
                              descriptor,
                              aTexture->GetFlags()));
+  return true;
 }
 
 void
@@ -411,7 +412,7 @@ ShadowLayerForwarder::RemoveTexture(CompositableClient* aCompositable,
   mTxn->AddEdit(OpRemoveTexture(nullptr, aCompositable->GetIPDLActor(),
                                 aTexture,
                                 aFlags));
-  if (!(aFlags & TEXTURE_DEALLOCATE_HOST)) {
+  if (aFlags & TEXTURE_DEALLOCATE_CLIENT) {
     mTxn->MarkSyncTransaction();
   }
 }
@@ -538,6 +539,7 @@ ShadowLayerForwarder::EndTransaction(InfallibleTArray<EditReply>* aReplies)
   MOZ_LAYERS_LOG(("[LayersForwarder] syncing before send..."));
   PlatformSyncBeforeUpdate();
 
+  profiler_tracing("Paint", "Rasterize", TRACING_INTERVAL_END);
   if (mTxn->mSwapRequired) {
     MOZ_LAYERS_LOG(("[LayersForwarder] sending transaction..."));
     RenderTraceScope rendertrace3("Forward Transaction", "000093");

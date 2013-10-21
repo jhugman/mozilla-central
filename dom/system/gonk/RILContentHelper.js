@@ -65,6 +65,8 @@ const CELLBROADCASTETWSINFO_CID =
   Components.ID("{59f176ee-9dcd-4005-9d47-f6be0cd08e17}");
 const DOMMMIERROR_CID =
   Components.ID("{6b204c42-7928-4e71-89ad-f90cd82aff96}");
+const ICCCARDLOCKERROR_CID =
+  Components.ID("{08a71987-408c-44ff-93fd-177c0a85c3dd}");
 
 const RIL_IPC_MSG_NAMES = [
   "RIL:CardStateChanged",
@@ -113,6 +115,20 @@ const RIL_IPC_MSG_NAMES = [
 XPCOMUtils.defineLazyServiceGetter(this, "cpmm",
                                    "@mozilla.org/childprocessmessagemanager;1",
                                    "nsISyncMessageSender");
+
+XPCOMUtils.defineLazyGetter(this, "gNumRadioInterfaces", function () {
+  let appInfo = Cc["@mozilla.org/xre/app-info;1"];
+  let isParentProcess = !appInfo || appInfo.getService(Ci.nsIXULRuntime)
+                          .processType == Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT;
+
+  if (isParentProcess) {
+    let ril = Cc["@mozilla.org/ril;1"].getService(Ci.nsIRadioInterfaceLayer);
+    return ril.numRadioInterfaces;
+  }
+
+  let num = cpmm.sendSyncMessage("RIL:GetNumRadioInterfaces")[0];
+  return num;
+});
 
 function MobileIccCardLockResult(options) {
   this.lockType = options.lockType;
@@ -415,6 +431,20 @@ DOMMMIError.prototype = {
     this.__DOM_IMPL__.init(name, message);
     this.serviceCode = serviceCode;
     this.additionalInformation = additionalInformation;
+  },
+};
+
+function IccCardLockError() {
+}
+IccCardLockError.prototype = {
+  classDescription: "IccCardLockError",
+  classID:          ICCCARDLOCKERROR_CID,
+  contractID:       "@mozilla.org/dom/icccardlock-error;1",
+  QueryInterface:   XPCOMUtils.generateQI([Ci.nsISupports]),
+  __init: function(lockType, errorMsg, retryCount) {
+    this.__DOM_IMPL__.init(errorMsg);
+    this.lockType = lockType;
+    this.retryCount = retryCount;
   },
 };
 
@@ -760,6 +790,8 @@ RILContentHelper.prototype = {
     }
     let request = Services.DOMRequest.createRequest(window);
     let requestId = this.getRequestId(request);
+    this._windowsMap[requestId] = window;
+
     cpmm.sendAsyncMessage("RIL:GetCardLockState", {
       clientId: 0,
       data: {
@@ -777,6 +809,8 @@ RILContentHelper.prototype = {
     }
     let request = Services.DOMRequest.createRequest(window);
     info.requestId = this.getRequestId(request);
+    this._windowsMap[info.requestId] = window;
+
     cpmm.sendAsyncMessage("RIL:UnlockCardLock", {
       clientId: 0,
       data: info
@@ -791,6 +825,8 @@ RILContentHelper.prototype = {
     }
     let request = Services.DOMRequest.createRequest(window);
     info.requestId = this.getRequestId(request);
+    this._windowsMap[info.requestId] = window;
+
     cpmm.sendAsyncMessage("RIL:SetCardLock", {
       clientId: 0,
       data: info
@@ -816,10 +852,6 @@ RILContentHelper.prototype = {
   },
 
   sendMMI: function sendMMI(window, mmi) {
-    // We need to save the global window to get the proper MMIError
-    // constructor once we get the reply from the parent process.
-    this._window = window;
-
     debug("Sending MMI " + mmi);
     if (!window) {
       throw Components.Exception("Can't get window object",
@@ -827,6 +859,10 @@ RILContentHelper.prototype = {
     }
     let request = Services.DOMRequest.createRequest(window);
     let requestId = this.getRequestId(request);
+    // We need to save the global window to get the proper MMIError
+    // constructor once we get the reply from the parent process.
+    this._windowsMap[requestId] = window;
+
     cpmm.sendAsyncMessage("RIL:SendMMI", {
       clientId: 0,
       data: {
@@ -1424,6 +1460,19 @@ RILContentHelper.prototype = {
                            Ci.nsIThread.DISPATCH_NORMAL);
   },
 
+  fireRequestDetailedError: function fireRequestDetailedError(requestId, detailedError) {
+    let request = this.takeRequest(requestId);
+    if (!request) {
+      if (DEBUG) {
+        debug("not firing detailed error for id: " + requestId +
+              ", detailedError: " + JSON.stringify(detailedError));
+      }
+      return;
+    }
+
+    Services.DOMRequest.fireDetailedError(request, detailedError);
+  },
+
   receiveMessage: function receiveMessage(msg) {
     let request;
     debug("Received message '" + msg.name + "': " + JSON.stringify(msg.json));
@@ -1481,20 +1530,27 @@ RILContentHelper.prototype = {
       case "RIL:VoicemailInfoChanged":
         this.updateInfo(data, this.voicemailInfo);
         break;
-      case "RIL:CardLockResult":
+      case "RIL:CardLockResult": {
+        let requestId = data.requestId;
+        let requestWindow = this._windowsMap[requestId];
+        delete this._windowsMap[requestId];
+
         if (data.success) {
           let result = new MobileIccCardLockResult(data);
-          this.fireRequestSuccess(data.requestId, result);
+          this.fireRequestSuccess(requestId, result);
         } else {
           if (data.rilMessageType == "iccSetCardLock" ||
               data.rilMessageType == "iccUnlockCardLock") {
-            this._deliverEvent("_iccListeners",
-                               "notifyIccCardLockError",
-                               [data.lockType, data.retryCount]);
+            let cardLockError = new requestWindow.IccCardLockError(data.lockType,
+                                                                   data.errorMsg,
+                                                                   data.retryCount);
+            this.fireRequestDetailedError(requestId, cardLockError);
+          } else {
+            this.fireRequestError(requestId, data.errorMsg);
           }
-          this.fireRequestError(data.requestId, data.errorMsg);
         }
         break;
+      }
       case "RIL:CardLockRetryCount":
         if (data.success) {
           let result = new MobileIccCardLockRetryCount(data);
@@ -1778,6 +1834,8 @@ RILContentHelper.prototype = {
   handleSendCancelMMI: function handleSendCancelMMI(message) {
     debug("handleSendCancelMMI " + JSON.stringify(message));
     let request = this.takeRequest(message.requestId);
+    let requestWindow = this._windowsMap[message.requestId];
+    delete this._windowsMap[message.requestId];
     if (!request) {
       return;
     }
@@ -1812,10 +1870,10 @@ RILContentHelper.prototype = {
       let mmiResult = new DOMMMIResult(result);
       Services.DOMRequest.fireSuccess(request, mmiResult);
     } else {
-      let mmiError = new this._window.DOMMMIError(result.serviceCode,
-                                                  message.errorMsg,
-                                                  null,
-                                                  result.additionalInformation);
+      let mmiError = new requestWindow.DOMMMIError(result.serviceCode,
+                                                   message.errorMsg,
+                                                   null,
+                                                   result.additionalInformation);
       Services.DOMRequest.fireDetailedError(request, mmiError);
     }
   },
@@ -1912,5 +1970,6 @@ RILContentHelper.prototype = {
 };
 
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory([RILContentHelper,
-                                                     DOMMMIError]);
+                                                     DOMMMIError,
+                                                     IccCardLockError]);
 

@@ -19,6 +19,7 @@
 #include "nsPrintfCString.h"
 #include "LayerTreeInvalidation.h"
 #include "nsSVGIntegrationUtils.h"
+#include "ImageContainer.h"
 
 #include "GeckoProfiler.h"
 #include "mozilla/gfx/Tools.h"
@@ -121,7 +122,7 @@ FrameLayerBuilder::DisplayItemData::UpdateContents(Layer* aLayer, LayerState aSt
   }
 }
 
-static nsIFrame* sDestroyedFrame = NULL;
+static nsIFrame* sDestroyedFrame = nullptr;
 FrameLayerBuilder::DisplayItemData::~DisplayItemData()
 {
   for (uint32_t i = 0; i < mFrameList.Length(); i++) {
@@ -908,7 +909,7 @@ FrameLayerBuilder::RemoveFrameFromLayerManager(nsIFrame* aFrame,
 
   arrayCopy.Clear();
   delete array;
-  sDestroyedFrame = NULL;
+  sDestroyedFrame = nullptr;
 }
 
 void
@@ -2226,8 +2227,8 @@ ContainerState::InvalidateForLayerChange(nsDisplayItem* aItem,
 {
   NS_ASSERTION(aItem->GetPerFrameKey(),
                "Display items that render using Thebes must have a key");
-  nsDisplayItemGeometry *oldGeometry = NULL;
-  DisplayItemClip* oldClip = NULL;
+  nsDisplayItemGeometry *oldGeometry = nullptr;
+  DisplayItemClip* oldClip = nullptr;
   nsAutoTArray<nsIFrame*,4> changedFrames;
   bool isInvalid = false;
   Layer* oldLayer = mLayerBuilder->GetOldLayerFor(aItem, &oldGeometry, &oldClip, &changedFrames, &isInvalid);

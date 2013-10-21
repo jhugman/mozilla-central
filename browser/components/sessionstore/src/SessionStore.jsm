@@ -184,7 +184,7 @@ this.SessionStore = {
     SessionStoreInternal.setTabState(aTab, aState);
   },
 
-  duplicateTab: function ss_duplicateTab(aWindow, aTab, aDelta) {
+  duplicateTab: function ss_duplicateTab(aWindow, aTab, aDelta = 0) {
     return SessionStoreInternal.duplicateTab(aWindow, aTab, aDelta);
   },
 
@@ -307,6 +307,9 @@ let SessionStoreInternal = {
   // states for all currently opened windows
   _windows: {},
 
+  // counter for creating unique window IDs
+  _nextWindowID: 0,
+
   // states for all recently closed windows
   _closedWindows: [],
 
@@ -352,7 +355,7 @@ let SessionStoreInternal = {
 
   /* ........ Public Getters .............. */
   get canRestoreLastSession() {
-    return this._lastSessionState;
+    return !!this._lastSessionState;
   },
 
   set canRestoreLastSession(val) {
@@ -683,6 +686,15 @@ let SessionStoreInternal = {
   },
 
   /**
+   * Generate a unique window identifier
+   * @return string
+   *         A unique string to identify a window
+   */
+  _generateWindowID: function ssi_generateWindowID() {
+    return "window" + (this._nextWindowID++);
+  },
+
+  /**
    * If it's the first window load since app start...
    * - determine if we're reloading after a crash or a forced-restart
    * - restore window state
@@ -703,8 +715,9 @@ let SessionStoreInternal = {
         this._loadState == STATE_QUITTING)
       return;
 
-    // assign it a unique identifier (timestamp)
-    aWindow.__SSi = "window" + Date.now();
+    // Assign the window a unique identifier we can use to reference
+    // internal data about the window.
+    aWindow.__SSi = this._generateWindowID();
 
     // and create its data object
     this._windows[aWindow.__SSi] = { tabs: [], selected: 0, _closedTabs: [], busy: false };
@@ -728,7 +741,7 @@ let SessionStoreInternal = {
           // We're starting with a single private window. Save the state we
           // actually wanted to restore so that we can do it later in case
           // the user opens another, non-private window.
-          this._deferredInitialState = aInitialState;
+          this._deferredInitialState = gSessionStartup.state;
 
           // Nothing to restore now, notify observers things are complete.
           Services.obs.notifyObservers(null, NOTIFY_WINDOWS_RESTORED, "");
@@ -880,8 +893,10 @@ let SessionStoreInternal = {
     // this window was about to be restored - conserve its original data, if any
     let isFullyLoaded = this._isWindowLoaded(aWindow);
     if (!isFullyLoaded) {
-      if (!aWindow.__SSi)
-        aWindow.__SSi = "window" + Date.now();
+      if (!aWindow.__SSi) {
+        aWindow.__SSi = this._generateWindowID();
+      }
+
       this._windows[aWindow.__SSi] = this._statesToRestore[aWindow.__SS_restoreID];
       delete this._statesToRestore[aWindow.__SS_restoreID];
       delete aWindow.__SS_restoreID;
@@ -1346,6 +1361,9 @@ let SessionStoreInternal = {
     // Don't include the last session state in getBrowserState().
     delete state.lastSessionState;
 
+    // Don't include any deferred initial state.
+    delete state.deferredInitialState;
+
     return this._toJSONString(state);
   },
 
@@ -1456,7 +1474,7 @@ let SessionStoreInternal = {
     this.restoreHistoryPrecursor(window, [aTab], [tabState], 0, 0, 0);
   },
 
-  duplicateTab: function ssi_duplicateTab(aWindow, aTab, aDelta) {
+  duplicateTab: function ssi_duplicateTab(aWindow, aTab, aDelta = 0) {
     if (!aTab.ownerDocument || !aTab.ownerDocument.defaultView.__SSi ||
         !aWindow.getBrowser)
       throw (Components.returnCode = Cr.NS_ERROR_INVALID_ARG);
@@ -2074,6 +2092,13 @@ let SessionStoreInternal = {
       state.lastSessionState = this._lastSessionState;
     }
 
+    // If we were called by the SessionSaver and started with only a private
+    // window we want to pass the deferred initial state to not lose the
+    // previous session.
+    if (this._deferredInitialState) {
+      state.deferredInitialState = this._deferredInitialState;
+    }
+
     return state;
   },
 
@@ -2462,11 +2487,18 @@ let SessionStoreInternal = {
       delete this._statesToRestore[aWindow.__SS_restoreID];
       delete aWindow.__SS_restoreID;
       delete this._windows[aWindow.__SSi]._restoring;
-
-      // It's important to set the window state to dirty so that
-      // we collect their data for the first time when saving state.
-      DirtyWindows.add(aWindow);
     }
+
+    // It's important to set the window state to dirty so that
+    // we collect their data for the first time when saving state.
+    DirtyWindows.add(aWindow);
+
+    // Set the state to restore as the window's current state. Normally, this
+    // will just be overridden the next time we collect state but we need this
+    // as a fallback should Firefox be shutdown early without notifying us
+    // beforehand.
+    this._windows[aWindow.__SSi].tabs = aTabData.slice();
+    this._windows[aWindow.__SSi].selected = aSelectTab;
 
     if (aTabs.length == 0) {
       // this is normally done in restoreHistory() but as we're returning early
@@ -2519,7 +2551,9 @@ let SessionStoreInternal = {
       if (!tabData.entries || tabData.entries.length == 0) {
         // make sure to blank out this tab's content
         // (just purging the tab's history won't be enough)
-        browser.contentDocument.location = "about:blank";
+        browser.loadURIWithFlags("about:blank",
+                                 Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_HISTORY,
+                                 null, null, null);
         continue;
       }
 
@@ -2730,7 +2764,6 @@ let SessionStoreInternal = {
       }
       catch (ex) {
         // ignore page load errors
-        aTab.removeAttribute("busy");
         didStartLoad = false;
       }
     }
@@ -3516,6 +3549,14 @@ let SessionStoreInternal = {
    * @returns [defaultState, state]
    */
   _prepDataForDeferredRestore: function ssi_prepDataForDeferredRestore(state) {
+    // Make sure that we don't modify the global state as provided by
+    // nsSessionStartup.state. Converting the object to a JSON string and
+    // parsing it again is the easiest way to do that, although not the most
+    // efficient one. Deferred sessions that don't have automatic session
+    // restore enabled tend to be a lot smaller though so that this shouldn't
+    // be a big perf hit.
+    state = JSON.parse(JSON.stringify(state));
+
     let defaultState = { windows: [], selectedWindow: 1 };
 
     state.selectedWindow = state.selectedWindow || 1;
@@ -3707,9 +3748,9 @@ let SessionStoreInternal = {
    * @param aTab the which has been restored
    */
   _sendTabRestoredNotification: function ssi_sendTabRestoredNotification(aTab) {
-      let event = aTab.ownerDocument.createEvent("Events");
-      event.initEvent("SSTabRestored", true, false);
-      aTab.dispatchEvent(event);
+    let event = aTab.ownerDocument.createEvent("Events");
+    event.initEvent("SSTabRestored", true, false);
+    aTab.dispatchEvent(event);
   },
 
   /**
@@ -4240,7 +4281,7 @@ let TabState = {
       }
 
       if (disallow.length > 0) {
-	tabData.disallow = disallow.join(",");
+        tabData.disallow = disallow.join(",");
       }
 
       // Save text and scroll data.
@@ -4387,9 +4428,9 @@ let TabState = {
     if (!options || !options.omitDocShellCapabilities) {
       let disallow = DocShellCapabilities.collect(browser.docShell);
       if (disallow.length > 0)
-	tabData.disallow = disallow.join(",");
+        tabData.disallow = disallow.join(",");
       else if (tabData.disallow)
-	delete tabData.disallow;
+        delete tabData.disallow;
     }
 
     // Save tab attributes.
@@ -4596,5 +4637,3 @@ let TabState = {
     return "";
   }
 };
-
-

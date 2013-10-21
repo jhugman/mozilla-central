@@ -6,6 +6,7 @@
 
 #include "mozilla/dom/HTMLMediaElement.h"
 #include "mozilla/dom/HTMLMediaElementBinding.h"
+#include "mozilla/dom/ElementInlines.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/Util.h"
 
@@ -2504,7 +2505,19 @@ nsresult HTMLMediaElement::InitializeDecoderForChannel(nsIChannel* aChannel,
   // stream successfully created, the stream now owns the channel.
   mChannel = nullptr;
 
-  return FinishDecoderSetup(decoder, resource, aListener, nullptr);
+  // We postpone the |FinishDecoderSetup| function call until we get
+  // |OnConnected| signal from MediaStreamController which is held by
+  // RtspMediaResource.
+  if (DecoderTraits::DecoderWaitsForOnConnected(mimeType)) {
+    decoder->SetResource(resource);
+    mDecoder = decoder;
+    if (aListener) {
+      *aListener = nullptr;
+    }
+    return NS_OK;
+  } else {
+    return FinishDecoderSetup(decoder, resource, aListener, nullptr);
+  }
 }
 
 nsresult HTMLMediaElement::FinishDecoderSetup(MediaDecoder* aDecoder,

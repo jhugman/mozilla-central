@@ -16,8 +16,10 @@ PREPROCESSED_WEBIDL_FILES = [
 ]
 
 WEBIDL_FILES = [
+    'AbstractWorker.webidl',
     'AnalyserNode.webidl',
     'AnimationEvent.webidl',
+    'AppNotificationServiceOptions.webidl',
     'ArchiveReader.webidl',
     'ArchiveRequest.webidl',
     'Attr.webidl',
@@ -53,8 +55,6 @@ WEBIDL_FILES = [
     'ChannelSplitterNode.webidl',
     'CharacterData.webidl',
     'ChildNode.webidl',
-    'ClientRect.webidl',
-    'ClientRectList.webidl',
     'ClipboardEvent.webidl',
     'CommandEvent.webidl',
     'Comment.webidl',
@@ -67,12 +67,15 @@ WEBIDL_FILES = [
     'DOMImplementation.webidl',
     'DOMMMIError.webidl',
     'DOMParser.webidl',
+    'DOMRect.webidl',
+    'DOMRectList.webidl',
     'DOMRequest.webidl',
     'DOMSettableTokenList.webidl',
     'DOMStringMap.webidl',
     'DOMTokenList.webidl',
     'DOMTransaction.webidl',
     'DataContainerEvent.webidl',
+    'DataStore.webidl',
     'DelayNode.webidl',
     'DesktopNotification.webidl',
     'DeviceMotionEvent.webidl',
@@ -122,6 +125,7 @@ WEBIDL_FILES = [
     'HTMLEmbedElement.webidl',
     'HTMLFieldSetElement.webidl',
     'HTMLFontElement.webidl',
+    'HTMLFormControlsCollection.webidl',
     'HTMLFormElement.webidl',
     'HTMLFrameElement.webidl',
     'HTMLFrameSetElement.webidl',
@@ -366,6 +370,7 @@ WEBIDL_FILES = [
     'ScriptProcessorNode.webidl',
     'ScrollAreaEvent.webidl',
     'SettingsManager.webidl',
+    'SharedWorker.webidl',
     'SimpleGestureEvent.webidl',
     'SourceBuffer.webidl',
     'SourceBufferList.webidl',
@@ -406,6 +411,7 @@ WEBIDL_FILES = [
     'WifiOptions.webidl',
     'Window.webidl',
     'WorkerLocation.webidl',
+    'WorkerMessagePort.webidl',
     'WorkerNavigator.webidl',
     'XMLDocument.webidl',
     'XMLHttpRequest.webidl',
@@ -434,6 +440,10 @@ if CONFIG['MOZ_WEBRTC']:
     WEBIDL_FILES += [
         'DataChannel.webidl',
         'MediaStreamList.webidl',
+        'PeerConnectionImpl.webidl',
+        'PeerConnectionImplEnums.webidl',
+        'PeerConnectionObserver.webidl',
+        'PeerConnectionObserverEnums.webidl',
     ]
 
 if CONFIG['MOZ_WEBSPEECH']:
@@ -470,7 +480,6 @@ WEBIDL_FILES += [
     'ElementReplaceEvent.webidl',
     'HashChangeEvent.webidl',
     'MozApplicationEvent.webidl',
-    'MozContactChangeEvent.webidl',
     'MozMmsEvent.webidl',
     'MozSettingsEvent.webidl',
     'MozSmsEvent.webidl',
@@ -499,7 +508,7 @@ if CONFIG['MOZ_B2G_RIL']:
     WEBIDL_FILES += [
         'CFStateChangeEvent.webidl',
         'DataErrorEvent.webidl',
-        'IccCardLockErrorEvent.webidl',
+        'IccCardLockError.webidl',
         'MozCellBroadcast.webidl',
         'MozCellBroadcastEvent.webidl',
         'MozEmergencyCbModeEvent.webidl',
@@ -535,12 +544,16 @@ if CONFIG['ENABLE_TESTS']:
 
 GENERATED_EVENTS_WEBIDL_FILES = [
     'BlobEvent.webidl',
+    'DataStoreChangeEvent.webidl',
     'DeviceLightEvent.webidl',
     'DeviceProximityEvent.webidl',
+    'ErrorEvent.webidl',
     'MediaStreamEvent.webidl',
+    'MozContactChangeEvent.webidl',
     'MozInterAppMessageEvent.webidl',
     'RTCDataChannelEvent.webidl',
     'RTCPeerConnectionIceEvent.webidl',
+    'TrackEvent.webidl',
     'UserProximityEvent.webidl',
 ]
 
@@ -550,5 +563,4 @@ if CONFIG['MOZ_GAMEPAD']:
         'GamepadButtonEvent.webidl',
         'GamepadEvent.webidl',
     ]
-
 

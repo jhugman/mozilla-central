@@ -294,7 +294,9 @@ TabParent::ActorDestroy(ActorDestroyReason why)
   }
   nsRefPtr<nsFrameLoader> frameLoader = GetFrameLoader();
   nsCOMPtr<nsIObserverService> os = services::GetObserverService();
+  nsRefPtr<nsFrameMessageManager> fmm;
   if (frameLoader) {
+    fmm = frameLoader->GetFrameMessageManager();
     nsCOMPtr<Element> frameElement(mFrameElement);
     ReceiveMessage(CHILD_PROCESS_SHUTDOWN_MESSAGE, false, nullptr, nullptr);
     frameLoader->DestroyChild();
@@ -310,6 +312,9 @@ TabParent::ActorDestroy(ActorDestroyReason why)
 
   if (os) {
     os->NotifyObservers(NS_ISUPPORTS_CAST(nsITabParent*, this), "ipc:browser-destroyed", nullptr);
+  }
+  if (fmm) {
+    fmm->Disconnect();
   }
 }
 
@@ -602,7 +607,7 @@ TabParent::SendKeyEvent(const nsAString& aType,
 }
 
 bool
-TabParent::MapEventCoordinatesForChildProcess(nsEvent* aEvent)
+TabParent::MapEventCoordinatesForChildProcess(WidgetEvent* aEvent)
 {
   nsRefPtr<nsFrameLoader> frameLoader = GetFrameLoader();
   if (!frameLoader) {
@@ -615,7 +620,7 @@ TabParent::MapEventCoordinatesForChildProcess(nsEvent* aEvent)
 
 void
 TabParent::MapEventCoordinatesForChildProcess(
-  const LayoutDeviceIntPoint& aOffset, nsEvent* aEvent)
+  const LayoutDeviceIntPoint& aOffset, WidgetEvent* aEvent)
 {
   if (aEvent->eventStructType != NS_TOUCH_EVENT) {
     aEvent->refPoint = aOffset;
@@ -634,12 +639,12 @@ TabParent::MapEventCoordinatesForChildProcess(
   }
 }
 
-bool TabParent::SendRealMouseEvent(nsMouseEvent& event)
+bool TabParent::SendRealMouseEvent(WidgetMouseEvent& event)
 {
   if (mIsDestroyed) {
     return false;
   }
-  nsMouseEvent e(event);
+  WidgetMouseEvent e(event);
   MaybeForwardEventToRenderFrame(event, &e);
   if (!MapEventCoordinatesForChildProcess(&e)) {
     return false;
@@ -647,12 +652,12 @@ bool TabParent::SendRealMouseEvent(nsMouseEvent& event)
   return PBrowserParent::SendRealMouseEvent(e);
 }
 
-bool TabParent::SendMouseWheelEvent(WheelEvent& event)
+bool TabParent::SendMouseWheelEvent(WidgetWheelEvent& event)
 {
   if (mIsDestroyed) {
     return false;
   }
-  WheelEvent e(event);
+  WidgetWheelEvent e(event);
   MaybeForwardEventToRenderFrame(event, &e);
   if (!MapEventCoordinatesForChildProcess(&e)) {
     return false;
@@ -727,7 +732,7 @@ TabParent::GetEventCapturer()
 }
 
 bool
-TabParent::TryCapture(const nsGUIEvent& aEvent)
+TabParent::TryCapture(const WidgetGUIEvent& aEvent)
 {
   MOZ_ASSERT(sEventCapturer == this && mEventCaptureDepth > 0);
 
@@ -760,6 +765,17 @@ TabParent::RecvSyncMessage(const nsString& aMessage,
                            const ClonedMessageData& aData,
                            const InfallibleTArray<CpowEntry>& aCpows,
                            InfallibleTArray<nsString>* aJSONRetVal)
+{
+  StructuredCloneData cloneData = ipc::UnpackClonedMessageDataForParent(aData);
+  CpowIdHolder cpows(static_cast<ContentParent*>(Manager())->GetCPOWManager(), aCpows);
+  return ReceiveMessage(aMessage, true, &cloneData, &cpows, aJSONRetVal);
+}
+
+bool
+TabParent::AnswerRpcMessage(const nsString& aMessage,
+                            const ClonedMessageData& aData,
+                            const InfallibleTArray<CpowEntry>& aCpows,
+                            InfallibleTArray<nsString>* aJSONRetVal)
 {
   StructuredCloneData cloneData = ipc::UnpackClonedMessageDataForParent(aData);
   CpowIdHolder cpows(static_cast<ContentParent*>(Manager())->GetCPOWManager(), aCpows);

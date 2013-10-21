@@ -42,8 +42,8 @@ using nsIntPoint;
 using nsIntRect;
 using nsIntSize;
 using mozilla::WidgetKeyboardEvent;
-using nsMouseEvent;
-using mozilla::WheelEvent;
+using mozilla::WidgetMouseEvent;
+using mozilla::WidgetWheelEvent;
 using nsRect;
 using mozilla::WidgetSelectionEvent;
 using mozilla::WidgetTextEvent;
@@ -82,6 +82,9 @@ parent:
     intr CreateWindow() returns (PBrowser window);
 
     sync SyncMessage(nsString aMessage, ClonedMessageData aData, CpowEntry[] aCpows)
+      returns (nsString[] retval);
+
+    rpc RpcMessage(nsString aMessage, ClonedMessageData aData, CpowEntry[] aCpows)
       returns (nsString[] retval);
 
     /**
@@ -362,9 +365,9 @@ child:
                int32_t aModifiers,
                bool aIgnoreRootScrollFrame);
 
-    RealMouseEvent(nsMouseEvent event);
+    RealMouseEvent(WidgetMouseEvent event);
     RealKeyEvent(WidgetKeyboardEvent event);
-    MouseWheelEvent(WheelEvent event);
+    MouseWheelEvent(WidgetWheelEvent event);
     RealTouchEvent(WidgetTouchEvent event);
     // We use a separate message for touchmove events only to apply
     // compression to them.

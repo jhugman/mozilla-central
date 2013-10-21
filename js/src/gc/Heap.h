@@ -101,6 +101,7 @@ struct Cell
     inline JSRuntime *runtimeFromMainThread() const;
     inline JS::shadow::Runtime *shadowRuntimeFromMainThread() const;
     inline JS::Zone *tenuredZone() const;
+    inline JS::Zone *tenuredZoneFromAnyThread() const;
     inline bool tenuredIsInsideZone(JS::Zone *zone) const;
 
     // Note: Unrestricted access to the runtime of a GC thing from an arbitrary
@@ -1022,6 +1023,13 @@ Cell::tenuredZone() const
     return zone;
 }
 
+JS::Zone *
+Cell::tenuredZoneFromAnyThread() const
+{
+    JS_ASSERT(isTenured());
+    return arenaHeader()->zone;
+}
+
 bool
 Cell::tenuredIsInsideZone(JS::Zone *zone) const
 {
@@ -1041,7 +1049,7 @@ Cell::isTenured() const
 {
 #ifdef JSGC_GENERATIONAL
     JS::shadow::Runtime *rt = js::gc::GetGCThingRuntime(this);
-    return uintptr_t(this) < rt->gcNurseryStart_ || uintptr_t(this) >= rt->gcNurseryEnd_;
+    return !IsInsideNursery(rt, this);
 #endif
     return true;
 }

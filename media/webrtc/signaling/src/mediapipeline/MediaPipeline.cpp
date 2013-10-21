@@ -1,3 +1,4 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -148,15 +149,15 @@ nsresult MediaPipeline::TransportReady_s(TransportFlow *flow) {
   // failure. bug 852665.
   if (*state != MP_CONNECTING) {
     MOZ_MTLOG(ML_ERROR, "Transport ready for flow in wrong state:" <<
-	      description_ << ": " << (rtcp ? "rtcp" : "rtp"));
+              description_ << ": " << (rtcp ? "rtcp" : "rtp"));
     return NS_ERROR_FAILURE;
   }
 
   nsresult res;
 
   MOZ_MTLOG(ML_DEBUG, "Transport ready for pipeline " <<
-	    static_cast<void *>(this) << " flow " << description_ << ": " <<
-	    (rtcp ? "rtcp" : "rtp"));
+            static_cast<void *>(this) << " flow " << description_ << ": " <<
+            (rtcp ? "rtcp" : "rtp"));
 
   // Now instantiate the SRTP objects
   TransportLayerDtls *dtls = static_cast<TransportLayerDtls *>(
@@ -895,7 +896,7 @@ void MediaPipelineTransmit::PipelineListener::ProcessVideoChunk(
           static_cast<const layers::PlanarYCbCrImage *>(img));
     // Big-time assumption here that this is all contiguous data coming
     // from getUserMedia or other sources.
-    const layers::PlanarYCbCrImage::Data *data = yuv->GetData();
+    const layers::PlanarYCbCrData *data = yuv->GetData();
 
     uint8_t *y = data->mYChannel;
 #ifdef DEBUG
@@ -1145,7 +1146,7 @@ void MediaPipelineReceiveVideo::PipelineListener::RenderVideoFrame(
   const uint8_t lumaBpp = 8;
   const uint8_t chromaBpp = 4;
 
-  layers::PlanarYCbCrImage::Data data;
+  layers::PlanarYCbCrData data;
   data.mYChannel = frame;
   data.mYSize = gfxIntSize(width_, height_);
   data.mYStride = width_ * lumaBpp/ 8;

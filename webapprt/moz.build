@@ -12,7 +12,6 @@ elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gtk2':
     DIRS += ['gtk2']
 
 DIRS += ['locales']
-TEST_DIRS += ['test']
 
 EXTRA_COMPONENTS += [
     'CommandLineHandler.js',
@@ -25,6 +24,11 @@ EXTRA_COMPONENTS += [
 EXTRA_JS_MODULES += [
     'RemoteDebugger.jsm',
     'Startup.jsm',
+    'WebRTCHandler.jsm',
     'WebappRT.jsm',
     'WebappsHandler.jsm',
 ]
+
+MOCHITEST_WEBAPPRT_CHROME_MANIFESTS += ['test/chrome/webapprt.ini']
+MOCHITEST_MANIFESTS += ['test/content/mochitest.ini']
+

@@ -115,7 +115,7 @@ CodeGeneratorX86::visitBox(LBox *box)
     // On x86, the input operand and the output payload have the same
     // virtual register. All that needs to be written is the type tag for
     // the type definition.
-    masm.movl(Imm32(MIRTypeToTag(box->type())), ToRegister(type));
+    masm.mov(ImmWord(MIRTypeToTag(box->type())), ToRegister(type));
     return true;
 }
 
@@ -539,7 +539,7 @@ CodeGeneratorX86::visitOutOfLineLoadTypedArrayOutOfBounds(OutOfLineLoadTypedArra
         masm.loadConstantDouble(GenericNaN(), ool->dest().fpu());
     } else {
         Register destReg = ool->dest().gpr();
-        masm.xorl(destReg, destReg);
+        masm.mov(ImmWord(0), destReg);
     }
     masm.jmp(ool->rejoin());
     return true;
@@ -745,6 +745,29 @@ GetElementParIC::initializeAddCacheState(LInstruction *ins, AddCacheState *addSt
         addState->dispatchScratch = output_.scratchReg().gpr();
     else
         addState->dispatchScratch = ToRegister(ins->toGetElementCacheT()->temp());
+}
+
+void
+SetPropertyParIC::initializeAddCacheState(LInstruction *ins, AddCacheState *addState)
+{
+    // We don't have an output register to reuse, so we always need a temp.
+    JS_ASSERT(ins->isSetPropertyCacheV() || ins->isSetPropertyCacheT());
+    if (ins->isSetPropertyCacheV())
+        addState->dispatchScratch = ToRegister(ins->toSetPropertyCacheV()->tempForDispatchCache());
+    else
+        addState->dispatchScratch = ToRegister(ins->toSetPropertyCacheT()->tempForDispatchCache());
+}
+
+void
+SetElementParIC::initializeAddCacheState(LInstruction *ins, AddCacheState *addState)
+{
+    // We don't have an output register to reuse, but luckily SetElementCache
+    // already needs a temp.
+    JS_ASSERT(ins->isSetElementCacheV() || ins->isSetElementCacheT());
+    if (ins->isSetElementCacheV())
+        addState->dispatchScratch = ToRegister(ins->toSetElementCacheV()->temp());
+    else
+        addState->dispatchScratch = ToRegister(ins->toSetElementCacheT()->temp());
 }
 
 namespace js {

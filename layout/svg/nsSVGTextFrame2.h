@@ -7,7 +7,6 @@
 #define NS_SVGTEXTFRAME2_H
 
 #include "mozilla/Attributes.h"
-#include "gfxFont.h"
 #include "gfxMatrix.h"
 #include "gfxRect.h"
 #include "gfxSVGGlyphs.h"
@@ -19,6 +18,7 @@ class nsDisplaySVGText;
 class nsRenderingContext;
 class nsSVGTextFrame2;
 class nsTextFrame;
+class gfxPath;
 
 typedef nsSVGDisplayContainerFrame nsSVGTextFrame2Base;
 
@@ -517,14 +517,14 @@ private:
 
   // Methods to get information for a <textPath> frame.
   nsIFrame* GetTextPathPathFrame(nsIFrame* aTextPathFrame);
-  already_AddRefed<gfxFlattenedPath> GetFlattenedTextPath(nsIFrame* aTextPathFrame);
+  already_AddRefed<gfxPath> GetTextPath(nsIFrame* aTextPathFrame);
   gfxFloat GetOffsetScale(nsIFrame* aTextPathFrame);
   gfxFloat GetStartOffset(nsIFrame* aTextPathFrame);
 
-  gfxFont::DrawMode SetupCairoState(gfxContext* aContext,
-                                    nsIFrame* aFrame,
-                                    gfxTextContextPaint* aOuterContextPaint,
-                                    gfxTextContextPaint** aThisContextPaint);
+  DrawMode SetupCairoState(gfxContext* aContext,
+                           nsIFrame* aFrame,
+                           gfxTextContextPaint* aOuterContextPaint,
+                           gfxTextContextPaint** aThisContextPaint);
 
   /**
    * Sets up the stroke style for |aFrame| in |aContext| and stores stroke

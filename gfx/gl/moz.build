@@ -102,6 +102,7 @@ CPP_SOURCES += [
     'SharedSurface.cpp',
     'GLLibraryEGL.cpp',
     'SharedSurfaceEGL.cpp',
+    'TextureImageEGL.cpp',
     'SharedSurfaceGL.cpp',
     'SurfaceFactory.cpp',
     'SurfaceStream.cpp',
@@ -116,4 +117,6 @@ LIBXUL_LIBRARY = True
 MSVC_ENABLE_PGO = True
 
 LIBRARY_NAME = 'gl'
+
+EXPORT_LIBRARY = True
 

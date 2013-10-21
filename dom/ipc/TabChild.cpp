@@ -67,6 +67,7 @@
 #include "nsViewportInfo.h"
 #include "JavaScriptChild.h"
 #include "APZCCallbackHelper.h"
+#include "nsILoadContext.h"
 
 #define BROWSER_ELEMENT_CHILD_SCRIPT \
     NS_LITERAL_STRING("chrome://global/content/BrowserElementChild.js")
@@ -1666,17 +1667,17 @@ TabChild::RecvMouseEvent(const nsString& aType,
 }
 
 bool
-TabChild::RecvRealMouseEvent(const nsMouseEvent& event)
+TabChild::RecvRealMouseEvent(const WidgetMouseEvent& event)
 {
-  nsMouseEvent localEvent(event);
+  WidgetMouseEvent localEvent(event);
   DispatchWidgetEvent(localEvent);
   return true;
 }
 
 bool
-TabChild::RecvMouseWheelEvent(const WheelEvent& event)
+TabChild::RecvMouseWheelEvent(const WidgetWheelEvent& event)
 {
-  WheelEvent localEvent(event);
+  WidgetWheelEvent localEvent(event);
   DispatchWidgetEvent(localEvent);
   return true;
 }
@@ -1688,11 +1689,11 @@ TabChild::DispatchSynthesizedMouseEvent(uint32_t aMsg, uint64_t aTime,
   MOZ_ASSERT(aMsg == NS_MOUSE_MOVE || aMsg == NS_MOUSE_BUTTON_DOWN ||
              aMsg == NS_MOUSE_BUTTON_UP);
 
-  nsMouseEvent event(true, aMsg, NULL,
-      nsMouseEvent::eReal, nsMouseEvent::eNormal);
+  WidgetMouseEvent event(true, aMsg, NULL,
+                         WidgetMouseEvent::eReal, WidgetMouseEvent::eNormal);
   event.refPoint = LayoutDeviceIntPoint(aRefPoint.x, aRefPoint.y);
   event.time = aTime;
-  event.button = nsMouseEvent::eLeftButton;
+  event.button = WidgetMouseEvent::eLeftButton;
   event.inputSource = nsIDOMMouseEvent::MOZ_SOURCE_TOUCH;
   if (aMsg != NS_MOUSE_MOVE) {
     event.clickCount = 1;
@@ -1907,7 +1908,7 @@ TabChild::RecvSelectionEvent(const WidgetSelectionEvent& event)
 }
 
 nsEventStatus
-TabChild::DispatchWidgetEvent(nsGUIEvent& event)
+TabChild::DispatchWidgetEvent(WidgetGUIEvent& event)
 {
   if (!mWidget)
     return nsEventStatus_eConsumeNoDefault;
@@ -2382,11 +2383,12 @@ TabChild::DeallocPIndexedDBChild(PIndexedDBChild* aActor)
 }
 
 bool
-TabChild::DoSendSyncMessage(JSContext* aCx,
-                            const nsAString& aMessage,
-                            const StructuredCloneData& aData,
-                            JS::Handle<JSObject *> aCpows,
-                            InfallibleTArray<nsString>* aJSONRetVal)
+TabChild::DoSendBlockingMessage(JSContext* aCx,
+                                const nsAString& aMessage,
+                                const StructuredCloneData& aData,
+                                JS::Handle<JSObject *> aCpows,
+                                InfallibleTArray<nsString>* aJSONRetVal,
+                                bool aIsSync)
 {
   ContentChild* cc = Manager();
   ClonedMessageData data;
@@ -2399,7 +2401,9 @@ TabChild::DoSendSyncMessage(JSContext* aCx,
       return false;
     }
   }
-  return SendSyncMessage(nsString(aMessage), data, cpows, aJSONRetVal);
+  if (aIsSync)
+    return SendSyncMessage(nsString(aMessage), data, cpows, aJSONRetVal);
+  return CallRpcMessage(nsString(aMessage), data, cpows, aJSONRetVal);
 }
 
 bool
@@ -2420,6 +2424,18 @@ TabChild::DoSendAsyncMessage(JSContext* aCx,
     }
   }
   return SendAsyncMessage(nsString(aMessage), data, cpows);
+}
+
+TabChild*
+TabChild::GetFrom(nsIPresShell* aPresShell)
+{
+  nsIDocument* doc = aPresShell->GetDocument();
+  if (!doc) {
+      return nullptr;
+  }
+  nsCOMPtr<nsISupports> container = doc->GetContainer();
+  nsCOMPtr<nsIDocShell> docShell(do_QueryInterface(container));
+  return GetFrom(docShell);
 }
 
 

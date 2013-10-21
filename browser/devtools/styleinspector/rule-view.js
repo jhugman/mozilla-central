@@ -1283,13 +1283,13 @@ CssRuleView.prototype = {
   {
     // Ignore refreshes during editing or when no element is selected.
     if (this.isEditing || !this._elementStyle) {
-      return promise.resolve(null);
+      return;
     }
 
     this._clearRules();
 
     // Repopulate the element style.
-    return this._populate();
+    this._populate();
   },
 
   _populate: function() {
@@ -1748,8 +1748,8 @@ function TextPropertyEditor(aRuleEditor, aProperty)
   this.browserWindow = this.doc.defaultView.top;
   this.removeOnRevert = this.prop.value === "";
 
-  let sheet = this.prop.rule.sheet;
-  let href = sheet ? (sheet.href || sheet.nodeHref) : null;
+  let domRule = this.prop.rule.domRule;
+  let href = domRule ? domRule.href : null;
   if (href) {
     this.sheetURI = IOService.newURI(href, null, null);
   }

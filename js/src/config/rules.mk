@@ -21,6 +21,8 @@ INCLUDED_RULES_MK = 1
 # present. If they are, this is a violation of the separation of
 # responsibility between Makefile.in and mozbuild files.
 _MOZBUILD_EXTERNAL_VARIABLES := \
+  ANDROID_GENERATED_RESFILES \
+  ANDROID_RESFILES \
   CMMSRCS \
   CPP_UNIT_TESTS \
   DIRS \
@@ -52,6 +54,7 @@ _DEPRECATED_VARIABLES := \
   XPIDL_FLAGS \
   MOCHITEST_FILES_PARTS \
   MOCHITEST_BROWSER_FILES_PARTS \
+  MOCHITEST_WEBAPPRT_CHROME_FILES \
   $(NULL)
 
 ifndef EXTERNALLY_MANAGED_MAKE_FILE
@@ -219,13 +222,13 @@ endif # CPP_UNIT_TESTS
 
 ifdef PYTHON_UNIT_TESTS
 
-RUN_PYTHON_UNIT_TESTS := $(addprefix run-,$(PYTHON_UNIT_TESTS))
+RUN_PYTHON_UNIT_TESTS := $(addsuffix -run,$(PYTHON_UNIT_TESTS))
 
 .PHONY: $(RUN_PYTHON_UNIT_TESTS)
 
 check:: $(RUN_PYTHON_UNIT_TESTS)
 
-$(RUN_PYTHON_UNIT_TESTS): run-%: %
+$(RUN_PYTHON_UNIT_TESTS): %-run: %
 	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) $<
 
 endif # PYTHON_UNIT_TESTS
@@ -363,7 +366,7 @@ SIMPLE_PROGRAMS :=
 endif
 
 ifndef TARGETS
-TARGETS			= $(LIBRARY) $(SHARED_LIBRARY) $(PROGRAM) $(SIMPLE_PROGRAMS) $(HOST_LIBRARY) $(HOST_PROGRAM) $(HOST_SIMPLE_PROGRAMS) $(JAVA_LIBRARY)
+TARGETS			= $(LIBRARY) $(SHARED_LIBRARY) $(PROGRAM) $(SIMPLE_PROGRAMS) $(HOST_LIBRARY) $(HOST_PROGRAM) $(HOST_SIMPLE_PROGRAMS)
 endif
 
 COBJS = $(notdir $(CSRCS:.c=.$(OBJ_SUFFIX)))
@@ -729,7 +732,9 @@ GLOBAL_DEPS += Makefile.in
 endif
 
 ##############################################
-compile:: $(OBJS) $(HOST_OBJS)
+OBJ_TARGETS = $(OBJS) $(PROGOBJS) $(HOST_OBJS) $(HOST_PROGOBJS)
+
+compile:: $(OBJ_TARGETS)
 
 include $(topsrcdir)/config/makefiles/target_libs.mk
 
@@ -1218,7 +1223,7 @@ endif
 ###############################################################################
 # Java rules
 ###############################################################################
-ifneq (,$(value JAVAFILES)$(value ANDROID_RESFILES))
+ifneq (,$(JAVAFILES)$(ANDROID_RESFILES)$(ANDROID_APKNAME)$(JAVA_JAR_TARGETS))
   include $(topsrcdir)/config/makefiles/java-build.mk
 endif
 
@@ -1311,8 +1316,8 @@ INSTALL_TARGETS += _XPT_NAME
 
 ifndef NO_INTERFACES_MANIFEST
 libs:: $(call mkdir_deps,$(FINAL_TARGET)/components)
-	@$(PYTHON) $(MOZILLA_DIR)/config/buildlist.py $(FINAL_TARGET)/components/interfaces.manifest "interfaces $(XPT_NAME)"
-	@$(PYTHON) $(MOZILLA_DIR)/config/buildlist.py $(FINAL_TARGET)/chrome.manifest "manifest components/interfaces.manifest"
+	$(call py_action,buildlist,$(FINAL_TARGET)/components/interfaces.manifest "interfaces $(XPT_NAME)")
+	$(call py_action,buildlist,$(FINAL_TARGET)/chrome.manifest "manifest components/interfaces.manifest")
 endif
 endif
 
@@ -1348,7 +1353,7 @@ endif
 EXTRA_MANIFESTS = $(filter %.manifest,$(EXTRA_COMPONENTS) $(EXTRA_PP_COMPONENTS))
 ifneq (,$(EXTRA_MANIFESTS))
 libs:: $(call mkdir_deps,$(FINAL_TARGET))
-	$(PYTHON) $(MOZILLA_DIR)/config/buildlist.py $(FINAL_TARGET)/chrome.manifest $(patsubst %,"manifest components/%",$(notdir $(EXTRA_MANIFESTS)))
+	$(call py_action,buildlist,$(FINAL_TARGET)/chrome.manifest $(patsubst %,"manifest components/%",$(notdir $(EXTRA_MANIFESTS))))
 endif
 
 ################################################################################
@@ -1448,10 +1453,10 @@ endif
 endif
 
 libs realchrome:: $(CHROME_DEPS) $(FINAL_TARGET)/chrome
-	$(PYTHON) $(MOZILLA_DIR)/config/JarMaker.py \
+	$(call py_action,jar_maker,\
 	  $(QUIET) -j $(FINAL_TARGET)/chrome \
 	  $(MAKE_JARS_FLAGS) $(XULPPFLAGS) $(DEFINES) $(ACDEFINES) \
-	  $(JAR_MANIFEST)
+	  $(JAR_MANIFEST))
 
 endif
 endif
@@ -1726,7 +1731,6 @@ FREEZE_VARIABLES = \
   MOCHITEST_A11Y_FILES \
   MOCHITEST_METRO_FILES \
   MOCHITEST_ROBOCOP_FILES \
-  MOCHITEST_WEBAPPRT_CHROME_FILES \
   $(NULL)
 
 $(foreach var,$(FREEZE_VARIABLES),$(eval $(var)_FROZEN := '$($(var))'))

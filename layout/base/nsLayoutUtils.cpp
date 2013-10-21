@@ -32,7 +32,6 @@
 #include "ImageOps.h"
 #include "gfxRect.h"
 #include "gfxContext.h"
-#include "gfxFont.h"
 #include "nsRenderingContext.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsCSSRendering.h"
@@ -48,10 +47,10 @@
 #include "mozilla/dom/HTMLCanvasElement.h"
 #include "nsICanvasRenderingContextInternal.h"
 #include "gfxPlatform.h"
-#include "nsClientRect.h"
 #include <algorithm>
 #include "mozilla/dom/HTMLVideoElement.h"
 #include "mozilla/dom/HTMLImageElement.h"
+#include "mozilla/dom/DOMRect.h"
 #include "imgIRequest.h"
 #include "nsIImageLoadingContent.h"
 #include "nsCOMPtr.h"
@@ -69,6 +68,9 @@
 #include "nsSVGTextFrame2.h"
 #include "nsStyleStructInlines.h"
 #include "nsStyleTransformMatrix.h"
+#include "nsIFrameInlines.h"
+#include "ImageContainer.h"
+#include "nsComputedDOMStyle.h"
 
 #include "mozilla/Preferences.h"
 
@@ -100,7 +102,6 @@ using mozilla::image::Orientation;
 bool nsLayoutUtils::gPreventAssertInCompareTreePosition = false;
 #endif // DEBUG
 
-typedef gfxPattern::GraphicsFilter GraphicsFilter;
 typedef FrameMetrics::ViewID ViewID;
 
 /* static */ uint32_t nsLayoutUtils::sFontSizeInflationEmPerLine;
@@ -430,6 +431,22 @@ nsLayoutUtils::CSSFiltersEnabled()
   return sCSSFiltersEnabled;
 }
 
+bool
+nsLayoutUtils::UnsetValueEnabled()
+{
+  static bool sUnsetValueEnabled;
+  static bool sUnsetValuePrefCached = false;
+
+  if (!sUnsetValuePrefCached) {
+    sUnsetValuePrefCached = true;
+    Preferences::AddBoolVarCache(&sUnsetValueEnabled,
+                                 "layout.css.unset-value.enabled",
+                                 false);
+  }
+
+  return sUnsetValueEnabled;
+}
+
 void
 nsLayoutUtils::UnionChildOverflow(nsIFrame* aFrame,
                                   nsOverflowAreas& aOverflowAreas)
@@ -483,6 +500,16 @@ nsLayoutUtils::FindOrCreateIDFor(nsIContent* aContent, bool aRoot)
 
   if (!FindIDFor(aContent, &scrollId)) {
     scrollId = aRoot ? FrameMetrics::ROOT_SCROLL_ID : sScrollIdCounter++;
+    if (aRoot) {
+      // We are possibly replacing the old ROOT_SCROLL_ID content with a new one, so
+      // we should clear the property on the old content if there is one. Otherwise when
+      // that content is destroyed it will clear its property list and clobber ROOT_SCROLL_ID.
+      nsIContent* oldRoot;
+      bool oldExists = GetContentMap().Get(scrollId, &oldRoot);
+      if (oldExists) {
+        oldRoot->DeleteProperty(nsGkAtoms::RemoteId);
+      }
+    }
     aContent->SetProperty(nsGkAtoms::RemoteId, new ViewID(scrollId),
                           DestroyViewID);
     GetContentMap().Put(scrollId, aContent);
@@ -1276,14 +1303,15 @@ nsLayoutUtils::GetDOMEventCoordinatesRelativeTo(nsIDOMEvent* aDOMEvent, nsIFrame
 {
   if (!aDOMEvent)
     return nsPoint(NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE);
-  nsEvent *event = aDOMEvent->GetInternalNSEvent();
+  WidgetEvent* event = aDOMEvent->GetInternalNSEvent();
   if (!event)
     return nsPoint(NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE);
   return GetEventCoordinatesRelativeTo(event, aFrame);
 }
 
 nsPoint
-nsLayoutUtils::GetEventCoordinatesRelativeTo(const nsEvent* aEvent, nsIFrame* aFrame)
+nsLayoutUtils::GetEventCoordinatesRelativeTo(const WidgetEvent* aEvent,
+                                             nsIFrame* aFrame)
 {
   if (!aEvent || (aEvent->eventStructType != NS_MOUSE_EVENT &&
                   aEvent->eventStructType != NS_MOUSE_SCROLL_EVENT &&
@@ -1295,14 +1323,14 @@ nsLayoutUtils::GetEventCoordinatesRelativeTo(const nsEvent* aEvent, nsIFrame* aF
                   aEvent->eventStructType != NS_QUERY_CONTENT_EVENT))
     return nsPoint(NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE);
 
-  const nsGUIEvent* GUIEvent = static_cast<const nsGUIEvent*>(aEvent);
+  const WidgetGUIEvent* GUIEvent = static_cast<const WidgetGUIEvent*>(aEvent);
   return GetEventCoordinatesRelativeTo(aEvent,
                                        LayoutDeviceIntPoint::ToUntyped(GUIEvent->refPoint),
                                        aFrame);
 }
 
 nsPoint
-nsLayoutUtils::GetEventCoordinatesRelativeTo(const nsEvent* aEvent,
+nsLayoutUtils::GetEventCoordinatesRelativeTo(const WidgetEvent* aEvent,
                                              const nsIntPoint aPoint,
                                              nsIFrame* aFrame)
 {
@@ -1310,7 +1338,7 @@ nsLayoutUtils::GetEventCoordinatesRelativeTo(const nsEvent* aEvent,
     return nsPoint(NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE);
   }
 
-  const nsGUIEvent* GUIEvent = static_cast<const nsGUIEvent*>(aEvent);
+  const WidgetGUIEvent* GUIEvent = static_cast<const WidgetGUIEvent*>(aEvent);
   nsIWidget* widget = GUIEvent->widget;
   if (!widget) {
     return nsPoint(NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE);
@@ -1389,7 +1417,7 @@ nsLayoutUtils::GetEventCoordinatesRelativeTo(nsIWidget* aWidget,
 
 nsIFrame*
 nsLayoutUtils::GetPopupFrameForEventCoordinates(nsPresContext* aPresContext,
-                                                const nsEvent* aEvent)
+                                                const WidgetEvent* aEvent)
 {
 #ifdef MOZ_XUL
   nsXULPopupManager* pm = nsXULPopupManager::GetInstance();
@@ -2355,13 +2383,13 @@ void nsLayoutUtils::RectAccumulator::AddRect(const nsRect& aRect) {
   }
 }
 
-nsLayoutUtils::RectListBuilder::RectListBuilder(nsClientRectList* aList)
+nsLayoutUtils::RectListBuilder::RectListBuilder(DOMRectList* aList)
   : mRectList(aList)
 {
 }
 
 void nsLayoutUtils::RectListBuilder::AddRect(const nsRect& aRect) {
-  nsRefPtr<nsClientRect> rect = new nsClientRect(mRectList);
+  nsRefPtr<DOMRect> rect = new DOMRect(mRectList);
 
   rect->SetLayoutRect(aRect);
   mRectList->Append(rect);
@@ -3853,7 +3881,7 @@ nsLayoutUtils::GetClosestLayer(nsIFrame* aFrame)
 GraphicsFilter
 nsLayoutUtils::GetGraphicsFilterForFrame(nsIFrame* aForFrame)
 {
-  GraphicsFilter defaultFilter = gfxPattern::FILTER_GOOD;
+  GraphicsFilter defaultFilter = GraphicsFilter::FILTER_GOOD;
   nsStyleContext *sc;
   if (nsCSSRendering::IsCanvasFrame(aForFrame)) {
     nsCSSRendering::FindBackground(aForFrame, &sc);
@@ -3863,11 +3891,11 @@ nsLayoutUtils::GetGraphicsFilterForFrame(nsIFrame* aForFrame)
 
   switch (sc->StyleSVG()->mImageRendering) {
   case NS_STYLE_IMAGE_RENDERING_OPTIMIZESPEED:
-    return gfxPattern::FILTER_FAST;
+    return GraphicsFilter::FILTER_FAST;
   case NS_STYLE_IMAGE_RENDERING_OPTIMIZEQUALITY:
-    return gfxPattern::FILTER_BEST;
+    return GraphicsFilter::FILTER_BEST;
   case NS_STYLE_IMAGE_RENDERING_CRISPEDGES:
-    return gfxPattern::FILTER_NEAREST;
+    return GraphicsFilter::FILTER_NEAREST;
   default:
     return defaultFilter;
   }
@@ -4244,7 +4272,7 @@ nsLayoutUtils::DrawBackgroundImage(nsRenderingContext* aRenderingContext,
   PROFILER_LABEL("layout", "nsLayoutUtils::DrawBackgroundImage");
 
   if (UseBackgroundNearestFiltering()) {
-    aGraphicsFilter = gfxPattern::FILTER_NEAREST;
+    aGraphicsFilter = GraphicsFilter::FILTER_NEAREST;
   }
 
   return DrawImageInternal(aRenderingContext, aImage, aGraphicsFilter,
@@ -4729,7 +4757,7 @@ nsLayoutUtils::SurfaceFromElement(HTMLCanvasElement* aElement,
     nsRefPtr<gfxContext> ctx = new gfxContext(surf);
     // XXX shouldn't use the external interface, but maybe we can layerify this
     uint32_t flags = premultAlpha ? HTMLCanvasElement::RenderFlagPremultAlpha : 0;
-    rv = aElement->RenderContextsExternal(ctx, gfxPattern::FILTER_NEAREST, flags);
+    rv = aElement->RenderContextsExternal(ctx, GraphicsFilter::FILTER_NEAREST, flags);
     if (NS_FAILED(rv))
       return result;
   }
@@ -4830,7 +4858,7 @@ nsLayoutUtils::SurfaceFromElement(dom::Element* aElement,
 nsIContent*
 nsLayoutUtils::GetEditableRootContentByContentEditable(nsIDocument* aDocument)
 {
-  // If the document is in designMode we should return NULL.
+  // If the document is in designMode we should return nullptr.
   if (!aDocument || aDocument->HasFlag(NODE_IS_EDITABLE)) {
     return nullptr;
   }
@@ -5057,6 +5085,8 @@ nsLayoutUtils::Initialize()
   Preferences::RegisterCallback(StickyEnabledPrefChangeCallback,
                                 STICKY_ENABLED_PREF_NAME);
   StickyEnabledPrefChangeCallback(STICKY_ENABLED_PREF_NAME, nullptr);
+
+  nsComputedDOMStyle::RegisterPrefChangeCallbacks();
 }
 
 /* static */
@@ -5072,6 +5102,8 @@ nsLayoutUtils::Shutdown()
                                   FLEXBOX_ENABLED_PREF_NAME);
   Preferences::UnregisterCallback(StickyEnabledPrefChangeCallback,
                                   STICKY_ENABLED_PREF_NAME);
+
+  nsComputedDOMStyle::UnregisterPrefChangeCallbacks();
 }
 
 /* static */

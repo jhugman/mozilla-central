@@ -2225,12 +2225,6 @@ RasterImage::RequestDecodeCore(RequestDecodeType aDecodeType)
   if (mDecoded)
     return NS_OK;
 
-  // If we don't have any bytes to flush to the decoder, we can't do anything.
-  // mBytesDecoded can be bigger than mSourceData.Length() if we're not storing
-  // the source data.
-  if (mBytesDecoded > mSourceData.Length())
-    return NS_OK;
-
   // mFinishing protects against the case when we enter RequestDecode from
   // ShutdownDecoder -- in that case, we're done with the decode, we're just
   // not quite ready to admit it.  See bug 744309.
@@ -2267,6 +2261,12 @@ RasterImage::RequestDecodeCore(RequestDecodeType aDecodeType)
   }
 
   MutexAutoLock lock(mDecodingMutex);
+
+  // If we don't have any bytes to flush to the decoder, we can't do anything.
+  // mBytesDecoded can be bigger than mSourceData.Length() if we're not storing
+  // the source data.
+  if (mBytesDecoded > mSourceData.Length())
+    return NS_OK;
 
   // If the image is waiting for decode work to be notified, go ahead and do that.
   if (mDecodeRequest &&
@@ -2453,7 +2453,7 @@ RasterImage::CanQualityScale(const gfxSize& scale)
 }
 
 bool
-RasterImage::CanScale(gfxPattern::GraphicsFilter aFilter,
+RasterImage::CanScale(GraphicsFilter aFilter,
                       gfxSize aScale, uint32_t aFlags)
 {
 // The high-quality scaler requires Skia.
@@ -2462,7 +2462,7 @@ RasterImage::CanScale(gfxPattern::GraphicsFilter aFilter,
   // bunch of work on an image that just gets thrown away.
   // We only use the scaler when drawing to the window because, if we're not
   // drawing to a window (eg a canvas), updates to that image will be ignored.
-  if (gHQDownscaling && aFilter == gfxPattern::FILTER_GOOD &&
+  if (gHQDownscaling && aFilter == GraphicsFilter::FILTER_GOOD &&
       !mAnim && mDecoded && !mMultipart && CanQualityScale(aScale) &&
       (aFlags & imgIContainer::FLAG_HIGH_QUALITY_SCALING)) {
     gfxFloat factor = gHQDownscalingMinFactor / 1000.0;
@@ -2519,7 +2519,7 @@ RasterImage::ScalingDone(ScaleRequest* request, ScaleStatus status)
 void
 RasterImage::DrawWithPreDownscaleIfNeeded(imgFrame *aFrame,
                                           gfxContext *aContext,
-                                          gfxPattern::GraphicsFilter aFilter,
+                                          GraphicsFilter aFilter,
                                           const gfxMatrix &aUserSpaceToImageSpace,
                                           const gfxRect &aFill,
                                           const nsIntRect &aSubimage,
@@ -2594,7 +2594,7 @@ RasterImage::DrawWithPreDownscaleIfNeeded(imgFrame *aFrame,
  *                      in uint32_t aFlags); */
 NS_IMETHODIMP
 RasterImage::Draw(gfxContext *aContext,
-                  gfxPattern::GraphicsFilter aFilter,
+                  GraphicsFilter aFilter,
                   const gfxMatrix &aUserSpaceToImageSpace,
                   const gfxRect &aFill,
                   const nsIntRect &aSubimage,

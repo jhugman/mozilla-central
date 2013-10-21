@@ -126,12 +126,21 @@ class TreeMetadataEmitter(LoggingMixin):
             yield XPIDLFile(sandbox, mozpath.join(sandbox['SRCDIR'], idl),
                 xpidl_module)
 
+        for symbol in ('CPP_SOURCES', 'CSRCS'):
+            for src in (sandbox[symbol] or []):
+                if not os.path.exists(os.path.join(sandbox['SRCDIR'], src)):
+                    raise SandboxValidationError('Reference to a file that '
+                        'doesn\'t exist in %s (%s) in %s'
+                        % (symbol, src, sandbox['RELATIVEDIR']))
+
         # Proxy some variables as-is until we have richer classes to represent
         # them. We should aim to keep this set small because it violates the
         # desired abstraction of the build definition away from makefiles.
         passthru = VariablePassthru(sandbox)
         varmap = dict(
             # Makefile.in : moz.build
+            ANDROID_GENERATED_RESFILES='ANDROID_GENERATED_RESFILES',
+            ANDROID_RESFILES='ANDROID_RESFILES',
             ASFILES='ASFILES',
             CMMSRCS='CMMSRCS',
             CPPSRCS='CPP_SOURCES',
@@ -221,8 +230,10 @@ class TreeMetadataEmitter(LoggingMixin):
         test_manifests = dict(
             A11Y=('a11y', 'testing/mochitest/a11y', True),
             BROWSER_CHROME=('browser-chrome', 'testing/mochitest/browser', True),
+            METRO_CHROME=('metro-chrome', 'testing/mochitest/metro', True),
             MOCHITEST=('mochitest', 'testing/mochitest/tests', True),
             MOCHITEST_CHROME=('chrome', 'testing/mochitest/chrome', True),
+            MOCHITEST_WEBAPPRT_CHROME=('webapprt-chrome', 'testing/mochitest/webapprtChrome', True),
             WEBRTC_SIGNALLING_TEST=('steeplechase', 'steeplechase', True),
             XPCSHELL_TESTS=('xpcshell', 'xpcshell', False),
         )
@@ -335,6 +346,7 @@ class TreeMetadataEmitter(LoggingMixin):
         o.external_make_dirs = sandbox.get('EXTERNAL_MAKE_DIRS', [])
         o.parallel_external_make_dirs = sandbox.get('PARALLEL_EXTERNAL_MAKE_DIRS', [])
         o.is_tool_dir = sandbox.get('IS_TOOL_DIR', False)
+        o.affected_tiers = sandbox.get_affected_tiers()
 
         if 'TIERS' in sandbox:
             for tier in sandbox['TIERS']:

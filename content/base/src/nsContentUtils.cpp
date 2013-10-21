@@ -93,6 +93,7 @@
 #include "nsIContentViewer.h"
 #include "nsIDocShell.h"
 #include "nsIDocument.h"
+#include "nsIDocumentEncoder.h"
 #include "nsIDOMDocument.h"
 #include "nsIDOMDocumentType.h"
 #include "nsIDOMEvent.h"
@@ -923,6 +924,7 @@ nsContentUtils::ParseSandboxAttributeToFlags(const nsAString& aSandboxAttrValue)
   // If there's a sandbox attribute at all (and there is if this is being
   // called), start off by setting all the restriction flags.
   uint32_t out = SANDBOXED_NAVIGATION |
+                 SANDBOXED_AUXILIARY_NAVIGATION |
                  SANDBOXED_TOPLEVEL_NAVIGATION |
                  SANDBOXED_PLUGINS |
                  SANDBOXED_ORIGIN |
@@ -953,6 +955,8 @@ nsContentUtils::ParseSandboxAttributeToFlags(const nsAString& aSandboxAttrValue)
         out &= ~SANDBOXED_TOPLEVEL_NAVIGATION;
       } else if (token.LowerCaseEqualsLiteral("allow-pointer-lock")) {
         out &= ~SANDBOXED_POINTER_LOCK;
+      } else if (token.LowerCaseEqualsLiteral("allow-popups")) {
+        out &= ~SANDBOXED_AUXILIARY_NAVIGATION;
       }
     }
   }
@@ -4554,7 +4558,7 @@ nsContentUtils::GetLocalizedEllipsis()
 }
 
 //static
-nsEvent*
+WidgetEvent*
 nsContentUtils::GetNativeEvent(nsIDOMEvent* aDOMEvent)
 {
   return aDOMEvent ? aDOMEvent->GetInternalNSEvent() : nullptr;

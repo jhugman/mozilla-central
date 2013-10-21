@@ -900,7 +900,7 @@ js::math_tan(JSContext *cx, unsigned argc, Value *vp)
 typedef double (*UnaryMathFunctionType)(MathCache *cache, double);
 
 template <UnaryMathFunctionType F>
-bool math_function(JSContext *cx, unsigned argc, Value *vp)
+static bool math_function(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
     if (args.length() == 0) {
@@ -1367,7 +1367,7 @@ js::math_trunc(JSContext *cx, unsigned argc, Value *vp)
     return math_function<math_trunc_impl>(cx, argc, vp);
 }
 
-double sign(double x)
+static double sign(double x)
 {
     if (mozilla::IsNaN(x))
         return GenericNaN();
@@ -1481,21 +1481,21 @@ static const JSFunctionSpec math_static_methods[] = {
 JSObject *
 js_InitMathClass(JSContext *cx, HandleObject obj)
 {
-    RootedObject Math(cx, NewObjectWithClassProto(cx, &MathClass, NULL, obj, SingletonObject));
+    RootedObject Math(cx, NewObjectWithClassProto(cx, &MathClass, nullptr, obj, SingletonObject));
     if (!Math)
-        return NULL;
+        return nullptr;
 
     if (!JS_DefineProperty(cx, obj, js_Math_str, OBJECT_TO_JSVAL(Math),
                            JS_PropertyStub, JS_StrictPropertyStub, 0)) {
-        return NULL;
+        return nullptr;
     }
 
     if (!JS_DefineFunctions(cx, Math, math_static_methods))
-        return NULL;
+        return nullptr;
     if (!JS_DefineConstDoubles(cx, Math, math_constants))
-        return NULL;
+        return nullptr;
 
-    MarkStandardClassInitializedNoProto(obj, &MathClass);
+    obj->as<GlobalObject>().markStandardClassInitializedNoProto(&MathClass);
 
     return Math;
 }

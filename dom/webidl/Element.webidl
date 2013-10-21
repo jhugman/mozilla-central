@@ -141,8 +141,8 @@ interface Element : Node {
 
 // http://dev.w3.org/csswg/cssom-view/#extensions-to-the-element-interface
 partial interface Element {
-  ClientRectList getClientRects();
-  ClientRect getBoundingClientRect();
+  DOMRectList getClientRects();
+  DOMRect getBoundingClientRect();
 
   // scrolling
   void scrollIntoView(optional boolean top = true);
@@ -175,9 +175,9 @@ partial interface Element {
 
 // http://domparsing.spec.whatwg.org/#extensions-to-the-element-interface
 partial interface Element {
-  [Throws,TreatNullAs=EmptyString]
+  [Pure,SetterThrows,TreatNullAs=EmptyString]
   attribute DOMString innerHTML;
-  [Throws,TreatNullAs=EmptyString]
+  [Pure,SetterThrows,TreatNullAs=EmptyString]
   attribute DOMString outerHTML;
   [Throws]
   void insertAdjacentHTML(DOMString position, DOMString text);

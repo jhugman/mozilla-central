@@ -19,6 +19,7 @@
 #include "jsinferinlines.h"
 
 #include "jit/BaselineFrame-inl.h"
+#include "jit/IonFrames-inl.h"
 #include "vm/Interpreter-inl.h"
 #include "vm/StringObject-inl.h"
 
@@ -31,6 +32,13 @@ namespace jit {
 // Don't explicitly initialize, it's not guaranteed that this initializer will
 // run before the constructors for static VMFunctions.
 /* static */ VMFunction *VMFunction::functions;
+
+AutoDetectInvalidation::AutoDetectInvalidation(JSContext *cx, Value *rval, IonScript *ionScript)
+  : cx_(cx),
+    ionScript_(ionScript ? ionScript : GetTopIonJSScript(cx)->ionScript()),
+    rval_(rval),
+    disabled_(false)
+{ }
 
 void
 VMFunction::addToFunctions()
@@ -166,7 +174,7 @@ InitProp(JSContext *cx, HandleObject obj, HandlePropertyName name, HandleValue v
     RootedId id(cx, NameToId(name));
 
     if (name == cx->names().proto)
-        return baseops::SetPropertyHelper(cx, obj, obj, id, 0, &rval, false);
+        return baseops::SetPropertyHelper<SequentialExecution>(cx, obj, obj, id, 0, &rval, false);
     return DefineNativeProperty(cx, obj, id, rval, nullptr, nullptr, JSPROP_ENUMERATE, 0, 0, 0);
 }
 
@@ -438,7 +446,8 @@ SetProperty(JSContext *cx, HandleObject obj, HandlePropertyName name, HandleValu
 
     if (JS_LIKELY(!obj->getOps()->setProperty)) {
         unsigned defineHow = (op == JSOP_SETNAME || op == JSOP_SETGNAME) ? DNP_UNQUALIFIED : 0;
-        return baseops::SetPropertyHelper(cx, obj, obj, id, defineHow, &v, strict);
+        return baseops::SetPropertyHelper<SequentialExecution>(cx, obj, obj, id, defineHow, &v,
+                                                               strict);
     }
 
     return JSObject::setGeneric(cx, obj, obj, id, &v, strict);
@@ -607,7 +616,7 @@ GetDynamicName(JSContext *cx, JSObject *scopeChain, JSString *str, Value *vp)
 }
 
 bool
-FilterArguments(JSContext *cx, JSString *str)
+FilterArgumentsOrEval(JSContext *cx, JSString *str)
 {
     // getChars() is fallible, but cannot GC: it can only allocate a character
     // for the flattened string. If this call fails then the calling Ion code
@@ -618,7 +627,10 @@ FilterArguments(JSContext *cx, JSString *str)
         return false;
 
     static const jschar arguments[] = {'a', 'r', 'g', 'u', 'm', 'e', 'n', 't', 's'};
-    return !StringHasPattern(chars, str->length(), arguments, mozilla::ArrayLength(arguments));
+    static const jschar eval[] = {'e', 'v', 'a', 'l'};
+
+    return !StringHasPattern(chars, str->length(), arguments, mozilla::ArrayLength(arguments)) &&
+        !StringHasPattern(chars, str->length(), eval, mozilla::ArrayLength(eval));
 }
 
 #ifdef JSGC_GENERATIONAL
@@ -707,7 +719,7 @@ DebugEpilogue(JSContext *cx, BaselineFrame *frame, bool ok)
     if (frame->hasPushedSPSFrame()) {
         cx->runtime()->spsProfiler.exit(cx, frame->script(), frame->maybeFun());
         // Unset the pushedSPSFrame flag because DebugEpilogue may get called before
-        // Probes::exitScript in baseline during exception handling, and we don't
+        // probes::ExitScript in baseline during exception handling, and we don't
         // want to double-pop SPS frames.
         frame->unsetPushedSPSFrame();
     }

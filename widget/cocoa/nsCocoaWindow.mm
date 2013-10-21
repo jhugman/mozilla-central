@@ -1594,7 +1594,8 @@ NS_IMETHODIMP nsCocoaWindow::SetTitle(const nsAString& aTitle)
     return NS_OK;
 
   const nsString& strTitle = PromiseFlatString(aTitle);
-  NSString* title = [NSString stringWithCharacters:strTitle.get() length:strTitle.Length()];
+  NSString* title = [NSString stringWithCharacters:reinterpret_cast<const unichar*>(strTitle.get())
+                                            length:strTitle.Length()];
   [mWindow setTitle:title];
 
   return NS_OK;
@@ -1676,7 +1677,7 @@ NS_IMETHODIMP nsCocoaWindow::GetSheetWindowParent(NSWindow** sheetWindowParent)
 
 // Invokes callback and ProcessEvent methods on Event Listener object
 NS_IMETHODIMP 
-nsCocoaWindow::DispatchEvent(nsGUIEvent* event, nsEventStatus& aStatus)
+nsCocoaWindow::DispatchEvent(WidgetGUIEvent* event, nsEventStatus& aStatus)
 {
   aStatus = nsEventStatus_eIgnore;
 

@@ -188,7 +188,7 @@ nsWindow::~nsWindow()
     if (mLayerManager == sLayerManager) {
         // If this window was the one that created the global OMTC layer manager
         // and compositor, then we should null those out.
-        SetCompositor(NULL, NULL, NULL);
+        SetCompositor(nullptr, nullptr, nullptr);
     }
 }
 
@@ -664,7 +664,7 @@ nsWindow::WidgetToScreenOffset()
 }
 
 NS_IMETHODIMP
-nsWindow::DispatchEvent(nsGUIEvent *aEvent,
+nsWindow::DispatchEvent(WidgetGUIEvent* aEvent,
                         nsEventStatus &aStatus)
 {
     aStatus = DispatchEvent(aEvent);
@@ -672,7 +672,7 @@ nsWindow::DispatchEvent(nsGUIEvent *aEvent,
 }
 
 nsEventStatus
-nsWindow::DispatchEvent(nsGUIEvent *aEvent)
+nsWindow::DispatchEvent(WidgetGUIEvent* aEvent)
 {
     if (mWidgetListener) {
         nsEventStatus status = mWidgetListener->HandleEvent(aEvent, mUseAttachedEvents);
@@ -1128,7 +1128,7 @@ nsWindow::OnSizeChanged(const gfxIntSize& aSize)
 }
 
 void
-nsWindow::InitEvent(nsGUIEvent& event, nsIntPoint* aPoint)
+nsWindow::InitEvent(WidgetGUIEvent& event, nsIntPoint* aPoint)
 {
     if (aPoint) {
         event.refPoint.x = aPoint->x;
@@ -1154,9 +1154,9 @@ void *
 nsWindow::GetNativeData(uint32_t aDataType)
 {
     switch (aDataType) {
-        // used by GLContextProviderEGL, NULL is EGL_DEFAULT_DISPLAY
+        // used by GLContextProviderEGL, nullptr is EGL_DEFAULT_DISPLAY
         case NS_NATIVE_DISPLAY:
-            return NULL;
+            return nullptr;
 
         case NS_NATIVE_WIDGET:
             return (void *) this;
@@ -1168,47 +1168,16 @@ nsWindow::GetNativeData(uint32_t aDataType)
 void
 nsWindow::OnMouseEvent(AndroidGeckoEvent *ae)
 {
-    uint32_t msg;
-    switch (ae->Action()) {
-        case AndroidMotionEvent::ACTION_HOVER_MOVE:
-            msg = NS_MOUSE_MOVE;
-            break;
-
-        case AndroidMotionEvent::ACTION_HOVER_ENTER:
-            msg = NS_MOUSEENTER;
-            break;
-
-        case AndroidMotionEvent::ACTION_HOVER_EXIT:
-            msg = NS_MOUSELEAVE;
-            break;
-
-        default:
-            return;
-    }
-
     nsRefPtr<nsWindow> kungFuDeathGrip(this);
 
-send_again:
-
-    nsMouseEvent event(true,
-                       msg, this,
-                       nsMouseEvent::eReal, nsMouseEvent::eNormal);
-    // XXX can we synthesize different buttons?
-    event.button = nsMouseEvent::eLeftButton;
-
-    if (msg != NS_MOUSE_MOVE)
-        event.clickCount = 1;
+    WidgetMouseEvent event = ae->MakeMouseEvent(this);
+    if (event.message == NS_EVENT_NULL) {
+        // invalid event type, abort
+        return;
+    }
 
     // XXX add the double-click handling logic here
-    if (ae->Points().Length() > 0)
-        DispatchMotionEvent(event, ae, ae->Points()[0]);
-    if (Destroyed())
-        return;
-
-    if (msg == NS_MOUSE_BUTTON_DOWN) {
-        msg = NS_MOUSE_MOVE;
-        goto send_again;
-    }
+    DispatchEvent(&event);
 }
 
 bool nsWindow::OnMultitouchEvent(AndroidGeckoEvent *ae)
@@ -1439,6 +1408,9 @@ static unsigned int ConvertAndroidKeyCodeToDOMKeyCode(int androidKeyCode)
         case AKEYCODE_KANA:               return NS_VK_KANA;
         case AKEYCODE_ASSIST:             return NS_VK_HELP;
 
+        // the A key is the action key for gamepad devices.
+        case AKEYCODE_BUTTON_A:          return NS_VK_RETURN;
+
         default:
             ALOG("ConvertAndroidKeyCodeToDOMKeyCode: "
                  "No DOM keycode for Android keycode %d", androidKeyCode);
@@ -1620,7 +1592,7 @@ nsWindow::InitKeyEvent(WidgetKeyboardEvent& event, AndroidGeckoEvent& key,
         event.isChar = (charCode >= ' ');
         event.charCode = event.isChar ? charCode : 0;
         event.keyCode = (event.charCode > 0) ? 0 : domKeyCode;
-        event.pluginEvent = NULL;
+        event.pluginEvent = nullptr;
     } else {
 #ifdef DEBUG
         if (event.message != NS_KEY_DOWN && event.message != NS_KEY_UP) {

@@ -59,7 +59,7 @@ extern PRLogModuleInfo* gWindowsLog;
 
 static uint32_t gInstanceCount = 0;
 const PRUnichar* kMetroSubclassThisProp = L"MetroSubclassThisProp";
-HWND MetroWidget::sICoreHwnd = NULL;
+HWND MetroWidget::sICoreHwnd = nullptr;
 
 namespace mozilla {
 namespace widget {
@@ -144,7 +144,7 @@ namespace {
     // processed.
     Log("  Inputs sent. Waiting for input messages to clear");
     MSG msg;
-    while (WinUtils::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+    while (WinUtils::PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
       if (nsTextStore::ProcessRawKeyMessage(msg)) {
         continue;  // the message is consumed by TSF
       }
@@ -163,8 +163,8 @@ nsRefPtr<mozilla::layers::APZCTreeManager> MetroWidget::sAPZC;
 
 MetroWidget::MetroWidget() :
   mTransparencyMode(eTransparencyOpaque),
-  mWnd(NULL),
-  mMetroWndProc(NULL),
+  mWnd(nullptr),
+  mMetroWndProc(nullptr),
   mTempBasicLayerInUse(false),
   mRootLayerTreeId(),
   nsWindowBase()
@@ -302,7 +302,7 @@ MetroWidget::Destroy()
   mLayerManager = nullptr;
   mView = nullptr;
   mIdleService = nullptr;
-  mWnd = NULL;
+  mWnd = nullptr;
 
   return NS_OK;
 }
@@ -630,7 +630,7 @@ MetroWidget::DeliverNextScrollEvent()
 
 // defined in nsWiondowBase, called from shared module KeyboardLayout.
 bool
-MetroWidget::DispatchKeyboardEvent(nsGUIEvent* aEvent)
+MetroWidget::DispatchKeyboardEvent(WidgetGUIEvent* aEvent)
 {
   MOZ_ASSERT(aEvent);
   WidgetKeyboardEvent* oldKeyEvent = static_cast<WidgetKeyboardEvent*>(aEvent);
@@ -920,7 +920,7 @@ MetroWidget::RemoveSubclass()
       NS_ASSERTION(mMetroWndProc, "Should have old proc here.");
       SetWindowLongPtr(mWnd, GWLP_WNDPROC,
         reinterpret_cast<LONG_PTR>(mMetroWndProc));
-      mMetroWndProc = NULL;
+      mMetroWndProc = nullptr;
   }
   RemovePropW(mWnd, kMetroSubclassThisProp);
 }
@@ -1207,7 +1207,7 @@ void MetroWidget::UserActivity()
 // InitEvent assumes physical coordinates and is used by shared win32 code. Do
 // not hand winrt event coordinates to this routine.
 void
-MetroWidget::InitEvent(nsGUIEvent& event, nsIntPoint* aPoint)
+MetroWidget::InitEvent(WidgetGUIEvent& event, nsIntPoint* aPoint)
 {
   if (!aPoint) {
     event.refPoint.x = event.refPoint.y = 0;
@@ -1219,7 +1219,7 @@ MetroWidget::InitEvent(nsGUIEvent& event, nsIntPoint* aPoint)
 }
 
 bool
-MetroWidget::DispatchWindowEvent(nsGUIEvent* aEvent)
+MetroWidget::DispatchWindowEvent(WidgetGUIEvent* aEvent)
 {
   MOZ_ASSERT(aEvent);
   nsEventStatus status = nsEventStatus_eIgnore;
@@ -1228,7 +1228,7 @@ MetroWidget::DispatchWindowEvent(nsGUIEvent* aEvent)
 }
 
 NS_IMETHODIMP
-MetroWidget::DispatchEvent(nsGUIEvent* event, nsEventStatus & aStatus)
+MetroWidget::DispatchEvent(WidgetGUIEvent* event, nsEventStatus & aStatus)
 {
   if (event->IsInputDerivedEvent()) {
     UserActivity();

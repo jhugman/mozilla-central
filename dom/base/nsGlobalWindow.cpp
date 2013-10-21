@@ -148,6 +148,7 @@
 #include "nsMenuPopupFrame.h"
 #endif
 #include "nsIDOMCustomEvent.h"
+#include "nsIFrameRequestCallback.h"
 
 #include "xpcprivate.h"
 
@@ -1030,8 +1031,7 @@ nsGlobalWindow::nsGlobalWindow(nsGlobalWindow *aOuterWindow)
 #endif
     mCleanedUp(false),
     mDialogAbuseCount(0),
-    mStopAbuseDialogs(false),
-    mDialogsPermanentlyDisabled(false)
+    mAreDialogsEnabled(true)
 {
   nsLayoutStatics::AddRef();
 
@@ -1433,12 +1433,7 @@ nsGlobalWindow::FreeInnerObjects()
   NotifyDOMWindowDestroyed(this);
 
   // Kill all of the workers for this window.
-  // We push a cx so that exceptions get reported in the right DOM Window.
-  {
-    nsIScriptContext *scx = GetContextInternal();
-    AutoPushJSContext cx(scx ? scx->GetNativeContext() : nsContentUtils::GetSafeJSContext());
-    mozilla::dom::workers::CancelWorkersForWindow(cx, this);
-  }
+  mozilla::dom::workers::CancelWorkersForWindow(this);
 
   // Close all offline storages for this window.
   quota::QuotaManager* quotaManager = quota::QuotaManager::Get();
@@ -2888,13 +2883,11 @@ nsGlobalWindow::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
 }
 
 bool
-nsGlobalWindow::DialogsAreBlocked(bool *aBeingAbused)
+nsGlobalWindow::ShouldPromptToBlockDialogs()
 {
-  *aBeingAbused = false;
-
   nsGlobalWindow *topWindow = GetScriptableTop();
   if (!topWindow) {
-    NS_ASSERTION(!mDocShell, "DialogsAreBlocked() called without a top window?");
+    NS_ASSERTION(!mDocShell, "ShouldPromptToBlockDialogs() called without a top window?");
     return true;
   }
 
@@ -2903,8 +2896,22 @@ nsGlobalWindow::DialogsAreBlocked(bool *aBeingAbused)
     return true;
   }
 
-  if (topWindow->mDialogsPermanentlyDisabled) {
-    return true;
+  return topWindow->DialogsAreBeingAbused();
+}
+
+bool
+nsGlobalWindow::AreDialogsEnabled()
+{
+  nsGlobalWindow *topWindow = GetScriptableTop();
+  if (!topWindow) {
+    NS_ERROR("AreDialogsEnabled() called without a top window?");
+    return false;
+  }
+
+  // TODO: Warn if no top window?
+  topWindow = topWindow->GetCurrentInnerWindowInternal();
+  if (!topWindow) {
+    return false;
   }
 
   // Dialogs are blocked if the content viewer is hidden
@@ -2915,13 +2922,11 @@ nsGlobalWindow::DialogsAreBlocked(bool *aBeingAbused)
     bool isHidden;
     cv->GetIsHidden(&isHidden);
     if (isHidden) {
-      return true;
+      return false;
     }
   }
 
-  *aBeingAbused = topWindow->DialogsAreBeingAbused();
-
-  return topWindow->mStopAbuseDialogs && *aBeingAbused;
+  return topWindow->mAreDialogsEnabled;
 }
 
 bool
@@ -2978,7 +2983,7 @@ nsGlobalWindow::ConfirmDialogIfNeeded()
                                      "ScriptDialogPreventTitle", title);
   promptSvc->Confirm(this, title.get(), label.get(), &disableDialog);
   if (disableDialog) {
-    PreventFurtherDialogs(false);
+    DisableDialogs();
     return false;
   }
 
@@ -2986,20 +2991,34 @@ nsGlobalWindow::ConfirmDialogIfNeeded()
 }
 
 void
-nsGlobalWindow::PreventFurtherDialogs(bool aPermanent)
+nsGlobalWindow::DisableDialogs()
 {
   nsGlobalWindow *topWindow = GetScriptableTop();
   if (!topWindow) {
-    NS_ERROR("PreventFurtherDialogs() called without a top window?");
+    NS_ERROR("DisableDialogs() called without a top window?");
     return;
   }
 
   topWindow = topWindow->GetCurrentInnerWindowInternal();
+  // TODO: Warn if no top window?
   if (topWindow) {
-    topWindow->mStopAbuseDialogs = true;
-    if (aPermanent) {
-      topWindow->mDialogsPermanentlyDisabled = true;
-    }
+    topWindow->mAreDialogsEnabled = false;
+  }
+}
+
+void
+nsGlobalWindow::EnableDialogs()
+{
+  nsGlobalWindow *topWindow = GetScriptableTop();
+  if (!topWindow) {
+    NS_ERROR("EnableDialogs() called without a top window?");
+    return;
+  }
+
+  // TODO: Warn if no top window?
+  topWindow = topWindow->GetCurrentInnerWindowInternal();
+  if (topWindow) {
+    topWindow->mAreDialogsEnabled = true;
   }
 }
 
@@ -3055,7 +3074,7 @@ nsGlobalWindow::PostHandleEvent(nsEventChainPostVisitor& aVisitor)
       // onload event for the frame element.
 
       nsEventStatus status = nsEventStatus_eIgnore;
-      nsEvent event(aVisitor.mEvent->mFlags.mIsTrusted, NS_LOAD);
+      WidgetEvent event(aVisitor.mEvent->mFlags.mIsTrusted, NS_LOAD);
       event.mFlags.mBubbles = false;
 
       // Most of the time we could get a pres context to pass in here,
@@ -3071,7 +3090,7 @@ nsGlobalWindow::PostHandleEvent(nsEventChainPostVisitor& aVisitor)
 }
 
 nsresult
-nsGlobalWindow::DispatchDOMEvent(nsEvent* aEvent,
+nsGlobalWindow::DispatchDOMEvent(WidgetEvent* aEvent,
                                  nsIDOMEvent* aDOMEvent,
                                  nsPresContext* aPresContext,
                                  nsEventStatus* aEventStatus)
@@ -3986,8 +4005,8 @@ nsGlobalWindow::SetOpener(nsIDOMWindow* aOpener)
     JS::Rooted<JSObject*> thisObj(cx, mJSObject);
     NS_ENSURE_STATE(mJSObject);
 
-    if (!JS_WrapObject(cx, otherObj.address()) ||
-        !JS_WrapObject(cx, thisObj.address()) ||
+    if (!JS_WrapObject(cx, &otherObj) ||
+        !JS_WrapObject(cx, &thisObj) ||
         !JS_DefineProperty(cx, thisObj, "opener", JS::ObjectValue(*otherObj),
                            JS_PropertyStub, JS_StrictPropertyStub,
                            JSPROP_ENUMERATE)) {
@@ -4137,11 +4156,24 @@ nsGlobalWindow::GetInnerSize(CSSIntSize& aSize)
     return NS_OK;
   }
 
-  nsRefPtr<nsViewManager> viewManager = presShell->GetViewManager();
-  if (viewManager) {
-    viewManager->FlushDelayedResize(false);
+  /*
+   * On platforms with resolution-based zooming, the CSS viewport
+   * and visual viewport may not be the same. The inner size should
+   * be the visual viewport, but we fall back to the CSS viewport
+   * if it is not set.
+   */
+  if (presShell->IsScrollPositionClampingScrollPortSizeSet()) {
+    aSize = CSSIntRect::FromAppUnitsRounded(
+      presShell->GetScrollPositionClampingScrollPortSize());
+  } else {
+    nsRefPtr<nsViewManager> viewManager = presShell->GetViewManager();
+    if (viewManager) {
+      viewManager->FlushDelayedResize(false);
+    }
+
+    aSize = CSSIntRect::FromAppUnitsRounded(
+      presContext->GetVisibleArea().Size());
   }
-  aSize = CSSIntRect::FromAppUnitsRounded(presContext->GetVisibleArea().Size());
   return NS_OK;
 }
 
@@ -4968,7 +5000,7 @@ nsGlobalWindow::DispatchResizeEvent(const nsIntSize& aSize)
 
   AutoSafeJSContext cx;
   JSAutoCompartment ac(cx, mJSObject);
-  DOMWindowResizeEventDetailInitializer detail;
+  DOMWindowResizeEventDetail detail;
   detail.mWidth = aSize.width;
   detail.mHeight = aSize.height;
   JS::Rooted<JS::Value> detailValue(cx);
@@ -5409,8 +5441,7 @@ nsGlobalWindow::Alert(const nsAString& aString)
 {
   FORWARD_TO_OUTER(Alert, (aString), NS_ERROR_NOT_INITIALIZED);
 
-  bool needToPromptForAbuse;
-  if (DialogsAreBlocked(&needToPromptForAbuse)) {
+  if (!AreDialogsEnabled()) {
     return NS_ERROR_NOT_AVAILABLE;
   }
 
@@ -5452,7 +5483,7 @@ nsGlobalWindow::Alert(const nsAString& aString)
   nsAutoSyncOperation sync(GetCurrentInnerWindowInternal() ? 
                              GetCurrentInnerWindowInternal()->mDoc :
                              nullptr);
-  if (needToPromptForAbuse) {
+  if (ShouldPromptToBlockDialogs()) {
     bool disallowDialog = false;
     nsXPIDLString label;
     nsContentUtils::GetLocalizedString(nsContentUtils::eCOMMON_DIALOG_PROPERTIES,
@@ -5461,7 +5492,7 @@ nsGlobalWindow::Alert(const nsAString& aString)
     rv = prompt->AlertCheck(title.get(), final.get(), label.get(),
                             &disallowDialog);
     if (disallowDialog)
-      PreventFurtherDialogs(false);
+      DisableDialogs();
   } else {
     rv = prompt->Alert(title.get(), final.get());
   }
@@ -5474,8 +5505,7 @@ nsGlobalWindow::Confirm(const nsAString& aString, bool* aReturn)
 {
   FORWARD_TO_OUTER(Confirm, (aString, aReturn), NS_ERROR_NOT_INITIALIZED);
 
-  bool needToPromptForAbuse;
-  if (DialogsAreBlocked(&needToPromptForAbuse)) {
+  if (!AreDialogsEnabled()) {
     return NS_ERROR_NOT_AVAILABLE;
   }
 
@@ -5519,7 +5549,7 @@ nsGlobalWindow::Confirm(const nsAString& aString, bool* aReturn)
   nsAutoSyncOperation sync(GetCurrentInnerWindowInternal() ? 
                              GetCurrentInnerWindowInternal()->mDoc :
                              nullptr);
-  if (needToPromptForAbuse) {
+  if (ShouldPromptToBlockDialogs()) {
     bool disallowDialog = false;
     nsXPIDLString label;
     nsContentUtils::GetLocalizedString(nsContentUtils::eCOMMON_DIALOG_PROPERTIES,
@@ -5528,7 +5558,7 @@ nsGlobalWindow::Confirm(const nsAString& aString, bool* aReturn)
     rv = prompt->ConfirmCheck(title.get(), final.get(), label.get(),
                               &disallowDialog, aReturn);
     if (disallowDialog)
-      PreventFurtherDialogs(false);
+      DisableDialogs();
   } else {
     rv = prompt->Confirm(title.get(), final.get(), aReturn);
   }
@@ -5545,8 +5575,7 @@ nsGlobalWindow::Prompt(const nsAString& aMessage, const nsAString& aInitial,
 
   SetDOMStringToNull(aReturn);
 
-  bool needToPromptForAbuse;
-  if (DialogsAreBlocked(&needToPromptForAbuse)) {
+  if (!AreDialogsEnabled()) {
     return NS_ERROR_NOT_AVAILABLE;
   }
 
@@ -5591,7 +5620,7 @@ nsGlobalWindow::Prompt(const nsAString& aMessage, const nsAString& aInitial,
   bool disallowDialog = false;
 
   nsXPIDLString label;
-  if (needToPromptForAbuse) {
+  if (ShouldPromptToBlockDialogs()) {
     nsContentUtils::GetLocalizedString(nsContentUtils::eCOMMON_DIALOG_PROPERTIES,
                                        "ScriptDialogLabel", label);
   }
@@ -5604,7 +5633,7 @@ nsGlobalWindow::Prompt(const nsAString& aMessage, const nsAString& aInitial,
                       &inoutValue, label.get(), &disallowDialog, &ok);
 
   if (disallowDialog) {
-    PreventFurtherDialogs(false);
+    DisableDialogs();
   }
 
   NS_ENSURE_SUCCESS(rv, rv);
@@ -5854,12 +5883,11 @@ nsGlobalWindow::Print()
   if (Preferences::GetBool("dom.disable_window_print", false))
     return NS_ERROR_NOT_AVAILABLE;
 
-  bool needToPromptForAbuse;
-  if (DialogsAreBlocked(&needToPromptForAbuse)) {
+  if (!AreDialogsEnabled()) {
     return NS_ERROR_NOT_AVAILABLE;
   }
 
-  if (needToPromptForAbuse && !ConfirmDialogIfNeeded()) {
+  if (ShouldPromptToBlockDialogs() && !ConfirmDialogIfNeeded()) {
     return NS_ERROR_NOT_AVAILABLE;
   }
 
@@ -6794,7 +6822,7 @@ PostMessageReadStructuredClone(JSContext* cx,
       JS::Rooted<JSObject*> global(cx, JS::CurrentGlobalOrNull(cx));
       if (global) {
         JS::Rooted<JSObject*> obj(cx, port->WrapObject(cx, global));
-        if (JS_WrapObject(cx, obj.address())) {
+        if (JS_WrapObject(cx, &obj)) {
           port->BindToOwner(scInfo->window);
           return obj;
         }
@@ -6987,7 +7015,7 @@ PostMessageEvent::Run()
     presContext = shell->GetPresContext();
 
   message->SetTrusted(mTrustedCaller);
-  nsEvent *internalEvent = message->GetInternalNSEvent();
+  WidgetEvent* internalEvent = message->GetInternalNSEvent();
 
   nsEventStatus status = nsEventStatus_eIgnore;
   nsEventDispatcher::Dispatch(static_cast<nsPIDOMWindow*>(mTargetWindow),
@@ -7839,12 +7867,11 @@ nsGlobalWindow::ShowModalDialog(const nsAString& aURI, nsIVariant *aArgs_,
   // pending reflows.
   EnsureReflowFlushAndPaint();
 
-  bool needToPromptForAbuse;
-  if (DialogsAreBlocked(&needToPromptForAbuse)) {
+  if (!AreDialogsEnabled()) {
     return NS_ERROR_NOT_AVAILABLE;
   }
 
-  if (needToPromptForAbuse && !ConfirmDialogIfNeeded()) {
+  if (ShouldPromptToBlockDialogs() && !ConfirmDialogIfNeeded()) {
     return NS_ERROR_NOT_AVAILABLE;
   }
 
@@ -9877,7 +9904,7 @@ nsGlobalWindow::Observe(nsISupports* aSubject, const char* aTopic,
     event->SetTrusted(true);
 
     if (fireMozStorageChanged) {
-      nsEvent *internalEvent = event->GetInternalNSEvent();
+      WidgetEvent* internalEvent = event->GetInternalNSEvent();
       internalEvent->mFlags.mOnlyChromeDispatch = true;
     }
 
@@ -11240,12 +11267,7 @@ nsGlobalWindow::SuspendTimeouts(uint32_t aIncrease,
     DisableGamepadUpdates();
 
     // Suspend all of the workers for this window.
-    // We push a cx so that exceptions get reported in the right DOM Window.
-    {
-      nsIScriptContext *scx = GetContextInternal();
-      AutoPushJSContext cx(scx ? scx->GetNativeContext() : nsContentUtils::GetSafeJSContext());
-      mozilla::dom::workers::SuspendWorkersForWindow(cx, this);
-    }
+    mozilla::dom::workers::SuspendWorkersForWindow(this);
 
     TimeStamp now = TimeStamp::Now();
     for (nsTimeout *t = mTimeouts.getFirst(); t; t = t->getNext()) {
@@ -11334,10 +11356,7 @@ nsGlobalWindow::ResumeTimeouts(bool aThawChildren)
     }
 
     // Resume all of the workers for this window.
-    // We push a cx so that exceptions get reported in the right DOM Window.
-    nsIScriptContext *scx = GetContextInternal();
-    AutoPushJSContext cx(scx ? scx->GetNativeContext() : nsContentUtils::GetSafeJSContext());
-    mozilla::dom::workers::ResumeWorkersForWindow(scx, this);
+    mozilla::dom::workers::ResumeWorkersForWindow(this);
 
     // Restore all of the timeouts, using the stored time remaining
     // (stored in timeout->mTimeRemaining).
@@ -11774,11 +11793,11 @@ nsGlobalChromeWindow::BeginWindowMove(nsIDOMEvent *aMouseDownEvent, nsIDOMElemen
   }
 
   NS_ENSURE_TRUE(aMouseDownEvent, NS_ERROR_FAILURE);
-  nsEvent *internalEvent = aMouseDownEvent->GetInternalNSEvent();
+  WidgetEvent* internalEvent = aMouseDownEvent->GetInternalNSEvent();
   NS_ENSURE_TRUE(internalEvent &&
                  internalEvent->eventStructType == NS_MOUSE_EVENT,
                  NS_ERROR_FAILURE);
-  nsMouseEvent *mouseEvent = static_cast<nsMouseEvent*>(internalEvent);
+  WidgetMouseEvent* mouseEvent = static_cast<WidgetMouseEvent*>(internalEvent);
 
   return widget->BeginMoveDrag(mouseEvent);
 }
@@ -12130,4 +12149,3 @@ nsGlobalWindow::DisableNetworkEvent(uint32_t aType)
 #undef BEFOREUNLOAD_EVENT
 #undef ERROR_EVENT
 #undef EVENT
-

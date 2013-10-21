@@ -429,6 +429,8 @@ enum nsEventStructType
 
 #define NS_WHEEL_EVENT_START         5400
 #define NS_WHEEL_WHEEL               (NS_WHEEL_EVENT_START)
+#define NS_WHEEL_START               (NS_WHEEL_EVENT_START + 1)
+#define NS_WHEEL_STOP                (NS_WHEEL_EVENT_START + 2)
 
 //System time is changed
 #define NS_MOZ_TIME_CHANGE_EVENT     5500
@@ -1021,9 +1023,5 @@ public:
 };
 
 } // namespace mozilla
-
-// TODO: Remove following typedefs
-typedef mozilla::WidgetEvent      nsEvent;
-typedef mozilla::WidgetGUIEvent   nsGUIEvent;
 
 #endif // mozilla_BasicEvents_h__

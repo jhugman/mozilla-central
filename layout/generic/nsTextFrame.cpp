@@ -54,6 +54,7 @@
 #include "nsLineBreaker.h"
 #include "nsIWordBreaker.h"
 #include "nsGenericDOMDataNode.h"
+#include "nsIFrameInlines.h"
 
 #include <algorithm>
 #ifdef ACCESSIBILITY
@@ -2893,8 +2894,8 @@ protected:
   
   // Either null, or pointing to the frame's TabWidthProperty.
   TabWidthStore*        mTabWidths;
-  // How far we've done tab-width calculation; this is ONLY valid
-  // when mTabWidths is NULL (otherwise rely on mTabWidths->mLimit instead).
+  // How far we've done tab-width calculation; this is ONLY valid when
+  // mTabWidths is nullptr (otherwise rely on mTabWidths->mLimit instead).
   // It's a DOM offset relative to the current frame's offset.
   uint32_t              mTabWidthsAnalyzedLimit;
 
@@ -5889,8 +5890,8 @@ DrawTextRun(gfxTextRun* aTextRun,
             gfxTextContextPaint* aContextPaint,
             nsTextFrame::DrawPathCallbacks* aCallbacks)
 {
-  gfxFont::DrawMode drawMode = aCallbacks ? gfxFont::GLYPH_PATH :
-                                            gfxFont::GLYPH_FILL;
+  DrawMode drawMode = aCallbacks ? DrawMode::GLYPH_PATH :
+                                   DrawMode::GLYPH_FILL;
   if (aCallbacks) {
     aCallbacks->NotifyBeforeText(aTextColor);
     aTextRun->Draw(aCtx, aTextBaselinePt, drawMode, aOffset, aLength,

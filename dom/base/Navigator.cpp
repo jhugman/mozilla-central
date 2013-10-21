@@ -70,11 +70,13 @@
 #endif
 
 #include "nsIDOMGlobalPropertyInitializer.h"
+#include "nsIDataStoreService.h"
 #include "nsJSUtils.h"
 
 #include "nsScriptNameSpaceManager.h"
 
 #include "mozilla/dom/NavigatorBinding.h"
+#include "mozilla/dom/Promise.h"
 
 namespace mozilla {
 namespace dom {
@@ -1095,6 +1097,28 @@ Navigator::GetBattery(ErrorResult& aRv)
   return mBatteryManager;
 }
 
+already_AddRefed<Promise>
+Navigator::GetDataStores(const nsAString& aName, ErrorResult& aRv)
+{
+  if (!mWindow || !mWindow->GetDocShell()) {
+    aRv.Throw(NS_ERROR_UNEXPECTED);
+    return nullptr;
+  }
+
+  nsCOMPtr<nsIDataStoreService> service =
+    do_GetService("@mozilla.org/datastore-service;1");
+  if (!service) {
+    aRv.Throw(NS_ERROR_FAILURE);
+    return nullptr;
+  }
+
+  nsCOMPtr<nsISupports> promise;
+  aRv = service->GetDataStores(mWindow, aName, getter_AddRefs(promise));
+
+  nsRefPtr<Promise> p = static_cast<Promise*>(promise.get());
+  return p.forget();
+}
+
 PowerManager*
 Navigator::GetMozPower(ErrorResult& aRv)
 {
@@ -1530,7 +1554,7 @@ Navigator::DoNewResolve(JSContext* aCx, JS::Handle<JSObject*> aObject,
       }
     }
 
-    if (!JS_WrapObject(aCx, domObject.address())) {
+    if (!JS_WrapObject(aCx, &domObject)) {
       return false;
     }
 

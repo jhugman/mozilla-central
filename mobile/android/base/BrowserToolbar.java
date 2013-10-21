@@ -21,6 +21,10 @@ import org.mozilla.gecko.util.ThreadUtils;
 import org.mozilla.gecko.util.UiAsyncTask;
 import org.mozilla.gecko.util.GeckoEventListener;
 import org.mozilla.gecko.util.StringUtils;
+import org.mozilla.gecko.widget.GeckoImageButton;
+import org.mozilla.gecko.widget.GeckoImageView;
+import org.mozilla.gecko.widget.GeckoRelativeLayout;
+import org.mozilla.gecko.widget.GeckoTextView;
 
 import org.json.JSONObject;
 
@@ -1117,7 +1121,7 @@ public class BrowserToolbar extends GeckoRelativeLayout
             image = Bitmap.createScaledBitmap(image, mFaviconSize, mFaviconSize, false);
             mFavicon.setImageBitmap(image);
         } else {
-            mFavicon.setImageResource(R.drawable.favicon);
+            mFavicon.setImageBitmap(null);
         }
     }
     

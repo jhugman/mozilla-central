@@ -30,6 +30,7 @@
 #include "mozilla/layers/ShadowLayers.h"  // for ShadowableLayer
 #include "mozilla/layers/TextureClient.h"  // for DeprecatedTextureClient
 #include "nsSize.h"                     // for nsIntSize
+#include "gfx2DGlue.h"
 
 namespace mozilla {
 
@@ -107,7 +108,7 @@ RotatedBuffer::DrawBufferQuadrant(gfxContext* aTarget,
   nsRefPtr<gfxPattern> pattern = new gfxPattern(source);
 
 #ifdef MOZ_GFX_OPTIMIZE_MOBILE
-  gfxPattern::GraphicsFilter filter = gfxPattern::FILTER_NEAREST;
+  GraphicsFilter filter = GraphicsFilter::FILTER_NEAREST;
   pattern->SetFilter(filter);
 #endif
 
@@ -656,17 +657,13 @@ ThebesLayerBuffer::BeginPaint(ThebesLayer* aLayer, ContentType aContentType,
           nsIntPoint dest = mBufferRect.TopLeft() - destBufferRect.TopLeft();
           if (IsAzureBuffer()) {
             MOZ_ASSERT(mDTBuffer);
-            RefPtr<SourceSurface> source = mDTBuffer->Snapshot();
-            mDTBuffer->CopySurface(source,
-                                   IntRect(srcRect.x, srcRect.y, srcRect.width, srcRect.height),
-                                   IntPoint(dest.x, dest.y));
+            mDTBuffer->CopyRect(IntRect(srcRect.x, srcRect.y, srcRect.width, srcRect.height),
+                                IntPoint(dest.x, dest.y));
             if (mode == Layer::SURFACE_COMPONENT_ALPHA) {
               EnsureBufferOnWhite();
               MOZ_ASSERT(mDTBufferOnWhite);
-              RefPtr<SourceSurface> sourceOnWhite = mDTBufferOnWhite->Snapshot();
-              mDTBufferOnWhite->CopySurface(sourceOnWhite,
-                                            IntRect(srcRect.x, srcRect.y, srcRect.width, srcRect.height),
-                                            IntPoint(dest.x, dest.y));
+              mDTBufferOnWhite->CopyRect(IntRect(srcRect.x, srcRect.y, srcRect.width, srcRect.height),
+                                         IntPoint(dest.x, dest.y));
             }
           } else {
             MOZ_ASSERT(mBuffer);

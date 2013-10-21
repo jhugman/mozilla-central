@@ -131,8 +131,8 @@ extern "C" {
     GWorldPtr *   offscreenGWorld,
     UInt32        PixelFormat,
     const Rect *  boundsRect,
-    CTabHandle    cTable,                /* can be NULL */
-    GDHandle      aGDevice,              /* can be NULL */
+    CTabHandle    cTable,                /* can be nullptr */
+    GDHandle      aGDevice,              /* can be nullptr */
     GWorldFlags   flags,
     Ptr           newBuffer,
     SInt32        rowBytes)
@@ -1348,7 +1348,8 @@ nsObjectFrame::PrintPlugin(nsRenderingContext& aRenderingContext,
     return;
   }
   GWorldPtr gWorld;
-  if (::NewGWorldFromPtr(&gWorld, k32ARGBPixelFormat, &gwBounds, NULL, NULL, 0,
+  if (::NewGWorldFromPtr(&gWorld, k32ARGBPixelFormat, &gwBounds,
+                         nullptr, nullptr, 0,
                          buffer.Elements(), window.width * 4) != noErr) {
     ::CGContextRelease(cgBuffer);
     nativeDraw.EndNativeDrawing();
@@ -1562,12 +1563,12 @@ nsObjectFrame::BuildLayer(nsDisplayListBuilder* aBuilder,
 
     imglayer->SetScaleToSize(size, SCALE_STRETCH);
     imglayer->SetContainer(container);
-    gfxPattern::GraphicsFilter filter =
+    GraphicsFilter filter =
       nsLayoutUtils::GetGraphicsFilterForFrame(this);
 #ifdef MOZ_GFX_OPTIMIZE_MOBILE
     if (!aManager->IsCompositingCheap()) {
       // Pixman just horrible with bilinear filter scaling
-      filter = gfxPattern::FILTER_NEAREST;
+      filter = GraphicsFilter::FILTER_NEAREST;
     }
 #endif
     imglayer->SetFilter(filter);
@@ -1742,7 +1743,7 @@ nsObjectFrame::PaintPlugin(nsDisplayListBuilder* aBuilder,
 
       // this rect is used only in the CoreGraphics drawing model
       gfxRect tmpRect(0, 0, 0, 0);
-      mInstanceOwner->Paint(tmpRect, NULL);
+      mInstanceOwner->Paint(tmpRect, nullptr);
     }
   }
 #elif defined(MOZ_X11)
@@ -1960,8 +1961,8 @@ nsObjectFrame::PaintPlugin(nsDisplayListBuilder* aBuilder,
 
 NS_IMETHODIMP
 nsObjectFrame::HandleEvent(nsPresContext* aPresContext,
-                           nsGUIEvent*     anEvent,
-                           nsEventStatus*  anEventStatus)
+                           WidgetGUIEvent* anEvent,
+                           nsEventStatus* anEventStatus)
 {
   NS_ENSURE_ARG_POINTER(anEvent);
   NS_ENSURE_ARG_POINTER(anEventStatus);

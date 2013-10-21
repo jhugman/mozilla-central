@@ -3539,7 +3539,7 @@ nsSVGTextFrame2::PaintSVG(nsRenderingContext* aContext,
       (gfxTextContextPaint*)aContext->GetUserData(&gfxTextContextPaint::sUserDataKey);
 
     nsAutoPtr<gfxTextContextPaint> contextPaint;
-    gfxFont::DrawMode drawMode =
+    DrawMode drawMode =
       SetupCairoState(gfx, frame, outerContextPaint,
                       getter_Transfers(contextPaint));
 
@@ -3550,7 +3550,7 @@ nsSVGTextFrame2::PaintSVG(nsRenderingContext* aContext,
     runTransform.Multiply(currentMatrix);
     gfx->SetMatrix(runTransform);
 
-    if (drawMode != gfxFont::DrawMode(0)) {
+    if (drawMode != DrawMode(0)) {
       nsRect frameRect = frame->GetVisualOverflowRect();
       bool paintSVGGlyphs;
       if (ShouldRenderAsPath(aContext, frame, paintSVGGlyphs)) {
@@ -4637,8 +4637,8 @@ nsSVGTextFrame2::GetTextPathPathFrame(nsIFrame* aTextPathFrame)
   return property->GetReferencedFrame(nsGkAtoms::svgPathGeometryFrame, nullptr);
 }
 
-already_AddRefed<gfxFlattenedPath>
-nsSVGTextFrame2::GetFlattenedTextPath(nsIFrame* aTextPathFrame)
+already_AddRefed<gfxPath>
+nsSVGTextFrame2::GetTextPath(nsIFrame* aTextPathFrame)
 {
   nsIFrame *path = GetTextPathPathFrame(aTextPathFrame);
 
@@ -4646,7 +4646,7 @@ nsSVGTextFrame2::GetFlattenedTextPath(nsIFrame* aTextPathFrame)
     nsSVGPathGeometryElement *element =
       static_cast<nsSVGPathGeometryElement*>(path->GetContent());
 
-    return element->GetFlattenedPath(element->PrependLocalTransformsTo(gfxMatrix()));
+    return element->GetPath(element->PrependLocalTransformsTo(gfxMatrix()));
   }
   return nullptr;
 }
@@ -4671,7 +4671,7 @@ nsSVGTextFrame2::GetStartOffset(nsIFrame* aTextPathFrame)
     &tp->mLengthAttributes[dom::SVGTextPathElement::STARTOFFSET];
 
   if (length->IsPercentage()) {
-    nsRefPtr<gfxFlattenedPath> data = GetFlattenedTextPath(aTextPathFrame);
+    nsRefPtr<gfxPath> data = GetTextPath(aTextPathFrame);
     return data ?
              length->GetAnimValInSpecifiedUnits() * data->GetLength() / 100.0 :
              0.0;
@@ -4694,7 +4694,7 @@ nsSVGTextFrame2::DoTextPathLayout()
     }
 
     // Get the path itself.
-    nsRefPtr<gfxFlattenedPath> data = GetFlattenedTextPath(textPathFrame);
+    nsRefPtr<gfxPath> data = GetTextPath(textPathFrame);
     if (!data) {
       it.AdvancePastCurrentTextPathFrame();
       continue;
@@ -5406,21 +5406,21 @@ nsSVGTextFrame2::TransformFrameRectFromTextChild(const nsRect& aRect,
   return result - framePosition;
 }
 
-gfxFont::DrawMode
+DrawMode
 nsSVGTextFrame2::SetupCairoState(gfxContext* aContext,
                                  nsIFrame* aFrame,
                                  gfxTextContextPaint* aOuterContextPaint,
                                  gfxTextContextPaint** aThisContextPaint)
 {
-  gfxFont::DrawMode toDraw = gfxFont::DrawMode(0);
+  DrawMode toDraw = DrawMode(0);
   SVGTextContextPaint *thisContextPaint = new SVGTextContextPaint();
 
   if (SetupCairoStroke(aContext, aFrame, aOuterContextPaint, thisContextPaint)) {
-    toDraw = gfxFont::DrawMode(toDraw | gfxFont::GLYPH_STROKE);
+    toDraw = DrawMode(int(toDraw) | int(DrawMode::GLYPH_STROKE));
   }
 
   if (SetupCairoFill(aContext, aFrame, aOuterContextPaint, thisContextPaint)) {
-    toDraw = gfxFont::DrawMode(toDraw | gfxFont::GLYPH_FILL);
+    toDraw = DrawMode(int(toDraw) | int(DrawMode::GLYPH_FILL));
   }
 
   *aThisContextPaint = thisContextPaint;

@@ -53,6 +53,7 @@
 #include "nsTextFrame.h"
 #include "SVGContentUtils.h"
 #include "mozilla/unused.h"
+#include "gfx2DGlue.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -1832,7 +1833,7 @@ nsSVGUtils::SetupCairoStroke(nsIFrame* aFrame, gfxContext* aContext,
 
 bool
 nsSVGUtils::PaintSVGGlyph(Element* aElement, gfxContext* aContext,
-                          gfxFont::DrawMode aDrawMode,
+                          DrawMode aDrawMode,
                           gfxTextContextPaint* aContextPaint)
 {
   nsIFrame* frame = aElement->GetPrimaryFrame();

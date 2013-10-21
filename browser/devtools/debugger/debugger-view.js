@@ -64,9 +64,11 @@ let DebuggerView = {
     this.StackFrames.initialize();
     this.Sources.initialize();
     this.WatchExpressions.initialize();
+    this.EventListeners.initialize();
     this.GlobalSearch.initialize();
     this._initializeVariablesView();
     this._initializeEditor(deferred.resolve);
+    document.title = L10N.getStr("DebuggerWindowTitle");
 
     return deferred.promise;
   },
@@ -94,6 +96,7 @@ let DebuggerView = {
     this.StackFrames.destroy();
     this.Sources.destroy();
     this.WatchExpressions.destroy();
+    this.EventListeners.destroy();
     this.GlobalSearch.destroy();
     this._destroyPanes();
     this._destroyEditor(deferred.resolve);
@@ -111,6 +114,15 @@ let DebuggerView = {
     this._instrumentsPane = document.getElementById("instruments-pane");
     this._instrumentsPaneToggleButton = document.getElementById("instruments-pane-toggle");
 
+    this.showEditor = this.showEditor.bind(this);
+    this.showBlackBoxMessage = this.showBlackBoxMessage.bind(this);
+    this.showProgressBar = this.showProgressBar.bind(this);
+    this.maybeShowBlackBoxMessage = this.maybeShowBlackBoxMessage.bind(this);
+    this._editorDeck = document.getElementById("editor-deck");
+
+    this._onTabSelect = this._onInstrumentsPaneTabSelect.bind(this);
+    this._instrumentsPane.tabpanels.addEventListener("select", this._onTabSelect);
+
     this._collapsePaneString = L10N.getStr("collapsePanes");
     this._expandPaneString = L10N.getStr("expandPanes");
 
@@ -127,6 +139,8 @@ let DebuggerView = {
 
     Prefs.sourcesWidth = this._sourcesPane.getAttribute("width");
     Prefs.instrumentsWidth = this._instrumentsPane.getAttribute("width");
+
+    this._instrumentsPane.tabpanels.removeEventListener("select", this._onTabSelect);
 
     this._sourcesPane = null;
     this._instrumentsPane = null;
@@ -211,6 +225,40 @@ let DebuggerView = {
       window.emit(EVENTS.EDITOR_UNLOADED, this.editor);
       aCallback();
     });
+  },
+
+  /**
+   * Display the source editor.
+   */
+  showEditor: function() {
+    this._editorDeck.selectedIndex = 0;
+  },
+
+  /**
+   * Display the black box message.
+   */
+  showBlackBoxMessage: function() {
+    this._editorDeck.selectedIndex = 1;
+  },
+
+  /**
+   * Display the progress bar.
+   */
+  showProgressBar: function() {
+    this._editorDeck.selectedIndex = 2;
+  },
+
+  /**
+   * Show or hide the black box message vs. source editor depending on if the
+   * selected source is black boxed or not.
+   */
+  maybeShowBlackBoxMessage: function() {
+    let { source } = DebuggerView.Sources.selectedItem.attachment;
+    if (gThreadClient.source(source).isBlackBoxed) {
+      this.showBlackBoxMessage();
+    } else {
+      this.showEditor();
+    }
   },
 
   /**
@@ -407,6 +455,13 @@ let DebuggerView = {
     this._instrumentsPane.hasAttribute("pane-collapsed"),
 
   /**
+   * Gets the currently selected tab in the instruments pane.
+   * @return string
+   */
+  get instrumentsPaneTab()
+    this._instrumentsPane.selectedTab.id,
+
+  /**
    * Sets the instruments pane hidden or visible.
    *
    * @param object aFlags
@@ -415,8 +470,10 @@ let DebuggerView = {
    *        - animated: true to display an animation on toggle
    *        - delayed: true to wait a few cycles before toggle
    *        - callback: a function to invoke when the toggle finishes
+   * @param number aTabIndex [optional]
+   *        The index of the intended selected tab in the details pane.
    */
-  toggleInstrumentsPane: function(aFlags) {
+  toggleInstrumentsPane: function(aFlags, aTabIndex) {
     let pane = this._instrumentsPane;
     let button = this._instrumentsPaneToggleButton;
 
@@ -428,6 +485,10 @@ let DebuggerView = {
     } else {
       button.setAttribute("pane-collapsed", "");
       button.setAttribute("tooltiptext", this._expandPaneString);
+    }
+
+    if (aTabIndex !== undefined) {
+      pane.selectedIndex = aTabIndex;
     }
   },
 
@@ -443,7 +504,16 @@ let DebuggerView = {
       animated: true,
       delayed: true,
       callback: aCallback
-    });
+    }, 0);
+  },
+
+  /**
+   * Handles a tab selection event on the instruments pane.
+   */
+  _onInstrumentsPaneTabSelect: function() {
+    if (this._instrumentsPane.selectedTab.id == "events-tab") {
+      DebuggerController.Breakpoints.DOM.scheduleEventListenersFetch();
+    }
   },
 
   /**
@@ -460,6 +530,7 @@ let DebuggerView = {
     this.StackFrames.empty();
     this.Sources.empty();
     this.Variables.empty();
+    this.EventListeners.empty();
 
     if (this.editor) {
       this.editor.setMode(SourceEditor.MODES.TEXT);
@@ -482,6 +553,7 @@ let DebuggerView = {
   Sources: null,
   Variables: null,
   WatchExpressions: null,
+  EventListeners: null,
   editor: null,
   _editorSource: {},
   _loadingText: "",
@@ -490,6 +562,7 @@ let DebuggerView = {
   _instrumentsPaneToggleButton: null,
   _collapsePaneString: "",
   _expandPaneString: "",
+  _editorDeck: null,
 };
 
 /**
@@ -734,6 +807,7 @@ ResultsPanelContainer.prototype = Heritage.extend(WidgetMethods, {
         this._panel.className = "results-panel";
         this._panel.setAttribute("level", "top");
         this._panel.setAttribute("noautofocus", "true");
+        this._panel.setAttribute("consumeoutsideclicks", "false");
         document.documentElement.appendChild(this._panel);
       }
       if (!this.widget) {

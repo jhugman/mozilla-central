@@ -171,6 +171,22 @@ var Scratchpad = {
   },
 
   /**
+   * Hide the menu bar.
+   */
+  hideMenu: function SP_hideMenu()
+  {
+    document.getElementById("sp-menubar").style.display = "none";
+  },
+
+  /**
+   * Show the menu bar.
+   */
+  showMenu: function SP_showMenu()
+  {
+    document.getElementById("sp-menubar").style.display = "";
+  },
+
+  /**
    * Get the editor content, in the given range. If no range is given you get
    * the entire editor content.
    *
@@ -312,7 +328,10 @@ var Scratchpad = {
   evaluate: function SP_evaluate(aString)
   {
     let connection;
-    if (this.executionContext == SCRATCHPAD_CONTEXT_CONTENT) {
+    if (this.target) {
+      connection = ScratchpadTarget.consoleFor(this.target);
+    }
+    else if (this.executionContext == SCRATCHPAD_CONTEXT_CONTENT) {
       connection = ScratchpadTab.consoleFor(this.gBrowser.selectedTab);
     }
     else {
@@ -1278,22 +1297,20 @@ var Scratchpad = {
       3);
 
     let args = window.arguments;
+    let state = null;
 
     if (args && args[0] instanceof Ci.nsIDialogParamBlock) {
       args = args[0];
+      this._instanceId = args.GetString(0);
+
+      state = args.GetString(1) || null;
+      if (state) {
+        state = JSON.parse(state);
+        this.setState(state);
+        initialText = state.text;
+      }
     } else {
-      // If this Scratchpad window doesn't have any arguments, horrible
-      // things might happen so we need to report an error.
-      Cu.reportError(this.strings. GetStringFromName("scratchpad.noargs"));
-    }
-
-    this._instanceId = args.GetString(0);
-
-    let state = args.GetString(1) || null;
-    if (state) {
-      state = JSON.parse(state);
-      this.setState(state);
-      initialText = state.text;
+      this._instanceId = ScratchpadManager.createUid();
     }
 
     this.editor = new Editor({
@@ -1696,6 +1713,24 @@ ScratchpadWindow.prototype = Heritage.extend(ScratchpadTab.prototype, {
 });
 
 
+function ScratchpadTarget(aTarget)
+{
+  this._target = aTarget;
+}
+
+ScratchpadTarget.consoleFor = ScratchpadTab.consoleFor;
+
+ScratchpadTarget.prototype = Heritage.extend(ScratchpadTab.prototype, {
+  _attach: function ST__attach()
+  {
+    if (this._target.isRemote) {
+      return promise.resolve(this._target);
+    }
+    return this._target.makeRemote().then(() => this._target);
+  }
+});
+
+
 /**
  * Encapsulates management of the sidebar containing the VariablesView for
  * object inspection.
@@ -1831,15 +1866,10 @@ ScratchpadSidebar.prototype = {
    */
   _update: function SS__update(aObject)
   {
+    let options = { objectActor: aObject };
     let view = this.variablesView;
     view.empty();
-
-    let scope = view.addScope();
-    scope.expanded = true;
-    scope.locked = true;
-
-    let container = scope.addItem();
-    return view.controller.expand(container, aObject);
+    return view.controller.setSingleVariable(options).expanded;
   }
 };
 

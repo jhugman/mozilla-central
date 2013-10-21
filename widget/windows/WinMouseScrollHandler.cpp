@@ -325,7 +325,8 @@ MouseScrollHandler::SynthesizeNativeMouseScrollEvent(nsWindowBase* aWidget,
 
 /* static */
 bool
-MouseScrollHandler::DispatchEvent(nsWindowBase* aWidget, nsGUIEvent& aEvent)
+MouseScrollHandler::DispatchEvent(nsWindowBase* aWidget,
+                                  WidgetGUIEvent& aEvent)
 {
   return aWidget->DispatchWindowEvent(&aEvent);
 }
@@ -333,7 +334,7 @@ MouseScrollHandler::DispatchEvent(nsWindowBase* aWidget, nsGUIEvent& aEvent)
 /* static */
 void
 MouseScrollHandler::InitEvent(nsWindowBase* aWidget,
-                              nsGUIEvent& aEvent,
+                              WidgetGUIEvent& aEvent,
                               nsIntPoint* aPoint)
 {
   NS_ENSURE_TRUE_VOID(aWidget);
@@ -643,7 +644,7 @@ MouseScrollHandler::HandleMouseWheelMessage(nsWindowBase* aWidget,
   // Grab the widget, it might be destroyed by a DOM event handler.
   nsRefPtr<nsWindowBase> kungFuDethGrip(aWidget);
 
-  WheelEvent wheelEvent(true, NS_WHEEL_WHEEL, aWidget);
+  WidgetWheelEvent wheelEvent(true, NS_WHEEL_WHEEL, aWidget);
   if (mLastEventInfo.InitWheelEvent(aWidget, wheelEvent, modKeyState)) {
     PR_LOG(gMouseScrollLog, PR_LOG_ALWAYS,
       ("MouseScroll::HandleMouseWheelMessage: dispatching "
@@ -681,7 +682,7 @@ MouseScrollHandler::HandleScrollMessageAsMouseWheelMessage(nsWindowBase* aWidget
 
   ModifierKeyState modKeyState = GetModifierKeyState(aMessage);
 
-  WheelEvent wheelEvent(true, NS_WHEEL_WHEEL, aWidget);
+  WidgetWheelEvent wheelEvent(true, NS_WHEEL_WHEEL, aWidget);
   double& delta =
    (aMessage == MOZ_WM_VSCROLL) ? wheelEvent.deltaY : wheelEvent.deltaX;
   int32_t& lineOrPageDelta =
@@ -835,7 +836,7 @@ MouseScrollHandler::LastEventInfo::RoundDelta(double aDelta)
 bool
 MouseScrollHandler::LastEventInfo::InitWheelEvent(
                                      nsWindowBase* aWidget,
-                                     WheelEvent& aWheelEvent,
+                                     WidgetWheelEvent& aWheelEvent,
                                      const ModifierKeyState& aModKeyState)
 {
   MOZ_ASSERT(aWheelEvent.message == NS_WHEEL_WHEEL);
@@ -1162,7 +1163,7 @@ MouseScrollHandler::Device::Elantech::GetDriverMajorVersion()
   // or at the start of the string.
   for (PRUnichar* p = buf; *p; p++) {
     if (*p >= L'0' && *p <= L'9' && (p == buf || *(p - 1) == L' ')) {
-      return wcstol(p, NULL, 10);
+      return wcstol(p, nullptr, 10);
     }
   }
 
@@ -1399,11 +1400,11 @@ MouseScrollHandler::Device::UltraNav::IsObsoleteDriverInstalled()
     return false;
   }
 
-  int majorVersion = wcstol(buf, NULL, 10);
+  int majorVersion = wcstol(buf, nullptr, 10);
   int minorVersion = 0;
   PRUnichar* p = wcschr(buf, L'.');
   if (p) {
-    minorVersion = wcstol(p + 1, NULL, 10);
+    minorVersion = wcstol(p + 1, nullptr, 10);
   }
   PR_LOG(gMouseScrollLog, PR_LOG_ALWAYS,
     ("MouseScroll::Device::UltraNav::IsObsoleteDriverInstalled(): "

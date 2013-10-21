@@ -48,6 +48,7 @@
 #include "ImageContainer.h"
 #include "mozilla/Telemetry.h"
 #include "gfxUtils.h"
+#include "gfxColor.h"
 #include <algorithm>
 
 using namespace mozilla;
@@ -3491,7 +3492,7 @@ DrawBorderImageComponent(nsRenderingContext&  aRenderingContext,
     aStyleBorder.SetSubImage(aIndex, subImage);
   }
 
-  gfxPattern::GraphicsFilter graphicsFilter =
+  GraphicsFilter graphicsFilter =
     nsLayoutUtils::GetGraphicsFilterForFrame(aForFrame);
 
   // If we have no tiling in either direction, we can skip the intermediate
@@ -4730,7 +4731,7 @@ nsImageRenderer::Draw(nsPresContext*       aPresContext,
     return;
   }
 
-  gfxPattern::GraphicsFilter graphicsFilter =
+  GraphicsFilter graphicsFilter =
     nsLayoutUtils::GetGraphicsFilterForFrame(mForFrame);
 
   switch (mType) {
@@ -4791,7 +4792,7 @@ nsImageRenderer::DrawBackground(nsPresContext*       aPresContext,
   }
 
   if (mType == eStyleImageType_Image) {
-    gfxPattern::GraphicsFilter graphicsFilter =
+    GraphicsFilter graphicsFilter =
       nsLayoutUtils::GetGraphicsFilterForFrame(mForFrame);
 
     nsLayoutUtils::DrawBackgroundImage(&aRenderingContext, mImageContainer,
@@ -4922,12 +4923,12 @@ nsContextBoxBlur::Init(const nsRect& aRect, nscoord aSpreadRadius,
                          blurRadius, &dirtyRect, &skipRect);
   } else {
     mContext = blur.Init(rect, spreadRadius,
-                         blurRadius, &dirtyRect, NULL);
+                         blurRadius, &dirtyRect, nullptr);
   }
 
   if (mContext) {
     // we don't need to blur if skipRect is equal to rect
-    // and mContext will be NULL
+    // and mContext will be nullptr
     mContext->SetMatrix(transform);
   }
   return mContext;

@@ -62,7 +62,6 @@
 #include "nsIAlertsService.h"
 #include "nsIAppsService.h"
 #include "nsIClipboard.h"
-#include "nsIDOMApplicationRegistry.h"
 #include "nsIDOMGeoGeolocation.h"
 #include "nsIDOMWakeLock.h"
 #include "nsIDOMWindow.h"
@@ -986,10 +985,9 @@ TryGetNameFromManifestURL(const nsAString& aManifestURL,
     nsCOMPtr<nsIAppsService> appsService = do_GetService(APPS_SERVICE_CONTRACTID);
     NS_ENSURE_TRUE_VOID(appsService);
 
-    nsCOMPtr<mozIDOMApplication> domApp;
-    appsService->GetAppByManifestURL(aManifestURL, getter_AddRefs(domApp));
+    nsCOMPtr<mozIApplication> app;
+    appsService->GetAppByManifestURL(aManifestURL, getter_AddRefs(app));
 
-    nsCOMPtr<mozIApplication> app = do_QueryInterface(domApp);
     if (!app) {
         return;
     }
@@ -1504,6 +1502,17 @@ ContentParent::ContentParent(mozIApplication* aApp,
         }
     }
 
+#ifdef MOZ_CONTENT_SANDBOX
+    // Bug 921817.  We enable the sandbox in RecvSetProcessPrivileges,
+    // which is where a preallocated process drops unnecessary privileges,
+    // but a non-preallocated process will already have changed its
+    // uid/gid/etc immediately after forking.  Thus, we send this message,
+    // which is otherwise a no-op, to sandbox it at an appropriate point
+    // during startup.
+    if (aOSPrivileges != base::PRIVILEGES_INHERIT) {
+        SendSetProcessPrivileges(base::PRIVILEGES_INHERIT);
+    }
+#endif
 }
 
 #ifdef MOZ_NUWA_PROCESS
@@ -2935,6 +2944,22 @@ ContentParent::RecvSyncMessage(const nsString& aMsg,
                                const ClonedMessageData& aData,
                                const InfallibleTArray<CpowEntry>& aCpows,
                                InfallibleTArray<nsString>* aRetvals)
+{
+  nsRefPtr<nsFrameMessageManager> ppm = mMessageManager;
+  if (ppm) {
+    StructuredCloneData cloneData = ipc::UnpackClonedMessageDataForParent(aData);
+    CpowIdHolder cpows(GetCPOWManager(), aCpows);
+    ppm->ReceiveMessage(static_cast<nsIContentFrameMessageManager*>(ppm.get()),
+                        aMsg, true, &cloneData, &cpows, aRetvals);
+  }
+  return true;
+}
+
+bool
+ContentParent::AnswerRpcMessage(const nsString& aMsg,
+                                const ClonedMessageData& aData,
+                                const InfallibleTArray<CpowEntry>& aCpows,
+                                InfallibleTArray<nsString>* aRetvals)
 {
   nsRefPtr<nsFrameMessageManager> ppm = mMessageManager;
   if (ppm) {

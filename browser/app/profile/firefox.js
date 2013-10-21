@@ -795,7 +795,6 @@ pref("browser.safebrowsing.reportPhishURL", "http://%LOCALE%.phish-report.mozill
 pref("browser.safebrowsing.reportMalwareURL", "http://%LOCALE%.malware-report.mozilla.com/?hl=%LOCALE%");
 pref("browser.safebrowsing.reportMalwareErrorURL", "http://%LOCALE%.malware-error.mozilla.com/?hl=%LOCALE%");
 
-pref("browser.safebrowsing.warning.infoURL", "https://www.mozilla.org/%LOCALE%/firefox/phishing-protection/");
 pref("browser.safebrowsing.malware.reportURL", "http://safebrowsing.clients.google.com/safebrowsing/diagnostic?client=%NAME%&hl=%LOCALE%&site=");
 // Since the application reputation query isn't hooked in anywhere yet, this
 // preference does not matter. To be extra safe, don't turn this preference on
@@ -1083,9 +1082,10 @@ pref("devtools.toolbar.visible", false);
 pref("devtools.gcli.allowSet", false);
 pref("devtools.commands.dir", "");
 
-// Disable the app manager
+// Enable the app manager
 pref("devtools.appmanager.enabled", true);
 pref("devtools.appmanager.firstrun", true);
+pref("devtools.appmanager.manifestEditor.enabled", false);
 
 // Toolbox preferences
 pref("devtools.toolbox.footer.height", 250);
@@ -1119,6 +1119,7 @@ pref("devtools.debugger.remote-timeout", 20000);
 pref("devtools.debugger.pause-on-exceptions", false);
 pref("devtools.debugger.ignore-caught-exceptions", true);
 pref("devtools.debugger.source-maps-enabled", true);
+pref("devtools.debugger.pretty-print-enabled", true);
 
 // The default Debugger UI settings
 pref("devtools.debugger.ui.panes-sources-width", 200);
@@ -1283,6 +1284,9 @@ pref("pdfjs.firstRun", true);
 // became the default.
 pref("pdfjs.previousHandler.preferredAction", 0);
 pref("pdfjs.previousHandler.alwaysAskBeforeHandling", false);
+
+// Shumway component (SWF player) is disabled by default. Also see bug 904346.
+pref("shumway.disabled", true);
 
 // The maximum amount of decoded image data we'll willingly keep around (we
 // might keep around more than this, but we'll try to get down to this value).

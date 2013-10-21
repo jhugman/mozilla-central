@@ -96,7 +96,6 @@ pref("browser.helperApps.deleteTempFileOnExit", false);
 /* password manager */
 pref("signon.rememberSignons", true);
 pref("signon.expireMasterPassword", false);
-pref("signon.SignonFileName", "signons.txt");
 
 /* autocomplete */
 pref("browser.formfill.enable", true);
@@ -324,7 +323,6 @@ pref("browser.safebrowsing.provider.0.reportMalwareURL", "http://{moz:locale}.ma
 pref("browser.safebrowsing.provider.0.reportMalwareErrorURL", "http://{moz:locale}.malware-error.mozilla.com/?hl={moz:locale}");
 
 // FAQ URLs
-pref("browser.safebrowsing.warning.infoURL", "http://www.mozilla.com/%LOCALE%/%APP%/phishing-protection/");
 pref("browser.geolocation.warning.infoURL", "http://www.mozilla.com/%LOCALE%/%APP%/geolocation/");
 
 // Name of the about: page contributed by safebrowsing to handle display of error
@@ -561,6 +559,7 @@ pref("dom.webapps.useCurrentProfile", true);
 pref("dom.sysmsg.enabled", true);
 pref("media.plugins.enabled", false);
 pref("media.omx.enabled", true);
+pref("media.rtsp.enabled", true);
 
 // Disable printing (particularly, window.print())
 pref("dom.disable_window_print", true);
@@ -795,11 +794,15 @@ pref("network.sntp.timeout", 30); // In seconds.
 // Enable promise
 pref("dom.promise.enabled", false);
 
-// DOM Inter-App Communication API.
-#ifdef MOZ_WIDGET_GONK
-// Enable this only for gonk-specific build but not for desktop build.
-pref("dom.inter-app-communication-api.enabled", true);
+// Enable dataStore
+#ifdef RELEASE_BUILD
+pref("dom.datastore.enabled", false);
+#else
+pref("dom.datastore.enabled", true);
 #endif
+
+// DOM Inter-App Communication API.
+pref("dom.inter-app-communication-api.enabled", true);
 
 // Allow ADB to run for this many hours before disabling
 // (only applies when marionette is disabled)

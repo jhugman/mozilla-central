@@ -38,7 +38,7 @@ SourcesView.prototype = Heritage.extend(WidgetMethods, {
     dumpn("Initializing the SourcesView");
 
     this.widget = new SideMenuWidget(document.getElementById("sources"), {
-      showCheckboxes: true,
+      showItemCheckboxes: true,
       showArrows: true
     });
 
@@ -50,9 +50,12 @@ SourcesView.prototype = Heritage.extend(WidgetMethods, {
     this._cmPopup = document.getElementById("sourceEditorContextMenu");
     this._cbPanel = document.getElementById("conditional-breakpoint-panel");
     this._cbTextbox = document.getElementById("conditional-breakpoint-panel-textbox");
-    this._editorDeck = document.getElementById("editor-deck");
     this._stopBlackBoxButton = document.getElementById("black-boxed-message-button");
     this._prettyPrintButton = document.getElementById("pretty-print");
+
+    if (Prefs.prettyPrintEnabled) {
+      this._prettyPrintButton.removeAttribute("hidden");
+    }
 
     window.on(EVENTS.EDITOR_LOADED, this._onEditorLoad, false);
     window.on(EVENTS.EDITOR_UNLOADED, this._onEditorUnload, false);
@@ -379,6 +382,10 @@ SourcesView.prototype = Heritage.extend(WidgetMethods, {
    * Pretty print the selected source.
    */
   prettyPrint: function() {
+    if (this._prettyPrintButton.hasAttribute("disabled")) {
+      return;
+    }
+
     const resetEditor = ([{ url }]) => {
       // Only set the text when the source is still selected.
       if (url == this.selectedValue) {
@@ -393,9 +400,11 @@ SourcesView.prototype = Heritage.extend(WidgetMethods, {
       return;
     }
 
-    let { source } = this.selectedItem.attachment;
-    let prettyPrinted = DebuggerController.SourceScripts.prettyPrint(source);
-    prettyPrinted.then(resetEditor, printError);
+    DebuggerView.showProgressBar();
+    const { source } = this.selectedItem.attachment;
+    DebuggerController.SourceScripts.prettyPrint(source)
+      .then(resetEditor, printError)
+      .then(DebuggerView.showEditor);
   },
 
   /**
@@ -681,17 +690,26 @@ SourcesView.prototype = Heritage.extend(WidgetMethods, {
     }
     // The container is not empty and an actual item was selected.
     DebuggerView.setEditorLocation(sourceItem.value);
-    this.maybeShowBlackBoxMessage();
+
+    // Set window title.
+    let script = sourceItem.value.split(" -> ").pop();
+    document.title = L10N.getFormatStr("DebuggerWindowScriptTitle", script);
+
+    DebuggerView.maybeShowBlackBoxMessage();
+    this._updatePrettyPrintButtonState();
   },
 
   /**
-   * Show or hide the black box message vs. source editor depending on if the
-   * selected source is black boxed or not.
+   * Enable or disable the pretty print button depending on whether the selected
+   * source is black boxed or not.
    */
-  maybeShowBlackBoxMessage: function() {
-    let sourceForm = this.selectedItem.attachment.source;
-    let sourceClient = DebuggerController.activeThread.source(sourceForm);
-    this._editorDeck.selectedIndex = sourceClient.isBlackBoxed ? 1 : 0;
+  _updatePrettyPrintButtonState: function() {
+    const { source } = this.selectedItem.attachment;
+    if (gThreadClient.source(source).isBlackBoxed) {
+      this._prettyPrintButton.setAttribute("disabled", true);
+    } else {
+      this._prettyPrintButton.removeAttribute("disabled");
+    }
   },
 
   /**
@@ -706,8 +724,23 @@ SourcesView.prototype = Heritage.extend(WidgetMethods, {
    * The check listener for the sources container.
    */
   _onSourceCheck: function({ detail: { checked }, target }) {
-    let item = this.getItemForElement(target);
-    DebuggerController.SourceScripts.blackBox(item.attachment.source, !checked);
+    const shouldBlackBox = !checked;
+
+    // Be optimistic that the (un-)black boxing will succeed and enable/disable
+    // the pretty print button immediately. Then, once we actually get the
+    // results from the server, make sure that it is in the correct state again
+    // by calling `_updatePrettyPrintButtonState`.
+
+    if (shouldBlackBox) {
+      this._prettyPrintButton.setAttribute("disabled", true);
+    } else {
+      this._prettyPrintButton.removeAttribute("disabled");
+    }
+
+    const { source } = this.getItemForElement(target).attachment;
+    DebuggerController.SourceScripts.blackBox(source, shouldBlackBox)
+      .then(this._updatePrettyPrintButtonState,
+            this._updatePrettyPrintButtonState);
   },
 
   /**
@@ -932,10 +965,10 @@ SourcesView.prototype = Heritage.extend(WidgetMethods, {
     // Breakpoints can only be set while the debuggee is paused. To avoid
     // an avalanche of pause/resume interrupts of the main thread, simply
     // pause it beforehand if it's not already.
-    if (gThreadClient.state == "paused") {
-      enableOthers();
-    } else {
+    if (gThreadClient.state != "paused") {
       gThreadClient.interrupt(() => enableOthers(() => gThreadClient.resume()));
+    } else {
+      enableOthers();
     }
   },
 
@@ -1493,6 +1526,274 @@ WatchExpressionsView.prototype = Heritage.extend(WidgetMethods, {
         return;
     }
   }
+});
+
+/**
+ * Functions handling the event listeners UI.
+ */
+function EventListenersView() {
+  dumpn("EventListenersView was instantiated");
+
+  this._onCheck = this._onCheck.bind(this);
+  this._onClick = this._onClick.bind(this);
+}
+
+EventListenersView.prototype = Heritage.extend(WidgetMethods, {
+  /**
+   * Initialization function, called when the debugger is started.
+   */
+  initialize: function() {
+    dumpn("Initializing the EventListenersView");
+
+    this.widget = new SideMenuWidget(document.getElementById("event-listeners"), {
+      theme: "light",
+      showItemCheckboxes: true,
+      showGroupCheckboxes: true
+    });
+
+    this.emptyText = L10N.getStr("noEventListenersText");
+    this._eventCheckboxTooltip = L10N.getStr("eventCheckboxTooltip");
+    this._onSelectorString = " " + L10N.getStr("eventOnSelector") + " ";
+    this._inSourceString = " " + L10N.getStr("eventInSource") + " ";
+    this._inNativeCodeString = L10N.getStr("eventNative");
+
+    this.widget.addEventListener("check", this._onCheck, false);
+    this.widget.addEventListener("click", this._onClick, false);
+
+    // Show an empty label by default.
+    this.empty();
+  },
+
+  /**
+   * Destruction function, called when the debugger is closed.
+   */
+  destroy: function() {
+    dumpn("Destroying the EventListenersView");
+
+    this.widget.removeEventListener("check", this._onCheck, false);
+    this.widget.removeEventListener("click", this._onClick, false);
+  },
+
+  /**
+   * Adds an event to this event listeners container.
+   *
+   * @param object aListener
+   *        The listener object coming from the active thread.
+   * @param object aOptions [optional]
+   *        Additional options for adding the source. Supported options:
+   *        - staged: true to stage the item to be appended later
+   */
+  addListener: function(aListener, aOptions = {}) {
+    let { node: { selector }, function: { url }, type } = aListener;
+    if (!type) return;
+
+    // Some listener objects may be added from plugins, thus getting
+    // translated to native code.
+    if (!url) {
+      url = this._inNativeCodeString;
+    }
+
+    // If an event item for this listener's url and type was already added,
+    // avoid polluting the view and simply increase the "targets" count.
+    let eventItem = this.getItemForPredicate(aItem =>
+      aItem.attachment.url == url &&
+      aItem.attachment.type == type);
+    if (eventItem) {
+      let { selectors, view: { targets } } = eventItem.attachment;
+      if (selectors.indexOf(selector) == -1) {
+        selectors.push(selector);
+        targets.setAttribute("value", L10N.getFormatStr("eventNodes", selectors.length));
+      }
+      return;
+    }
+
+    // There's no easy way of grouping event types into higher-level groups,
+    // so we need to do this by hand.
+    let is = (...args) => args.indexOf(type) != -1;
+    let has = str => type.contains(str);
+    let starts = str => type.startsWith(str);
+    let group;
+
+    if (starts("animation")) {
+      group = L10N.getStr("animationEvents");
+    } else if (starts("audio")) {
+      group = L10N.getStr("audioEvents");
+    } else if (is("levelchange")) {
+      group = L10N.getStr("batteryEvents");
+    } else if (is("cut", "copy", "paste")) {
+      group = L10N.getStr("clipboardEvents");
+    } else if (starts("composition")) {
+      group = L10N.getStr("compositionEvents");
+    } else if (starts("device")) {
+      group = L10N.getStr("deviceEvents");
+    } else if (is("fullscreenchange", "fullscreenerror", "orientationchange",
+      "overflow", "resize", "scroll", "underflow", "zoom")) {
+      group = L10N.getStr("displayEvents");
+    } else if (starts("drag") || starts("drop")) {
+      group = L10N.getStr("Drag and dropEvents");
+    } else if (starts("gamepad")) {
+      group = L10N.getStr("gamepadEvents");
+    } else if (is("canplay", "canplaythrough", "durationchange", "emptied",
+      "ended", "loadeddata", "loadedmetadata", "pause", "play", "playing",
+      "ratechange", "seeked", "seeking", "stalled", "suspend", "timeupdate",
+      "volumechange", "waiting")) {
+      group = L10N.getStr("mediaEvents");
+    } else if (is("blocked", "complete", "success", "upgradeneeded", "versionchange")) {
+      group = L10N.getStr("indexedDBEvents");
+    } else if (is("blur", "change", "focus", "focusin", "focusout", "invalid",
+      "reset", "select", "submit")) {
+      group = L10N.getStr("interactionEvents");
+    } else if (starts("key") || is("input")) {
+      group = L10N.getStr("keyboardEvents");
+    } else if (starts("mouse") || has("click") || is("contextmenu", "show", "wheel")) {
+      group = L10N.getStr("mouseEvents");
+    } else if (starts("DOM")) {
+      group = L10N.getStr("mutationEvents");
+    } else if (is("abort", "error", "hashchange", "load", "loadend", "loadstart",
+      "pagehide", "pageshow", "progress", "timeout", "unload", "uploadprogress",
+      "visibilitychange")) {
+      group = L10N.getStr("navigationEvents");
+    } else if (is("pointerlockchange", "pointerlockerror")) {
+      group = L10N.getStr("Pointer lockEvents");
+    } else if (is("compassneedscalibration", "userproximity")) {
+      group = L10N.getStr("sensorEvents");
+    } else if (starts("storage")) {
+      group = L10N.getStr("storageEvents");
+    } else if (is("beginEvent", "endEvent", "repeatEvent")) {
+      group = L10N.getStr("timeEvents");
+    } else if (starts("touch")) {
+      group = L10N.getStr("touchEvents");
+    } else {
+      group = L10N.getStr("otherEvents");
+    }
+
+    // Create the element node for the event listener item.
+    let itemView = this._createItemView(type, selector, url);
+
+    // Event breakpoints survive target navigations. Make sure the newly
+    // inserted event item is correctly checked.
+    let checkboxState =
+      DebuggerController.Breakpoints.DOM.activeEventNames.indexOf(type) != -1;
+
+    // Append an event listener item to this container.
+    this.push([itemView.container, url, group], {
+      staged: aOptions.staged, /* stage the item to be appended later? */
+      attachment: {
+        url: url,
+        type: type,
+        view: itemView,
+        selectors: [selector],
+        checkboxState: checkboxState,
+        checkboxTooltip: this._eventCheckboxTooltip
+      }
+    });
+  },
+
+  /**
+   * Gets all the event types known to this container.
+   *
+   * @return array
+   *         List of event types, for example ["load", "click"...]
+   */
+  getAllEvents: function() {
+    return this.attachments.map(e => e.type);
+  },
+
+  /**
+   * Gets the checked event types in this container.
+   *
+   * @return array
+   *         List of event types, for example ["load", "click"...]
+   */
+  getCheckedEvents: function() {
+    return this.attachments.filter(e => e.checkboxState).map(e => e.type);
+  },
+
+  /**
+   * Customization function for creating an item's UI.
+   *
+   * @param string aType
+   *        The event type, for example "click".
+   * @param string aSelector
+   *        The target element's selector.
+   * @param string url
+   *        The source url in which the event listener is located.
+   * @return object
+   *         An object containing the event listener view nodes.
+   */
+  _createItemView: function(aType, aSelector, aUrl) {
+    let container = document.createElement("hbox");
+    container.className = "dbg-event-listener";
+
+    let eventType = document.createElement("label");
+    eventType.className = "plain dbg-event-listener-type";
+    eventType.setAttribute("value", aType);
+    container.appendChild(eventType);
+
+    let typeSeparator = document.createElement("label");
+    typeSeparator.className = "plain dbg-event-listener-separator";
+    typeSeparator.setAttribute("value", this._onSelectorString);
+    container.appendChild(typeSeparator);
+
+    let eventTargets = document.createElement("label");
+    eventTargets.className = "plain dbg-event-listener-targets";
+    eventTargets.setAttribute("value", aSelector);
+    container.appendChild(eventTargets);
+
+    let selectorSeparator = document.createElement("label");
+    selectorSeparator.className = "plain dbg-event-listener-separator";
+    selectorSeparator.setAttribute("value", this._inSourceString);
+    container.appendChild(selectorSeparator);
+
+    let eventLocation = document.createElement("label");
+    eventLocation.className = "plain dbg-event-listener-location";
+    eventLocation.setAttribute("value", SourceUtils.getSourceLabel(aUrl));
+    eventLocation.setAttribute("flex", "1");
+    eventLocation.setAttribute("crop", "center");
+    container.appendChild(eventLocation);
+
+    return {
+      container: container,
+      type: eventType,
+      targets: eventTargets,
+      location: eventLocation
+    };
+  },
+
+  /**
+   * The check listener for the event listeners container.
+   */
+  _onCheck: function({ detail: { description, checked }, target }) {
+    if (description == "item") {
+      this.getItemForElement(target).attachment.checkboxState = checked;
+      DebuggerController.Breakpoints.DOM.scheduleEventBreakpointsUpdate();
+      return;
+    }
+
+    // Check all the event items in this group.
+    this.items
+      .filter(e => e.description == description)
+      .forEach(e => this.callMethod("checkItem", e.target, checked));
+  },
+
+  /**
+   * The select listener for the event listeners container.
+   */
+  _onClick: function({ target }) {
+    // Changing the checkbox state is handled by the _onCheck event. Avoid
+    // handling that again in this click event, so pass in "noSiblings"
+    // when retrieving the target's item, to ignore the checkbox.
+    let eventItem = this.getItemForElement(target, { noSiblings: true });
+    if (eventItem) {
+      let newState = eventItem.attachment.checkboxState ^= 1;
+      this.callMethod("checkItem", eventItem.target, newState);
+    }
+  },
+
+  _eventCheckboxTooltip: "",
+  _onSelectorString: "",
+  _inSourceString: "",
+  _inNativeCodeString: ""
 });
 
 /**
@@ -2228,4 +2529,5 @@ LineResults.size = function() {
  */
 DebuggerView.Sources = new SourcesView();
 DebuggerView.WatchExpressions = new WatchExpressionsView();
+DebuggerView.EventListeners = new EventListenersView();
 DebuggerView.GlobalSearch = new GlobalSearchView();

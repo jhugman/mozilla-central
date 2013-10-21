@@ -483,7 +483,7 @@ nsIMEStateManager::SetIMEState(const IMEState &aState,
           willSubmit = true;
         // is this an html form and does it only have a single text input element?
         } else if (formElement && formElement->Tag() == nsGkAtoms::form && formElement->IsHTML() &&
-                   static_cast<dom::HTMLFormElement*>(formElement)->HasSingleTextControl()) {
+                   !static_cast<dom::HTMLFormElement*>(formElement)->ImplicitSubmissionIsDisabled()) {
           willSubmit = true;
         }
       }
@@ -522,7 +522,7 @@ nsIMEStateManager::EnsureTextCompositionArray()
 void
 nsIMEStateManager::DispatchCompositionEvent(nsINode* aEventTargetNode,
                                             nsPresContext* aPresContext,
-                                            nsEvent* aEvent,
+                                            WidgetEvent* aEvent,
                                             nsEventStatus* aStatus,
                                             nsDispatchingCallback* aCallBack)
 {
@@ -534,7 +534,7 @@ nsIMEStateManager::DispatchCompositionEvent(nsINode* aEventTargetNode,
 
   EnsureTextCompositionArray();
 
-  nsGUIEvent* GUIEvent = static_cast<nsGUIEvent*>(aEvent);
+  WidgetGUIEvent* GUIEvent = static_cast<WidgetGUIEvent*>(aEvent);
 
   TextComposition* composition =
     sTextCompositions->GetCompositionFor(GUIEvent->widget);

@@ -778,18 +778,6 @@ var gBrowserInit = {
     window.QueryInterface(Ci.nsIDOMChromeWindow).browserDOMWindow =
       new nsBrowserAccess();
 
-    // set default character set if provided
-    // window.arguments[1]: character set (string)
-    if ("arguments" in window && window.arguments.length > 1 && window.arguments[1]) {
-      if (window.arguments[1].startsWith("charset=")) {
-        var arrayArgComponents = window.arguments[1].split("=");
-        if (arrayArgComponents) {
-          //we should "inherit" the charset menu setting in a new window
-          getMarkupDocumentViewer().defaultCharacterSet = arrayArgComponents[1];
-        }
-      }
-    }
-
     // Manually hook up session and global history for the first browser
     // so that we don't have to load global history before bringing up a
     // window.
@@ -2404,11 +2392,7 @@ let BrowserOnClick = {
           }
         }
         else { // It's a phishing site, not malware
-          try {
-            content.location = formatURL("browser.safebrowsing.warning.infoURL", true);
-          } catch (e) {
-            Components.utils.reportError("Couldn't get phishing info URL: " + e);
-          }
+          openHelpLink("phishing-malware", false, "current");
         }
         break;
 
@@ -6438,6 +6422,14 @@ var gIdentityHandler = {
   },
 
   /**
+   * Handler for commands on the help button in the "identity-popup" panel.
+   */
+  handleHelpCommand : function(event) {
+    openHelpLink("secure-connection");
+    this._identityPopup.hidePopup();
+  },
+
+  /**
    * Handler for mouseclicks on the "More Information" button in the
    * "identity-popup" panel.
    */
@@ -7123,7 +7115,14 @@ function safeModeRestart()
   let rv = Services.prompt.confirmEx(window, promptTitle, promptMessage,
                                      buttonFlags, restartText, null, null,
                                      null, {});
-  if (rv == 0) {
+  if (rv != 0)
+    return;
+
+  let cancelQuit = Cc["@mozilla.org/supports-PRBool;1"]
+                     .createInstance(Ci.nsISupportsPRBool);
+  Services.obs.notifyObservers(cancelQuit, "quit-application-requested", "restart");
+
+  if (!cancelQuit.data) {
     Services.startup.restartInSafeMode(Ci.nsIAppStartup.eAttemptQuit);
   }
 }

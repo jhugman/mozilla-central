@@ -305,6 +305,7 @@
 @BINPATH@/components/shistory.xpt
 @BINPATH@/components/spellchecker.xpt
 @BINPATH@/components/storage.xpt
+@BINPATH@/components/toolkit_finalizationwitness.xpt
 @BINPATH@/components/toolkitprofile.xpt
 #ifdef MOZ_ENABLE_XREMOTE
 @BINPATH@/components/toolkitremote.xpt
@@ -373,7 +374,6 @@
 @BINPATH@/components/nsLoginInfo.js
 @BINPATH@/components/nsLoginManager.js
 @BINPATH@/components/nsLoginManagerPrompter.js
-@BINPATH@/components/storage-Legacy.js
 @BINPATH@/components/storage-mozStorage.js
 @BINPATH@/components/crypto-SDR.js
 @BINPATH@/components/jsconsole-clhandler.manifest
@@ -593,6 +593,8 @@
 @BINPATH@/browser/chrome/browser.manifest
 @BINPATH@/browser/chrome/pdfjs.manifest
 @BINPATH@/browser/chrome/pdfjs/*
+@BINPATH@/browser/chrome/shumway.manifest
+@BINPATH@/browser/chrome/shumway/*
 @BINPATH@/browser/extensions/{972ce4c6-7e08-4474-a285-3208198ce6fd}/install.rdf
 @BINPATH@/browser/extensions/{972ce4c6-7e08-4474-a285-3208198ce6fd}/icon.png
 @BINPATH@/chrome/toolkit@JAREXT@
@@ -785,6 +787,7 @@ bin/libfreebl_32int64_3.so
 @BINPATH@/webapprt/modules/WebappRT.jsm
 @BINPATH@/webapprt/modules/WebappsHandler.jsm
 @BINPATH@/webapprt/modules/RemoteDebugger.jsm
+@BINPATH@/webapprt/modules/WebRTCHandler.jsm
 #endif
 
 #ifdef MOZ_METRO
@@ -813,6 +816,11 @@ bin/libfreebl_32int64_3.so
 @BINPATH@/metro/defaults
 @BINPATH@/metro/modules
 #endif
+
+@BINPATH@/components/DataStore.manifest
+@BINPATH@/components/DataStoreService.js
+@BINPATH@/components/dom_datastore.xpt
+
 
 #ifdef MOZ_ASAN
 @BINPATH@/llvm-symbolizer

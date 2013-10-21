@@ -23,7 +23,6 @@
 #include "nsAttrValueOrString.h"
 #include "nsBindingManager.h"
 #include "nsCCUncollectableMarker.h"
-#include "nsClientRect.h"
 #include "nsContentCreatorFunctions.h"
 #include "nsContentList.h"
 #include "nsContentUtils.h"
@@ -1148,7 +1147,7 @@ nsINode::PostHandleEvent(nsEventChainPostVisitor& /*aVisitor*/)
 }
 
 nsresult
-nsINode::DispatchDOMEvent(nsEvent* aEvent,
+nsINode::DispatchDOMEvent(WidgetEvent* aEvent,
                           nsIDOMEvent* aDOMEvent,
                           nsPresContext* aPresContext,
                           nsEventStatus* aEventStatus)
@@ -2338,21 +2337,30 @@ template<bool onlyFirstMatch, class T>
 inline static nsresult
 FindMatchingElements(nsINode* aRoot, const nsAString& aSelector, T &aList)
 {
-  nsAutoPtr<nsCSSSelectorList> selectorList;
-  nsresult rv = ParseSelectorList(aRoot, aSelector,
-                                  getter_Transfers(selectorList));
-  if (NS_FAILED(rv)) {
-    // We hit this for syntax errors, which are quite common, so don't
-    // use NS_ENSURE_SUCCESS.  (For example, jQuery has an extended set
-    // of selectors, but it sees if we can parse them first.)
-    return rv;
+
+  nsIDocument* doc = aRoot->OwnerDoc();
+  nsIDocument::SelectorCache& cache = doc->GetSelectorCache();
+  nsCSSSelectorList* selectorList = cache.GetList(aSelector);
+
+  if (!selectorList) {
+    nsresult rv = ParseSelectorList(aRoot, aSelector,
+                                    &selectorList);
+    if (NS_FAILED(rv)) {
+      delete selectorList;
+      // We hit this for syntax errors, which are quite common, so don't
+      // use NS_ENSURE_SUCCESS.  (For example, jQuery has an extended set
+      // of selectors, but it sees if we can parse them first.)
+      return rv;
+    }
+
+    NS_ENSURE_TRUE(selectorList, NS_OK);
+
+    cache.CacheList(aSelector, selectorList);
   }
-  NS_ENSURE_TRUE(selectorList, NS_OK);
 
   NS_ASSERTION(selectorList->mSelectors,
                "How can we not have any selectors?");
 
-  nsIDocument* doc = aRoot->OwnerDoc();
   TreeMatchContext matchingContext(false, nsRuleWalker::eRelevantLinkUnvisited,
                                    doc, TreeMatchContext::eNeverMatchVisited);
   doc->FlushPendingLinkUpdates();

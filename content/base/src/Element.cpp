@@ -10,13 +10,15 @@
  * utility methods for subclasses, and so forth.
  */
 
-#include "mozilla/dom/Element.h"
+#include "mozilla/dom/ElementInlines.h"
 
 #include "mozilla/DebugOnly.h"
 #include "mozilla/dom/Attr.h"
 #include "nsDOMAttributeMap.h"
 #include "nsIAtom.h"
+#include "nsIContentInlines.h"
 #include "nsINodeInfo.h"
+#include "nsIDocumentEncoder.h"
 #include "nsIDocumentInlines.h"
 #include "nsIDOMNodeList.h"
 #include "nsIDOMDocument.h"
@@ -70,7 +72,7 @@
 #include "nsXBLBinding.h"
 #include "nsPIDOMWindow.h"
 #include "nsPIBoxObject.h"
-#include "nsClientRect.h"
+#include "mozilla/dom/DOMRect.h"
 #include "nsSVGUtils.h"
 #include "nsLayoutUtils.h"
 #include "nsGkAtoms.h"
@@ -647,10 +649,10 @@ Element::GetClientAreaRect()
   return nsRect(0, 0, 0, 0);
 }
 
-already_AddRefed<nsClientRect>
+already_AddRefed<DOMRect>
 Element::GetBoundingClientRect()
 {
-  nsRefPtr<nsClientRect> rect = new nsClientRect(this);
+  nsRefPtr<DOMRect> rect = new DOMRect(this);
   
   nsIFrame* frame = GetPrimaryFrame(Flush_Layout);
   if (!frame) {
@@ -665,10 +667,10 @@ Element::GetBoundingClientRect()
   return rect.forget();
 }
 
-already_AddRefed<nsClientRectList>
+already_AddRefed<DOMRectList>
 Element::GetClientRects()
 {
-  nsRefPtr<nsClientRectList> rectList = new nsClientRectList(this);
+  nsRefPtr<DOMRectList> rectList = new DOMRectList(this);
 
   nsIFrame* frame = GetPrimaryFrame(Flush_Layout);
   if (!frame) {
@@ -1171,7 +1173,9 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
       nsIDocument::UnlockPointer();
     }
     if (GetParent()) {
-      NS_RELEASE(mParent);
+      nsINode* p = mParent;
+      mParent = nullptr;
+      NS_RELEASE(p);
     } else {
       mParent = nullptr;
     }
@@ -1403,7 +1407,7 @@ Element::IsNodeOfType(uint32_t aFlags) const
 /* static */
 nsresult
 Element::DispatchEvent(nsPresContext* aPresContext,
-                       nsEvent* aEvent,
+                       WidgetEvent* aEvent,
                        nsIContent* aTarget,
                        bool aFullDispatch,
                        nsEventStatus* aStatus)
@@ -1441,16 +1445,16 @@ Element::DispatchClickEvent(nsPresContext* aPresContext,
   NS_PRECONDITION(aSourceEvent, "Must have source event");
   NS_PRECONDITION(aStatus, "Null out param?");
 
-  nsMouseEvent event(aSourceEvent->mFlags.mIsTrusted, NS_MOUSE_CLICK,
-                     aSourceEvent->widget, nsMouseEvent::eReal);
+  WidgetMouseEvent event(aSourceEvent->mFlags.mIsTrusted, NS_MOUSE_CLICK,
+                         aSourceEvent->widget, WidgetMouseEvent::eReal);
   event.refPoint = aSourceEvent->refPoint;
   uint32_t clickCount = 1;
   float pressure = 0;
   uint16_t inputSource = 0;
   if (aSourceEvent->eventStructType == NS_MOUSE_EVENT) {
-    clickCount = static_cast<nsMouseEvent*>(aSourceEvent)->clickCount;
-    pressure = static_cast<nsMouseEvent*>(aSourceEvent)->pressure;
-    inputSource = static_cast<nsMouseEvent*>(aSourceEvent)->inputSource;
+    clickCount = static_cast<WidgetMouseEvent*>(aSourceEvent)->clickCount;
+    pressure = static_cast<WidgetMouseEvent*>(aSourceEvent)->pressure;
+    inputSource = static_cast<WidgetMouseEvent*>(aSourceEvent)->inputSource;
   } else if (aSourceEvent->eventStructType == NS_KEY_EVENT) {
     inputSource = nsIDOMMouseEvent::MOZ_SOURCE_KEYBOARD;
   }
@@ -2222,8 +2226,8 @@ Element::PostHandleEventForLinks(nsEventChainPostVisitor& aVisitor)
   case NS_MOUSE_BUTTON_DOWN:
     {
       if (aVisitor.mEvent->eventStructType == NS_MOUSE_EVENT &&
-          static_cast<nsMouseEvent*>(aVisitor.mEvent)->button ==
-          nsMouseEvent::eLeftButton) {
+          static_cast<WidgetMouseEvent*>(aVisitor.mEvent)->button ==
+            WidgetMouseEvent::eLeftButton) {
         // don't make the link grab the focus if there is no link handler
         nsILinkHandler *handler = aVisitor.mPresContext->GetLinkHandler();
         nsIDocument *document = GetCurrentDoc();
@@ -3106,14 +3110,15 @@ Serialize(Element* aRoot, bool aDescendentsOnly, nsAString& aOut)
   }
 }
 
-nsresult
+void
 Element::GetMarkup(bool aIncludeSelf, nsAString& aMarkup)
 {
   aMarkup.Truncate();
 
   nsIDocument* doc = OwnerDoc();
   if (IsInHTMLDocument()) {
-    return Serialize(this, !aIncludeSelf, aMarkup) ? NS_OK : NS_ERROR_OUT_OF_MEMORY;
+    Serialize(this, !aIncludeSelf, aMarkup);
+    return;
   }
 
   nsAutoString contentType;
@@ -3134,7 +3139,7 @@ Element::GetMarkup(bool aIncludeSelf, nsAString& aMarkup)
     docEncoder = do_CreateInstance(NS_DOC_ENCODER_CONTRACTID_BASE "application/xml");
   }
 
-  NS_ENSURE_TRUE(docEncoder, NS_ERROR_FAILURE);
+  NS_ENSURE_TRUE_VOID(docEncoder);
 
   uint32_t flags = nsIDocumentEncoder::OutputEncodeBasicEntities |
                    // Output DOM-standard newlines
@@ -3152,8 +3157,8 @@ Element::GetMarkup(bool aIncludeSelf, nsAString& aMarkup)
     }
   }
 
-  nsresult rv = docEncoder->NativeInit(doc, contentType, flags);
-  NS_ENSURE_SUCCESS(rv, rv);
+  DebugOnly<nsresult> rv = docEncoder->NativeInit(doc, contentType, flags);
+  MOZ_ASSERT(NS_SUCCEEDED(rv));
 
   if (aIncludeSelf) {
     docEncoder->SetNativeNode(this);
@@ -3161,10 +3166,10 @@ Element::GetMarkup(bool aIncludeSelf, nsAString& aMarkup)
     docEncoder->SetNativeContainerNode(this);
   }
   rv = docEncoder->EncodeToString(aMarkup);
+  MOZ_ASSERT(NS_SUCCEEDED(rv));
   if (!aIncludeSelf) {
     doc->SetCachedEncoder(docEncoder.forget());
   }
-  return rv;
 }
 
 /**
@@ -3196,10 +3201,11 @@ FireMutationEventsForDirectParsing(nsIDocument* aDoc, nsIContent* aDest,
   }
 }
 
-void
-Element::GetInnerHTML(nsAString& aInnerHTML, ErrorResult& aError)
+NS_IMETHODIMP
+Element::GetInnerHTML(nsAString& aInnerHTML)
 {
-  aError = GetMarkup(false, aInnerHTML);
+  GetMarkup(false, aInnerHTML);
+  return NS_OK;
 }
 
 void
@@ -3265,9 +3271,9 @@ Element::SetInnerHTML(const nsAString& aInnerHTML, ErrorResult& aError)
 }
 
 void
-Element::GetOuterHTML(nsAString& aOuterHTML, ErrorResult& aError)
+Element::GetOuterHTML(nsAString& aOuterHTML)
 {
-  aError = GetMarkup(true, aOuterHTML);
+  GetMarkup(true, aOuterHTML);
 }
 
 void

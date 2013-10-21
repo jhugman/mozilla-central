@@ -3085,7 +3085,7 @@ class XPCJSContextStack
 {
 public:
     XPCJSContextStack()
-      : mSafeJSContext(NULL)
+      : mSafeJSContext(nullptr)
     { }
 
     virtual ~XPCJSContextStack();
@@ -3097,7 +3097,7 @@ public:
 
     JSContext *Peek()
     {
-        return mStack.IsEmpty() ? NULL : mStack[mStack.Length() - 1].cx;
+        return mStack.IsEmpty() ? nullptr : mStack[mStack.Length() - 1].cx;
     }
 
     JSContext *GetSafeJSContext();
@@ -3590,12 +3590,13 @@ struct GlobalProperties {
     GlobalProperties() { mozilla::PodZero(this); }
     bool Parse(JSContext *cx, JS::HandleObject obj);
     bool Define(JSContext *cx, JS::HandleObject obj);
-    bool indexedDB;
-    bool XMLHttpRequest;
-    bool TextDecoder;
-    bool TextEncoder;
-    bool atob;
-    bool btoa;
+    bool indexedDB : 1;
+    bool XMLHttpRequest : 1;
+    bool TextDecoder : 1;
+    bool TextEncoder : 1;
+    bool URL : 1;
+    bool atob : 1;
+    bool btoa : 1;
 };
 
 // Infallible.
@@ -3606,15 +3607,40 @@ NewSandboxConstructor();
 bool
 IsSandbox(JSObject *obj);
 
-struct SandboxOptions {
-    SandboxOptions(JSContext *cx)
-        : wantXrays(true)
+class MOZ_STACK_CLASS OptionsBase {
+public:
+    OptionsBase(JSContext *cx = xpc_GetSafeJSContext(),
+                JS::HandleObject options = JS::NullPtr())
+        : mCx(cx)
+        , mObject(cx, options)
+    { }
+
+    virtual bool Parse() = 0;
+
+protected:
+    bool ParseValue(const char *name, JS::MutableHandleValue prop, bool *found);
+    bool ParseBoolean(const char *name, bool *prop);
+    bool ParseObject(const char *name, JS::MutableHandleObject prop);
+    bool ParseString(const char *name, nsCString &prop);
+
+    JSContext *mCx;
+    JS::RootedObject mObject;
+};
+
+class MOZ_STACK_CLASS SandboxOptions : public OptionsBase {
+public:
+    SandboxOptions(JSContext *cx = xpc_GetSafeJSContext(),
+                   JS::HandleObject options = JS::NullPtr())
+        : OptionsBase(cx, options)
+        , wantXrays(true)
         , wantComponents(true)
         , wantExportHelpers(false)
-        , proto(xpc_GetSafeJSContext())
-        , sameZoneAs(xpc_GetSafeJSContext())
-        , metadata(xpc_GetSafeJSContext())
+        , proto(cx)
+        , sameZoneAs(cx)
+        , metadata(cx)
     { }
+
+    virtual bool Parse();
 
     bool wantXrays;
     bool wantComponents;
@@ -3624,6 +3650,9 @@ struct SandboxOptions {
     JS::RootedObject sameZoneAs;
     GlobalProperties globalProperties;
     JS::RootedValue metadata;
+
+protected:
+    bool ParseGlobalProperties();
 };
 
 JSObject *

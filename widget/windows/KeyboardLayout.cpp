@@ -155,19 +155,19 @@ ModifierKeyState::InitMouseEvent(WidgetInputEvent& aMouseEvent) const
     static_cast<WidgetMouseEventBase&>(aMouseEvent);
   mouseEvent.buttons = 0;
   if (::GetKeyState(VK_LBUTTON) < 0) {
-    mouseEvent.buttons |= nsMouseEvent::eLeftButtonFlag;
+    mouseEvent.buttons |= WidgetMouseEvent::eLeftButtonFlag;
   }
   if (::GetKeyState(VK_RBUTTON) < 0) {
-    mouseEvent.buttons |= nsMouseEvent::eRightButtonFlag;
+    mouseEvent.buttons |= WidgetMouseEvent::eRightButtonFlag;
   }
   if (::GetKeyState(VK_MBUTTON) < 0) {
-    mouseEvent.buttons |= nsMouseEvent::eMiddleButtonFlag;
+    mouseEvent.buttons |= WidgetMouseEvent::eMiddleButtonFlag;
   }
   if (::GetKeyState(VK_XBUTTON1) < 0) {
-    mouseEvent.buttons |= nsMouseEvent::e4thButtonFlag;
+    mouseEvent.buttons |= WidgetMouseEvent::e4thButtonFlag;
   }
   if (::GetKeyState(VK_XBUTTON2) < 0) {
-    mouseEvent.buttons |= nsMouseEvent::e5thButtonFlag;
+    mouseEvent.buttons |= WidgetMouseEvent::e5thButtonFlag;
   }
 }
 
@@ -2234,7 +2234,7 @@ KeyboardLayout::SynthesizeNativeKeyEvent(nsWindowBase* aWidget,
                                          const nsAString& aCharacters,
                                          const nsAString& aUnmodifiedCharacters)
 {
-  UINT keyboardLayoutListCount = ::GetKeyboardLayoutList(0, NULL);
+  UINT keyboardLayoutListCount = ::GetKeyboardLayoutList(0, nullptr);
   NS_ASSERTION(keyboardLayoutListCount > 0,
                "One keyboard layout must be installed at least");
   HKL keyboardLayoutListBuff[50];
@@ -2248,7 +2248,7 @@ KeyboardLayout::SynthesizeNativeKeyEvent(nsWindowBase* aWidget,
 
   nsPrintfCString layoutName("%08x", aNativeKeyboardLayout);
   HKL loadedLayout = LoadKeyboardLayoutA(layoutName.get(), KLF_NOTELLSHELL);
-  if (loadedLayout == NULL) {
+  if (loadedLayout == nullptr) {
     if (keyboardLayoutListBuff != keyboardLayoutList) {
       delete [] keyboardLayoutList;
     }

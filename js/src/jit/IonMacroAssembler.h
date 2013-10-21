@@ -237,6 +237,21 @@ class MacroAssembler : public MacroAssemblerSpecific
 #endif
     }
 
+    MacroAssembler(JSContext *cx, IonScript *ion)
+      : enoughMemory_(true),
+        embedsNurseryPointers_(false),
+        sps_(NULL)
+    {
+        constructRoot(cx);
+         ionContext_.construct(cx, (js::jit::TempAllocator *)NULL);
+         alloc_.construct(cx);
+#ifdef JS_CPU_ARM
+         initWithAllocator();
+         m_buffer.id = GetIonContext()->getNextAssemblerId();
+#endif
+        setFramePushed(ion->frameSize());
+    }
+
     void setInstrumentation(IonInstrumentation *sps) {
         sps_ = sps;
     }
@@ -392,8 +407,10 @@ class MacroAssembler : public MacroAssemblerSpecific
             storeValue(src.valueReg(), dest);
         } else if (IsFloatingPointType(src.type())) {
             FloatRegister reg = src.typedReg().fpu();
-            if (src.type() == MIRType_Float32)
-                convertFloatToDouble(reg, reg);
+            if (src.type() == MIRType_Float32) {
+                convertFloatToDouble(reg, ScratchFloatReg);
+                reg = ScratchFloatReg;
+            }
             storeDouble(reg, dest);
         } else {
             storeValue(ValueTypeFromMIRType(src.type()), src.typedReg().gpr(), dest);
@@ -538,8 +555,10 @@ class MacroAssembler : public MacroAssemblerSpecific
             Push(v.valueReg());
         } else if (IsFloatingPointType(v.type())) {
             FloatRegister reg = v.typedReg().fpu();
-            if (v.type() == MIRType_Float32)
-                convertFloatToDouble(reg, reg);
+            if (v.type() == MIRType_Float32) {
+                convertFloatToDouble(reg, ScratchFloatReg);
+                reg = ScratchFloatReg;
+            }
             Push(reg);
         } else {
             Push(ValueTypeFromMIRType(v.type()), v.typedReg().gpr());
@@ -912,18 +931,13 @@ class MacroAssembler : public MacroAssemblerSpecific
         // of the JSObject::isWrapper test performed in EmulatesUndefined.  If none
         // of the branches are taken, we can check class flags directly.
         loadObjClass(objReg, scratch);
-        branchPtr(Assembler::Equal, scratch, ImmPtr(&ObjectProxyObject::class_), slowCheck);
+        branchPtr(Assembler::Equal, scratch, ImmPtr(&ProxyObject::callableClass_), slowCheck);
+        branchPtr(Assembler::Equal, scratch, ImmPtr(&ProxyObject::uncallableClass_), slowCheck);
         branchPtr(Assembler::Equal, scratch, ImmPtr(&OuterWindowProxyObject::class_), slowCheck);
-        branchPtr(Assembler::Equal, scratch, ImmPtr(&FunctionProxyObject::class_), slowCheck);
 
         test32(Address(scratch, Class::offsetOfFlags()), Imm32(JSCLASS_EMULATES_UNDEFINED));
         return truthy ? Assembler::Zero : Assembler::NonZero;
     }
-
-    void pushCalleeToken(Register callee, ExecutionMode mode);
-    void PushCalleeToken(Register callee, ExecutionMode mode);
-    void tagCallee(Register callee, ExecutionMode mode);
-    void clearCalleeTag(Register callee, ExecutionMode mode);
 
   private:
     // These two functions are helpers used around call sites throughout the
@@ -1050,7 +1064,7 @@ class MacroAssembler : public MacroAssemblerSpecific
         storePtr(ImmPtr(nullptr), Address(temp, ProfileEntry::offsetOfStackAddress()));
 
         // Store 0 for PCIdx because that's what interpreter does.
-        // (See Probes::enterScript, which calls spsProfiler.enter, which pushes an entry
+        // (See probes::EnterScript, which calls spsProfiler.enter, which pushes an entry
         //  with 0 pcIdx).
         store32(Imm32(0), Address(temp, ProfileEntry::offsetOfPCIdx()));
 
@@ -1313,6 +1327,26 @@ class MacroAssembler : public MacroAssemblerSpecific
                                   Label *fail)
     {
         convertTypedOrValueToInt(src, temp, output, fail, IntConversion_ClampToUint8);
+    }
+
+  public:
+    class AfterICSaveLive {
+        friend class MacroAssembler;
+        AfterICSaveLive()
+        {}
+    };
+
+    AfterICSaveLive icSaveLive(RegisterSet &liveRegs) {
+        PushRegsInMask(liveRegs);
+        return AfterICSaveLive();
+    }
+
+    bool icBuildOOLFakeExitFrame(void *fakeReturnAddr, AfterICSaveLive &aic) {
+        return buildOOLFakeExitFrame(fakeReturnAddr);
+    }
+
+    void icRestoreLive(RegisterSet &liveRegs, AfterICSaveLive &aic) {
+        PopRegsInMask(liveRegs);
     }
 };
 

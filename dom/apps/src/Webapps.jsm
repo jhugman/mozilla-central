@@ -76,6 +76,10 @@ XPCOMUtils.defineLazyGetter(this, "interAppCommService", function() {
          .getService(Ci.nsIInterAppCommService);
 });
 
+XPCOMUtils.defineLazyServiceGetter(this, "dataStoreService",
+                                   "@mozilla.org/datastore-service;1",
+                                   "nsIDataStoreService");
+
 XPCOMUtils.defineLazyGetter(this, "msgmgr", function() {
   return Cc["@mozilla.org/system-message-internal;1"]
          .getService(Ci.nsISystemMessagesInternal);
@@ -281,6 +285,20 @@ this.DOMApplicationRegistry = {
       // Nothing else to do but notifying we're ready.
       this.notifyAppsRegistryReady();
     }
+  },
+
+  updateDataStoreForApp: function(aId) {
+    if (!this.webapps[aId]) {
+      return;
+    }
+
+    // Create or Update the DataStore for this app
+    this._readManifests([{ id: aId }], (function(aResult) {
+      this.updateDataStore(this.webapps[aId].localId,
+                           this.webapps[aId].origin,
+                           this.webapps[aId].manifestURL,
+                           aResult[0].manifest);
+    }).bind(this));
   },
 
   updatePermissionsForApp: function updatePermissionsForApp(aId) {
@@ -529,6 +547,12 @@ this.DOMApplicationRegistry = {
         // installPreinstalledApp() removes the ones failing to install.
         this._saveApps();
       }
+
+      // DataStores must be initialized at startup.
+      for (let id in this.webapps) {
+        this.updateDataStoreForApp(id);
+      }
+
       this.registerAppsHandlers(runUpdate);
     }).bind(this);
 
@@ -543,6 +567,30 @@ this.DOMApplicationRegistry = {
       onAppsLoaded();
 #endif
     }).bind(this));
+  },
+
+  updateDataStore: function(aId, aOrigin, aManifestURL, aManifest) {
+    if ('datastores-owned' in aManifest) {
+      for (let name in aManifest['datastores-owned']) {
+        let readonly = "access" in aManifest['datastores-owned'][name]
+                         ? aManifest['datastores-owned'][name].access == 'readonly'
+                         : false;
+
+        dataStoreService.installDataStore(aId, name, aOrigin, aManifestURL,
+                                          readonly);
+      }
+    }
+
+    if ('datastores-access' in aManifest) {
+      for (let name in aManifest['datastores-access']) {
+        let readonly = ("readonly" in aManifest['datastores-access'][name]) &&
+                       !aManifest['datastores-access'][name].readonly
+                         ? false : true;
+
+        dataStoreService.installAccessDataStore(aId, name, aOrigin,
+                                                aManifestURL, readonly);
+      }
+    }
   },
 
   // |aEntryPoint| is either the entry_point name or the null in which case we
@@ -1405,7 +1453,8 @@ this.DOMApplicationRegistry = {
                 manifestURL: app.manifestURL },
               true);
           }
-
+          this.updateDataStore(this.webapps[id].localId, app.origin,
+                               app.manifestURL, aData);
           this.broadcastMessage("Webapps:PackageEvent",
                                 { type: "applied",
                                   manifestURL: app.manifestURL,
@@ -1564,6 +1613,9 @@ this.DOMApplicationRegistry = {
             manifestURL: aData.manifestURL
           }, true);
         }
+
+        this.updateDataStore(this.webapps[id].localId, app.origin,
+                             app.manifestURL, app.manifest);
 
         app.name = manifest.name;
         app.csp = manifest.csp || "";
@@ -2038,7 +2090,6 @@ this.DOMApplicationRegistry = {
       this.downloadPackage(manifest, newApp, false,
         this._onDownloadPackage.bind(this, newApp, installSuccessCallback)
       );
-
     }
   },
 
@@ -2155,13 +2206,17 @@ this.DOMApplicationRegistry = {
 
     // For package apps, the permissions are not in the mini-manifest, so
     // don't update the permissions yet.
-    if (!aData.isPackage && supportUseCurrentProfile()) {
+    if (!aData.isPackage) {
+      if (supportUseCurrentProfile()) {
+        PermissionsInstaller.installPermissions({ origin: appObject.origin,
+                                                  manifestURL: appObject.manifestURL,
+                                                  manifest: jsonManifest},
+                                                isReinstall,
+                                                this.uninstall.bind(this, aData, aData.mm));
+      }
 
-      PermissionsInstaller.installPermissions({ origin: appObject.origin,
-                                                manifestURL: appObject.manifestURL,
-                                                manifest: jsonManifest},
-                                              isReinstall,
-                                              this.uninstall.bind(this, aData, aData.mm));
+      this.updateDataStore(this.webapps[id].localId,  this.webapps[id].origin,
+                           this.webapps[id].manifestURL, jsonManifest);
     }
 
     this._copyStates(aData, appObject);
@@ -2180,6 +2235,8 @@ this.DOMApplicationRegistry = {
     this._saveApps((function() {
       this.broadcastMessage("Webapps:AddApp", { id: id, app: appObject });
       this.broadcastMessage("Webapps:Install:Return:OK", aData);
+      Services.obs.notifyObservers(null, "webapps-installed",
+        JSON.stringify({ manifestURL: app.manifestURL }));
     }).bind(this));
 
 
@@ -2252,6 +2309,8 @@ this.DOMApplicationRegistry = {
     this._saveApps((function() {
       this.updateAppHandlers(null, aManifest, aNewApp);
       this.broadcastMessage("Webapps:AddApp", { id: aId, app: aNewApp });
+      Services.obs.notifyObservers(null, "webapps-installed",
+        JSON.stringify({ manifestURL: aNewApp.manifestURL }));
 
       if (supportUseCurrentProfile()) {
         // Update the permissions for this app.
@@ -2260,6 +2319,10 @@ this.DOMApplicationRegistry = {
                                                   manifestURL: aNewApp.manifestURL },
                                                 true);
       }
+
+      this.updateDataStore(this.webapps[aId].localId, aNewApp.origin,
+                           aNewApp.manifestURL, aManifest);
+
       debug("About to fire Webapps:PackageEvent 'installed'");
       this.broadcastMessage("Webapps:PackageEvent",
                             { type: "installed",

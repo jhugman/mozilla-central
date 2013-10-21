@@ -58,7 +58,7 @@ WrapperFactory::GetXrayWaiver(JSObject *obj)
     MOZ_ASSERT(scope);
 
     if (!scope->mWaiverWrapperMap)
-        return NULL;
+        return nullptr;
 
     JSObject* xrayWaiver = scope->mWaiverWrapperMap->Find(obj);
     if (xrayWaiver)
@@ -84,7 +84,7 @@ WrapperFactory::CreateXrayWaiver(JSContext *cx, HandleObject obj)
 
     // Create the waiver.
     JSAutoCompartment ac(cx, obj);
-    if (!JS_WrapObject(cx, proto.address()))
+    if (!JS_WrapObject(cx, &proto))
         return nullptr;
     JSObject *waiver = Wrapper::New(cx, obj, proto,
                                     JS_GetGlobalForObject(cx, obj),
@@ -333,6 +333,8 @@ DEBUG_CheckUnwrapSafety(HandleObject obj, js::Wrapper *handler,
     } else if (WrapperFactory::IsComponentsObject(obj)) {
         // The Components object that is restricted regardless of origin.
         MOZ_ASSERT(!handler->isSafeToUnwrap());
+    } else if (AccessCheck::needsSystemOnlyWrapper(obj)) {
+        // The rules for SOWs are complicated enough. Just skip double-checking them here.
     } else if (handler == &FilteringWrapper<CrossCompartmentSecurityWrapper, GentlyOpaque>::singleton) {
         // We explicitly use a SecurityWrapper to protect privileged callers from
         // less-privileged objects that they should never see. Skip the check in
@@ -583,7 +585,7 @@ WrapperFactory::WrapSOWObject(JSContext *cx, JSObject *objArg)
     // that case.
     MOZ_ASSERT(xpc::AllowXBLScope(js::GetContextCompartment(cx)));
     if (!JS_GetPrototype(cx, obj, &proto))
-        return NULL;
+        return nullptr;
     JSObject *wrapperObj =
         Wrapper::New(cx, obj, proto, JS_GetGlobalForObject(cx, obj),
                      &FilteringWrapper<SameCompartmentSecurityWrapper,
@@ -603,7 +605,7 @@ WrapperFactory::WrapComponentsObject(JSContext *cx, HandleObject obj)
 {
     RootedObject proto(cx);
     if (!JS_GetPrototype(cx, obj, &proto))
-        return NULL;
+        return nullptr;
     JSObject *wrapperObj =
         Wrapper::New(cx, obj, proto, JS_GetGlobalForObject(cx, obj),
                      &FilteringWrapper<SameCompartmentSecurityWrapper, ComponentsObjectPolicy>::singleton);
@@ -661,7 +663,7 @@ TransplantObject(JSContext *cx, JS::HandleObject origobj, JS::HandleObject targe
        return newIdentity;
 
     if (!FixWaiverAfterTransplant(cx, oldWaiver, newIdentity))
-        return NULL;
+        return nullptr;
     return newIdentity;
 }
 
@@ -678,9 +680,9 @@ TransplantObjectWithWrapper(JSContext *cx,
         return newSameCompartmentWrapper;
 
     RootedObject newIdentity(cx, Wrapper::wrappedObject(newSameCompartmentWrapper));
-    MOZ_ASSERT(js::IsWrapper(newIdentity));
+    MOZ_ASSERT(!js::IsWrapper(newIdentity));
     if (!FixWaiverAfterTransplant(cx, oldWaiver, newIdentity))
-        return NULL;
+        return nullptr;
     return newSameCompartmentWrapper;
 }
 

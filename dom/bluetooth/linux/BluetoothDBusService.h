@@ -22,7 +22,6 @@ BEGIN_BLUETOOTH_NAMESPACE
  */
 
 class BluetoothDBusService : public BluetoothService
-                           , private mozilla::ipc::RawDBusConnection
 {
 public:
   bool IsReady();
@@ -60,9 +59,6 @@ public:
   static bool
   AddReservedServicesInternal(const nsTArray<uint32_t>& aServices,
                               nsTArray<uint32_t>& aServiceHandlesContainer);
-
-  static bool
-  RemoveReservedServicesInternal(const nsTArray<uint32_t>& aServiceHandles);
 
   virtual nsresult
   GetScoSocket(const nsAString& aObjectPath,
@@ -204,6 +200,8 @@ private:
                                 const char* aInterface,
                                 const nsAString& aMessage,
                                 mozilla::ipc::DBusReplyCallback aCallback);
+
+  nsRefPtr<mozilla::ipc::RawDBusConnection> mConnection;
 };
 
 END_BLUETOOTH_NAMESPACE

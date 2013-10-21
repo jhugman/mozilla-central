@@ -490,7 +490,6 @@ WebConsoleFrame.prototype = {
 
     this._setFilterTextBoxEvents();
     this._initFilterButtons();
-    this._changeClearModifier();
 
     let fontSize = this.owner._browserConsole ?
                    Services.prefs.getIntPref("devtools.webconsole.fontSize") : 0;
@@ -595,21 +594,6 @@ WebConsoleFrame.prototype = {
   },
 
   /**
-   * Changes modifier for the clear output shorcut on Macs.
-   *
-   * @private
-   */
-  _changeClearModifier: function WCF__changeClearModifier()
-  {
-    if (Services.appinfo.OS != "Darwin") {
-      return;
-    }
-
-    let clear = this.document.querySelector("#key_clearOutput");
-    clear.setAttribute("modifiers", "access");
-  },
-
-  /**
    * Creates one of the filter buttons on the toolbar.
    *
    * @private
@@ -653,6 +637,9 @@ WebConsoleFrame.prototype = {
       let net = this.document.querySelector("toolbarbutton[category=net]");
       let accesskey = net.getAttribute("accesskeyMacOSX");
       net.setAttribute("accesskey", accesskey);
+
+      let logging = this.document.querySelector("toolbarbutton[category=logging]");
+      logging.removeAttribute("accesskey");
     }
   },
 
@@ -2589,16 +2576,7 @@ WebConsoleFrame.prototype = {
     // Make the location clickable.
     this._addMessageLinkCallback(locationNode, () => {
       if (isScratchpad) {
-        let wins = Services.wm.getEnumerator("devtools:scratchpad");
-
-        while (wins.hasMoreElements()) {
-          let win = wins.getNext();
-
-          if (!win.closed && win.Scratchpad.uniqueName === aSourceURL) {
-            win.focus();
-            return;
-          }
-        }
+        this.owner.viewSourceInScratchpad(aSourceURL);
       }
       else if (locationNode.parentNode.category == CATEGORY_CSS) {
         this.owner.viewSourceInStyleEditor(fullURL, aSourceLine);
@@ -3485,20 +3463,13 @@ JSTerm.prototype = {
       view.delete = null;
     }
 
-    let scope = view.addScope(aOptions.label);
-    scope.expanded = true;
-    scope.locked = true;
-
-    let container = scope.addItem();
-    container.evaluationMacro = simpleValueEvalMacro;
+    let { variable, expanded } = view.controller.setSingleVariable(aOptions);
+    variable.evaluationMacro = simpleValueEvalMacro;
 
     if (aOptions.objectActor) {
-      view.controller.expand(container, aOptions.objectActor);
       view._consoleLastObjectActor = aOptions.objectActor.actor;
     }
     else if (aOptions.rawObject) {
-      container.populate(aOptions.rawObject);
-      view.commitHierarchy();
       view._consoleLastObjectActor = null;
     }
     else {
@@ -3506,7 +3477,9 @@ JSTerm.prototype = {
                       "display.");
     }
 
-    this.emit("variablesview-updated", view, aOptions);
+    expanded.then(() => {
+      this.emit("variablesview-updated", view, aOptions);
+    });
   },
 
   /**

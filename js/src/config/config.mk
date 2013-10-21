@@ -108,6 +108,13 @@ ifneq (,$(filter no-pymake,$(subst $(comma), ,$(MOZ_PSEUDO_DERECURSE))))
 MOZ_PSEUDO_DERECURSE :=
 endif
 endif
+
+# Disable MOZ_PSEUDO_DERECURSE on the second PGO pass until it's widely
+# tested.
+ifdef MOZ_PROFILE_USE
+MOZ_PSEUDO_DERECURSE :=
+endif
+
 #
 # Strip off the excessively long version numbers on these platforms,
 # but save the version to allow multiple versions of the same base
@@ -345,7 +352,6 @@ DEFINES += -DSTATIC_EXPORTABLE_JS_API
 endif
 endif
 
-# Flags passed to JarMaker.py
 MAKE_JARS_FLAGS = \
 	-t $(topsrcdir) \
 	-f $(MOZ_CHROME_FILE_FORMAT) \
@@ -626,7 +632,7 @@ endif
 PWD := $(CURDIR)
 endif
 
-NSINSTALL_PY := $(PYTHON) $(call core_abspath,$(topsrcdir)/config/nsinstall.py)
+NSINSTALL_PY := $(PYTHON) $(abspath $(topsrcdir)/config/nsinstall.py)
 # For Pymake, wherever we use nsinstall.py we're also going to try to make it
 # a native command where possible. Since native commands can't be used outside
 # of single-line commands, we continue to provide INSTALL for general use.
@@ -685,7 +691,7 @@ else
   IS_LANGUAGE_REPACK = 1
 endif
 
-EXPAND_LOCALE_SRCDIR = $(if $(filter en-US,$(AB_CD)),$(topsrcdir)/$(1)/en-US,$(call core_realpath,$(L10NBASEDIR))/$(AB_CD)/$(subst /locales,,$(1)))
+EXPAND_LOCALE_SRCDIR = $(if $(filter en-US,$(AB_CD)),$(topsrcdir)/$(1)/en-US,$(or $(realpath $(L10NBASEDIR)),$(abspath $(L10NBASEDIR)))/$(AB_CD)/$(subst /locales,,$(1)))
 
 ifdef relativesrcdir
 LOCALE_SRCDIR ?= $(call EXPAND_LOCALE_SRCDIR,$(relativesrcdir))
@@ -736,7 +742,7 @@ ifdef MOZ_DEBUG
 JAVAC_FLAGS += -g
 endif
 
-CREATE_PRECOMPLETE_CMD = $(PYTHON) $(call core_abspath,$(topsrcdir)/config/createprecomplete.py)
+CREATE_PRECOMPLETE_CMD = $(PYTHON) $(abspath $(topsrcdir)/config/createprecomplete.py)
 
 # MDDEPDIR is the subdirectory where dependency files are stored
 MDDEPDIR := .deps
@@ -818,4 +824,8 @@ DEFINES += -DNO_NSPR_10_SUPPORT
 #
 #   libs::
 #       $(call py_action,purge_manifests,_build_manifests/purge/foo.manifest)
+ifdef .PYMAKE
+py_action = %mozbuild.action.$(1) main $(2)
+else
 py_action = $(PYTHON) -m mozbuild.action.$(1) $(2)
+endif

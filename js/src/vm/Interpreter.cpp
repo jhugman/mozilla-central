@@ -225,7 +225,7 @@ NoSuchMethod(JSContext *cx, unsigned argc, Value *vp)
 
 #endif /* JS_HAS_NO_SUCH_METHOD */
 
-inline bool
+static inline bool
 GetPropertyOperation(JSContext *cx, StackFrame *fp, HandleScript script, jsbytecode *pc,
                      MutableHandleValue lval, MutableHandleValue vp)
 {
@@ -316,7 +316,7 @@ NameOperation(JSContext *cx, StackFrame *fp, jsbytecode *pc, MutableHandleValue 
     return FetchName<false>(cx, scopeRoot, pobjRoot, nameRoot, shapeRoot, vp);
 }
 
-inline bool
+static inline bool
 SetPropertyOperation(JSContext *cx, HandleScript script, jsbytecode *pc, HandleValue lval,
                      HandleValue rval)
 {
@@ -330,8 +330,11 @@ SetPropertyOperation(JSContext *cx, HandleScript script, jsbytecode *pc, HandleV
 
     RootedId id(cx, NameToId(script->getName(pc)));
     if (JS_LIKELY(!obj->getOps()->setProperty)) {
-        if (!baseops::SetPropertyHelper(cx, obj, obj, id, 0, &rref, script->strict))
+        if (!baseops::SetPropertyHelper<SequentialExecution>(cx, obj, obj, id, 0,
+                                                             &rref, script->strict))
+        {
             return false;
+        }
     } else {
         if (!JSObject::setGeneric(cx, obj, obj, id, &rref, script->strict))
             return false;
@@ -587,6 +590,13 @@ js::ExecuteKernel(JSContext *cx, HandleScript script, JSObject &scopeChainArg, c
 {
     JS_ASSERT_IF(evalInFrame, type == EXECUTE_DEBUG);
     JS_ASSERT_IF(type == EXECUTE_GLOBAL, !scopeChainArg.is<ScopeObject>());
+#ifdef DEBUG
+    if (thisv.isObject()) {
+        RootedObject thisObj(cx, &thisv.toObject());
+        AutoSuppressGC nogc(cx);
+        JS_ASSERT(GetOuterObject(cx, thisObj) == thisObj);
+    }
+#endif
 
     if (script->isEmpty()) {
         if (result)
@@ -596,10 +606,10 @@ js::ExecuteKernel(JSContext *cx, HandleScript script, JSObject &scopeChainArg, c
 
     TypeScript::SetThis(cx, script, thisv);
 
-    Probes::startExecution(script);
+    probes::StartExecution(script);
     ExecuteState state(cx, script, thisv, scopeChainArg, type, evalInFrame, result);
     bool ok = RunScript(cx, state);
-    Probes::stopExecution(script);
+    probes::StopExecution(script);
 
     return ok;
 }
@@ -623,7 +633,7 @@ js::Execute(JSContext *cx, HandleScript script, JSObject &scopeChainArg, Value *
 #endif
 
     /* The VAROBJFIX option makes varObj == globalObj in global code. */
-    if (!cx->hasOption(JSOPTION_VAROBJFIX)) {
+    if (!cx->options().varObjFix()) {
         if (!scopeChain->setVarObj(cx))
             return false;
     }
@@ -819,7 +829,7 @@ EnterWith(JSContext *cx, AbstractFramePtr frame, HandleValue val, uint32_t stack
     if (val.isObject()) {
         obj = &val.toObject();
     } else {
-        obj = js_ValueToNonNullObject(cx, val);
+        obj = ToObject(cx, val);
         if (!obj)
             return false;
     }
@@ -1052,7 +1062,7 @@ FrameGuard::~FrameGuard()
  * We set *vp to undefined early to reduce code size and bias this code for the
  * common and future-friendly cases.
  */
-inline bool
+static inline bool
 ComputeImplicitThis(JSContext *cx, HandleObject obj, MutableHandleValue vp)
 {
     vp.setUndefined();
@@ -1325,7 +1335,7 @@ Interpret(JSContext *cx, RunState &state)
          * fail if cx->isExceptionPending() is true.
          */
         if (cx->isExceptionPending()) {
-            Probes::enterScript(cx, script, script->function(), regs.fp());
+            probes::EnterScript(cx, script, script->function(), regs.fp());
             goto error;
         }
     }
@@ -1337,7 +1347,7 @@ Interpret(JSContext *cx, RunState &state)
         if (!entryFrame->prologue(cx))
             goto error;
     } else {
-        Probes::enterScript(cx, script, script->function(), entryFrame);
+        probes::EnterScript(cx, script, script->function(), entryFrame);
     }
     if (cx->compartment()->debugMode()) {
         JSTrapStatus status = ScriptDebugPrologue(cx, entryFrame);
@@ -1479,7 +1489,6 @@ BEGIN_CASE(JSOP_UNUSED180)
 BEGIN_CASE(JSOP_UNUSED181)
 BEGIN_CASE(JSOP_UNUSED182)
 BEGIN_CASE(JSOP_UNUSED183)
-BEGIN_CASE(JSOP_UNUSED188)
 BEGIN_CASE(JSOP_UNUSED189)
 BEGIN_CASE(JSOP_UNUSED190)
 BEGIN_CASE(JSOP_UNUSED200)
@@ -1614,7 +1623,7 @@ BEGIN_CASE(JSOP_STOP)
         if (!regs.fp()->isYielding())
             regs.fp()->epilogue(cx);
         else
-            Probes::exitScript(cx, script, script->function(), regs.fp());
+            probes::ExitScript(cx, script, script->function(), regs.fp());
 
 #if defined(JS_ION)
   jit_return_pop_frame:
@@ -2977,7 +2986,8 @@ BEGIN_CASE(JSOP_INITPROP)
     id = NameToId(name);
 
     if (JS_UNLIKELY(name == cx->names().proto)
-        ? !baseops::SetPropertyHelper(cx, obj, obj, id, 0, &rval, script->strict)
+        ? !baseops::SetPropertyHelper<SequentialExecution>(cx, obj, obj, id, 0, &rval,
+                                                           script->strict)
         : !DefineNativeProperty(cx, obj, id, rval, nullptr, nullptr,
                                 JSPROP_ENUMERATE, 0, 0, 0)) {
         goto error;
@@ -3044,21 +3054,26 @@ BEGIN_CASE(JSOP_SPREAD)
     RootedObject &arr = rootObject0;
     arr = &regs.sp[-3].toObject();
     const Value iterable = regs.sp[-1];
-    ForOfIterator iter(cx, iterable);
+    ForOfIterator iter(cx);
     RootedValue &iterVal = rootValue0;
-    while (iter.next()) {
+    iterVal.set(iterable);
+    if (!iter.init(iterVal))
+        goto error;
+    while (true) {
+        bool done;
+        if (!iter.next(&iterVal, &done))
+            goto error;
+        if (done)
+            break;
         if (count == INT32_MAX) {
             JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr,
                                  JSMSG_SPREAD_TOO_LARGE);
             goto error;
         }
-        iterVal = iter.value();
         if (!JSObject::defineElement(cx, arr, count++, iterVal, nullptr, nullptr,
                                      JSPROP_ENUMERATE))
             goto error;
     }
-    if (!iter.close())
-        goto error;
     regs.sp[-2].setInt32(count);
     regs.sp--;
 }
@@ -3175,6 +3190,7 @@ END_CASE(JSOP_DEBUGGER)
 BEGIN_CASE(JSOP_ENTERBLOCK)
 BEGIN_CASE(JSOP_ENTERLET0)
 BEGIN_CASE(JSOP_ENTERLET1)
+BEGIN_CASE(JSOP_ENTERLET2)
 {
     StaticBlockObject &blockObj = script->getObject(regs.pc)->as<StaticBlockObject>();
 
@@ -3385,7 +3401,7 @@ default:
     if (!regs.fp()->isYielding())
         regs.fp()->epilogue(cx);
     else
-        Probes::exitScript(cx, script, script->function(), regs.fp());
+        probes::ExitScript(cx, script, script->function(), regs.fp());
 
     gc::MaybeVerifyBarriers(cx, true);
 
