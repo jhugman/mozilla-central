@@ -307,7 +307,7 @@ nsXBLPrototypeHandler::ExecuteHandler(EventTarget* aTarget,
   // scope if one doesn't already exist, and potentially wraps it cross-
   // compartment into our scope (via aAllowWrapping=true).
   JS::Rooted<JS::Value> targetV(cx, JS::UndefinedValue());
-  rv = nsContentUtils::WrapNative(cx, scopeObject, scriptTarget, targetV.address(), nullptr,
+  rv = nsContentUtils::WrapNative(cx, scopeObject, scriptTarget, &targetV, nullptr,
                                   /* aAllowWrapping = */ true);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -910,9 +910,8 @@ bool
 nsXBLPrototypeHandler::ModifiersMatchMask(nsIDOMUIEvent* aEvent,
                                           bool aIgnoreShiftKey)
 {
-  WidgetEvent* event = aEvent->GetInternalNSEvent();
-  NS_ENSURE_TRUE(event && event->IsInputDerivedEvent(), false);
-  WidgetInputEvent* inputEvent = static_cast<WidgetInputEvent*>(event);
+  WidgetInputEvent* inputEvent = aEvent->GetInternalNSEvent()->AsInputEvent();
+  NS_ENSURE_TRUE(inputEvent, false);
 
   if (mKeyMask & cMetaMask) {
     if (inputEvent->IsMeta() != ((mKeyMask & cMeta) != 0)) {

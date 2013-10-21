@@ -261,11 +261,11 @@ JS_ConvertArgumentsVA(JSContext *cx, unsigned argc, jsval *argv, const char *for
                 return false;
             break;
           case 'd':
-            if (!JS_ValueToNumber(cx, *sp, va_arg(ap, double *)))
+            if (!ToNumber(cx, arg, va_arg(ap, double *)))
                 return false;
             break;
           case 'I':
-            if (!JS_ValueToNumber(cx, *sp, &d))
+            if (!ToNumber(cx, arg, &d))
                 return false;
             *va_arg(ap, double *) = ToInteger(d);
             break;
@@ -356,7 +356,7 @@ JS_ConvertValue(JSContext *cx, HandleValue value, JSType type, MutableHandleValu
             vp.setString(str);
         break;
       case JSTYPE_NUMBER:
-        ok = JS_ValueToNumber(cx, value, &d);
+        ok = ToNumber(cx, value, &d);
         if (ok)
             vp.setDouble(d);
         break;
@@ -427,13 +427,6 @@ JS_ValueToSource(JSContext *cx, jsval valueArg)
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, value);
     return ValueToSource(cx, value);
-}
-
-JS_PUBLIC_API(bool)
-JS_ValueToNumber(JSContext *cx, jsval valueArg, double *dp)
-{
-    RootedValue value(cx, valueArg);
-    return JS::ToNumber(cx, value, dp);
 }
 
 JS_PUBLIC_API(bool)
@@ -1265,96 +1258,6 @@ JS_TransplantObject(JSContext *cx, HandleObject origobj, HandleObject target)
     // The new identity object might be one of several things. Return it to avoid
     // ambiguity.
     return newIdentity;
-}
-
-/*
- * Some C++ objects (such as the location object and XBL) require both an XPConnect
- * reflector and a security wrapper for that reflector. We expect that there are
- * no live references to the reflector, so when we perform the transplant we turn
- * the security wrapper into a cross-compartment wrapper. Just in case there
- * happen to be live references to the reflector, we swap it out to limit the harm.
- */
-JS_FRIEND_API(JSObject *)
-js_TransplantObjectWithWrapper(JSContext *cx,
-                               HandleObject origobj,
-                               HandleObject origwrapper,
-                               HandleObject targetobj,
-                               HandleObject targetwrapper)
-{
-    AutoMaybeTouchDeadZones agc(cx);
-    AutoDisableProxyCheck adpc(cx->runtime());
-
-    AssertHeapIsIdle(cx);
-    JS_ASSERT(!origobj->is<CrossCompartmentWrapperObject>());
-    JS_ASSERT(!origwrapper->is<CrossCompartmentWrapperObject>());
-    JS_ASSERT(!targetobj->is<CrossCompartmentWrapperObject>());
-    JS_ASSERT(!targetwrapper->is<CrossCompartmentWrapperObject>());
-
-    RootedObject newWrapper(cx);
-    JSCompartment *destination = targetobj->compartment();
-
-    // |origv| is the map entry we're looking up. The map entries are going to
-    // be for |origobj|, not |origwrapper|.
-    Value origv = ObjectValue(*origobj);
-
-    // There might already be a wrapper for the original object in the new
-    // compartment.
-    if (WrapperMap::Ptr p = destination->lookupWrapper(origv)) {
-        // There is. Make the existing cross-compartment wrapper a same-
-        // compartment wrapper.
-        newWrapper = &p->value.toObject();
-
-        // When we remove origv from the wrapper map, its wrapper, newWrapper,
-        // must immediately cease to be a cross-compartment wrapper. Neuter it.
-        destination->removeWrapper(p);
-        NukeCrossCompartmentWrapper(cx, newWrapper);
-
-        if (!JSObject::swap(cx, newWrapper, targetwrapper))
-            MOZ_CRASH();
-    } else {
-        // Otherwise, use the passed-in wrapper as the same-compartment wrapper.
-        newWrapper = targetwrapper;
-    }
-
-    // Now, iterate through other scopes looking for references to the old
-    // object. Note that the entries in the maps are for |origobj| and not
-    // |origwrapper|. They need to be updated to point at the new object.
-    if (!RemapAllWrappersForObject(cx, origobj, targetobj))
-        MOZ_CRASH();
-
-    // Lastly, update things in the original compartment. Our invariants dictate
-    // that the original compartment can only have one cross-compartment wrapper
-    // to the new object. So we choose to update |origwrapper|, not |origobj|,
-    // since there are probably no live direct intra-compartment references to
-    // |origobj|.
-    {
-        AutoCompartment ac(cx, origobj);
-
-        // We can't be sure that the reflector is completely dead. This is bad,
-        // because it is in a weird state. To minimize potential harm we create
-        // a new unreachable dummy object and swap it with the reflector.
-        // After the swap we have a possibly-live object that isn't dangerous,
-        // and a possibly-dangerous object that isn't live.
-        ProxyOptions options;
-        if (!IsBackgroundFinalized(origobj->tenuredGetAllocKind()))
-            options.setForceForegroundFinalization(true);
-        RootedObject reflectorGuts(cx, NewDeadProxyObject(cx, JS_GetGlobalForObject(cx, origobj),
-                                                          options));
-        if (!reflectorGuts || !JSObject::swap(cx, origobj, reflectorGuts))
-            MOZ_CRASH();
-
-        // Turn origwrapper into a CCW to the new object.
-        RootedObject wrapperGuts(cx, targetobj);
-        if (!JS_WrapObject(cx, &wrapperGuts))
-            MOZ_CRASH();
-        JS_ASSERT(Wrapper::wrappedObject(wrapperGuts) == targetobj);
-        if (!JSObject::swap(cx, origwrapper, wrapperGuts))
-            MOZ_CRASH();
-        origwrapper->compartment()->putWrapper(ObjectValue(*targetobj),
-                                               ObjectValue(*origwrapper));
-    }
-
-    return newWrapper;
 }
 
 /*
@@ -3937,22 +3840,6 @@ JS_NextProperty(JSContext *cx, JSObject *iterobjArg, jsid *idp)
     return true;
 }
 
-JS_PUBLIC_API(bool)
-JS_ArrayIterator(JSContext *cx, unsigned argc, jsval *vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-    Rooted<Value> target(cx, args.thisv());
-    AssertHeapIsIdle(cx);
-    assertSameCompartment(cx, target);
-    CHECK_REQUEST(cx);
-
-    JSObject *iterobj = ElementIteratorObject::create(cx, target);
-    if (!iterobj)
-        return false;
-    vp->setObject(*iterobj);
-    return true;
-}
-
 JS_PUBLIC_API(jsval)
 JS_GetReservedSlot(JSObject *obj, uint32_t index)
 {
@@ -6376,6 +6263,12 @@ JS_PreventExtensions(JSContext *cx, JS::HandleObject obj)
     if (!extensible)
         return true;
     return JSObject::preventExtensions(cx, obj);
+}
+
+JS_PUBLIC_API(void)
+JS::SetAsmJSCacheOps(JSRuntime *rt, const JS::AsmJSCacheOps *ops)
+{
+    rt->asmJSCacheOps = *ops;
 }
 
 char *

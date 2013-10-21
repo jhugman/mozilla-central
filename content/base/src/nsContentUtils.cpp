@@ -4557,13 +4557,6 @@ nsContentUtils::GetLocalizedEllipsis()
   return nsDependentString(sBuf);
 }
 
-//static
-WidgetEvent*
-nsContentUtils::GetNativeEvent(nsIDOMEvent* aDOMEvent)
-{
-  return aDOMEvent ? aDOMEvent->GetInternalNSEvent() : nullptr;
-}
-
 static bool
 HasASCIIDigit(const nsTArray<nsShortcutCandidate>& aCandidates)
 {
@@ -4604,7 +4597,7 @@ nsContentUtils::GetAccelKeyCandidates(nsIDOMKeyEvent* aDOMKeyEvent,
     return;
 
   WidgetKeyboardEvent* nativeKeyEvent =
-    static_cast<WidgetKeyboardEvent*>(GetNativeEvent(aDOMKeyEvent));
+    aDOMKeyEvent->GetInternalNSEvent()->AsKeyboardEvent();
   if (nativeKeyEvent) {
     NS_ASSERTION(nativeKeyEvent->eventStructType == NS_KEY_EVENT,
                  "wrong type of native event");
@@ -5659,14 +5652,14 @@ nsContentUtils::DispatchXULCommand(nsIContent* aTarget,
 nsresult
 nsContentUtils::WrapNative(JSContext *cx, JS::Handle<JSObject*> scope,
                            nsISupports *native, nsWrapperCache *cache,
-                           const nsIID* aIID, JS::Value *vp,
+                           const nsIID* aIID, JS::MutableHandleValue vp,
                            nsIXPConnectJSObjectHolder **aHolder,
                            bool aAllowWrapping)
 {
   if (!native) {
     NS_ASSERTION(!aHolder || !*aHolder, "*aHolder should be null!");
 
-    *vp = JSVAL_NULL;
+    vp.setNull();
 
     return NS_OK;
   }
@@ -5685,7 +5678,7 @@ nsContentUtils::WrapNative(JSContext *cx, JS::Handle<JSObject*> scope,
   nsresult rv = NS_OK;
   AutoPushJSContext context(cx);
   rv = sXPConnect->WrapNativeToJSVal(context, scope, native, cache, aIID,
-                                     aAllowWrapping, vp, aHolder);
+                                     aAllowWrapping, vp.address(), aHolder);
   return rv;
 }
 
@@ -5728,8 +5721,7 @@ nsContentUtils::CreateBlobBuffer(JSContext* aCx,
     return NS_ERROR_OUT_OF_MEMORY;
   }
   JS::Rooted<JSObject*> scope(aCx, JS::CurrentGlobalOrNull(aCx));
-  return nsContentUtils::WrapNative(aCx, scope, blob, aBlob.address(), nullptr,
-                                    true);
+  return nsContentUtils::WrapNative(aCx, scope, blob, aBlob, nullptr, true);
 }
 
 void

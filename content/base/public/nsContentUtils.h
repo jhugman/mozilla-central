@@ -19,6 +19,7 @@
 #endif
 
 #include "js/TypeDecls.h"
+#include "js/Value.h"
 #include "js/RootingAPI.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/EventForwards.h"
@@ -1368,13 +1369,6 @@ public:
   static const nsDependentString GetLocalizedEllipsis();
 
   /**
-   * The routine GetNativeEvent returns the result of
-   * aDOMEvent->GetInternalNSEvent().
-   * XXX Is this necessary?
-   */
-  static mozilla::WidgetEvent* GetNativeEvent(nsIDOMEvent* aDOMEvent);
-
-  /**
    * Get the candidates for accelkeys for aDOMKeyEvent.
    *
    * @param aDOMKeyEvent [in] the key event for accelkey handling.
@@ -1637,7 +1631,7 @@ public:
 
   static nsresult WrapNative(JSContext *cx, JS::Handle<JSObject*> scope,
                              nsISupports *native, const nsIID* aIID,
-                             JS::Value *vp,
+                             JS::MutableHandle<JS::Value> vp,
                              // If non-null aHolder will keep the Value alive
                              // while there's a ref to it
                              nsIXPConnectJSObjectHolder** aHolder = nullptr,
@@ -1649,7 +1643,7 @@ public:
 
   // Same as the WrapNative above, but use this one if aIID is nsISupports' IID.
   static nsresult WrapNative(JSContext *cx, JS::Handle<JSObject*> scope,
-                             nsISupports *native, JS::Value *vp,
+                             nsISupports *native, JS::MutableHandle<JS::Value> vp,
                              // If non-null aHolder will keep the Value alive
                              // while there's a ref to it
                              nsIXPConnectJSObjectHolder** aHolder = nullptr,
@@ -1660,7 +1654,7 @@ public:
   }
   static nsresult WrapNative(JSContext *cx, JS::Handle<JSObject*> scope,
                              nsISupports *native, nsWrapperCache *cache,
-                             JS::Value *vp,
+                             JS::MutableHandle<JS::Value> vp,
                              // If non-null aHolder will keep the Value alive
                              // while there's a ref to it
                              nsIXPConnectJSObjectHolder** aHolder = nullptr,
@@ -2091,7 +2085,7 @@ private:
 
   static nsresult WrapNative(JSContext *cx, JS::Handle<JSObject*> scope,
                              nsISupports *native, nsWrapperCache *cache,
-                             const nsIID* aIID, JS::Value *vp,
+                             const nsIID* aIID, JS::MutableHandle<JS::Value> vp,
                              nsIXPConnectJSObjectHolder** aHolder,
                              bool aAllowWrapping);
 

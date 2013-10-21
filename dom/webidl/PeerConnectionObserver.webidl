@@ -4,6 +4,8 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
+interface nsISupports;
+
 [ChromeOnly,
  JSImplementation="@mozilla.org/dom/peerconnectionobserver;1",
  Constructor (object domPC)]
@@ -22,6 +24,10 @@ interface PeerConnectionObserver
   void onAddIceCandidateError(unsigned long name, DOMString message);
   void onIceCandidate(unsigned short level, DOMString mid, DOMString candidate);
 
+  /* Stats callbacks */
+  void onGetStatsSuccess(optional RTCStatsReportInternal report);
+  void onGetStatsError(unsigned long name, DOMString message);
+
   /* Data channel callbacks */
   void notifyDataChannel(DataChannel channel);
   void notifyConnection();
@@ -35,6 +41,9 @@ interface PeerConnectionObserver
   void onRemoveStream();
   void onAddTrack();
   void onRemoveTrack();
+
+  /* Used by c++ to know when Observer goes away */
+  readonly attribute nsISupports weakReferent;
 
   /* Helper function to access supported constraints defined in webidl. Needs to
    * be in a separate webidl object we hold, so putting it here was convenient.

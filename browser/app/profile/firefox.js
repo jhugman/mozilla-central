@@ -96,6 +96,14 @@ pref("app.update.log", false);
 // the failure.
 pref("app.update.backgroundMaxErrors", 10);
 
+// The aus update xml certificate checks for application update are disabled on
+// Windows since the mar signature check which is currently only implemented on
+// Windows is sufficient for preventing us from applying a mar that is not
+// valid.
+#ifdef XP_WIN
+pref("app.update.cert.requireBuiltIn", false);
+pref("app.update.cert.checkAttributes", false);
+#else
 // When |app.update.cert.requireBuiltIn| is true or not specified the
 // final certificate and all certificates the connection is redirected to before
 // the final certificate for the url specified in the |app.update.url|
@@ -129,8 +137,9 @@ pref("app.update.cert.maxErrors", 5);
 // the |app.update.url.override| preference should ONLY be used for testing.
 // IMPORTANT! metro.js should also be updated for updates to certs.X.issuerName
 
-// Nightly builds have switched over to aus4.mozilla.org, but we don't want anything else to yet.
-#ifdef NIGHTLY_BUILD
+// Non-release builds (Nightly, Aurora, etc.) have been switched over to aus4.mozilla.org.
+// This condition protects us against accidentally using it for release builds.
+#ifndef RELEASE_BUILD
 pref("app.update.certs.1.issuerName", "CN=DigiCert Secure Server CA,O=DigiCert Inc,C=US");
 pref("app.update.certs.1.commonName", "aus4.mozilla.org");
 
@@ -142,6 +151,7 @@ pref("app.update.certs.1.commonName", "aus3.mozilla.org");
 
 pref("app.update.certs.2.issuerName", "CN=Thawte SSL CA,O=\"Thawte, Inc.\",C=US");
 pref("app.update.certs.2.commonName", "aus3.mozilla.org");
+#endif
 #endif
 
 // Whether or not app updates are enabled
@@ -172,7 +182,7 @@ pref("app.update.silent", false);
 pref("app.update.staging.enabled", true);
 
 // Update service URL:
-#ifdef NIGHTLY_BUILD
+#ifndef RELEASE_BUILD
 pref("app.update.url", "https://aus4.mozilla.org/update/3/%PRODUCT%/%VERSION%/%BUILD_ID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/update.xml");
 #else
 pref("app.update.url", "https://aus3.mozilla.org/update/3/%PRODUCT%/%VERSION%/%BUILD_ID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/update.xml");
@@ -231,6 +241,12 @@ pref("xpinstall.whitelist.add", "addons.mozilla.org");
 pref("xpinstall.whitelist.add.180", "marketplace.firefox.com");
 
 pref("lightweightThemes.update.enabled", true);
+
+// UI tour experience.
+pref("browser.uitour.enabled", true);
+pref("browser.uitour.themeOrigin", "https://addons.mozilla.org/%LOCALE%/firefox/themes/");
+pref("browser.uitour.pinnedTabUrl", "https://support.mozilla.org/%LOCALE%/kb/pinned-tabs-keep-favorite-websites-open");
+pref("browser.uitour.whitelist.add.260", "www.mozilla.org,support.mozilla.org");
 
 pref("keyword.enabled", true);
 
@@ -658,6 +674,8 @@ pref("plugins.update.url", "https://www.mozilla.org/%LOCALE%/plugincheck/");
 pref("plugins.update.notifyUser", false);
 
 pref("plugins.click_to_play", true);
+
+pref("plugins.clickToActivateInfo.url", "https://support.mozilla.org/1/firefox/%VERSION%/%OS%/%LOCALE%/clicktoplay");
 
 // let all plugins except Flash default to click-to-play
 pref("plugin.default.state", 1);

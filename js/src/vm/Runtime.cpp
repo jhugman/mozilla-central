@@ -118,6 +118,8 @@ JSRuntime::JSRuntime(JSUseHelperThreads useHelperThreads)
 #ifdef JS_THREADSAFE
     operationCallbackLock(nullptr),
     operationCallbackOwner(nullptr),
+#else
+    operationCallbackLockTaken(false),
 #endif
 #ifdef JS_WORKER_THREADS
     workerThreadState(nullptr),
@@ -294,6 +296,7 @@ JSRuntime::JSRuntime(JSUseHelperThreads useHelperThreads)
     PodZero(&debugHooks);
     PodZero(&atomState);
     PodArrayZero(nativeStackQuota);
+    PodZero(&asmJSCacheOps);
 
 #if JS_STACK_GROWTH_DIRECTION > 0
     nativeStackLimit = UINTPTR_MAX;

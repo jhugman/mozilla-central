@@ -111,6 +111,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "DocumentUtils",
   "resource:///modules/sessionstore/DocumentUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Messenger",
   "resource:///modules/sessionstore/Messenger.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "PageStyle",
+  "resource:///modules/sessionstore/PageStyle.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PrivacyLevel",
   "resource:///modules/sessionstore/PrivacyLevel.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "SessionSaver",
@@ -121,6 +123,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "SessionCookies",
   "resource:///modules/sessionstore/SessionCookies.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "SessionHistory",
   "resource:///modules/sessionstore/SessionHistory.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "TextAndScrollData",
+  "resource:///modules/sessionstore/TextAndScrollData.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "_SessionFile",
   "resource:///modules/sessionstore/_SessionFile.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "TabStateCache",
@@ -156,8 +160,8 @@ this.SessionStore = {
     SessionStoreInternal.canRestoreLastSession = val;
   },
 
-  init: function ss_init(aWindow) {
-    SessionStoreInternal.init(aWindow);
+  init: function ss_init() {
+    SessionStoreInternal.init();
   },
 
   getBrowserState: function ss_getBrowserState() {
@@ -368,13 +372,9 @@ let SessionStoreInternal = {
   /**
    * Initialize the sessionstore service.
    */
-  init: function (aWindow) {
+  init: function () {
     if (this._initialized) {
       throw new Error("SessionStore.init() must only be called once!");
-    }
-
-    if (!aWindow) {
-      throw new Error("SessionStore.init() must be called with a valid window.");
     }
 
     this._disabledForMultiProcess = Services.prefs.getBoolPref("browser.tabs.remote");
@@ -390,20 +390,6 @@ let SessionStoreInternal = {
 
     this._initPrefs();
     this._initialized = true;
-
-    // Wait until nsISessionStartup has finished reading the session data.
-    gSessionStartup.onceInitialized.then(() => {
-      // Parse session data and start restoring.
-      let initialState = this.initSession();
-
-      // Start tracking the given (initial) browser window.
-      if (!aWindow.closed) {
-        this.onLoad(aWindow, initialState);
-      }
-
-      // Let everyone know we're done.
-      this._deferredInitialized.resolve();
-    }, Cu.reportError);
   },
 
   initSession: function ssi_initSession() {
@@ -489,7 +475,6 @@ let SessionStoreInternal = {
       this._prefBranch.setBoolPref("sessionstore.resume_session_once", false);
 
     this._performUpgradeBackup();
-    this._sessionInitialized = true;
 
     return state;
   },
@@ -876,7 +861,34 @@ let SessionStoreInternal = {
   onOpen: function ssi_onOpen(aWindow) {
     let onload = () => {
       aWindow.removeEventListener("load", onload);
-      this.onLoad(aWindow);
+
+      if (this._sessionInitialized) {
+        this.onLoad(aWindow);
+        return;
+      }
+
+      // We can't call this.onLoad since initialization
+      // hasn't completed, so we'll wait until it is done.
+      // Even if additional windows are opened and wait
+      // for initialization as well, the first opened
+      // window should execute first, and this.onLoad
+      // will be called with the initialState.
+      gSessionStartup.onceInitialized.then(() => {
+        if (aWindow.closed) {
+          return;
+        }
+
+        if (this._sessionInitialized) {
+          this.onLoad(aWindow);
+        } else {
+          let initialState = this.initSession();
+          this._sessionInitialized = true;
+          this.onLoad(aWindow, initialState);
+
+          // Let everyone know we're done.
+          this._deferredInitialized.resolve();
+        }
+      }, Cu.reportError);
     };
 
     aWindow.addEventListener("load", onload);
@@ -1471,7 +1483,7 @@ let SessionStoreInternal = {
 
     TabStateCache.delete(aTab);
     this._setWindowStateBusy(window);
-    this.restoreHistoryPrecursor(window, [aTab], [tabState], 0, 0, 0);
+    this.restoreHistoryPrecursor(window, [aTab], [tabState], 0);
   },
 
   duplicateTab: function ssi_duplicateTab(aWindow, aTab, aDelta = 0) {
@@ -1491,7 +1503,7 @@ let SessionStoreInternal = {
       aWindow.gBrowser.addTab(null, {relatedToCurrent: true, ownerTab: aTab}) :
       aWindow.gBrowser.addTab();
 
-    this.restoreHistoryPrecursor(aWindow, [newTab], [tabState], 0, 0, 0,
+    this.restoreHistoryPrecursor(aWindow, [newTab], [tabState], 0,
                                  true /* Load this tab right away. */);
 
     return newTab;
@@ -1571,7 +1583,7 @@ let SessionStoreInternal = {
     let tab = tabbrowser.addTab();
 
     // restore tab content
-    this.restoreHistoryPrecursor(aWindow, [tab], [closedTabState], 1, 0, 0);
+    this.restoreHistoryPrecursor(aWindow, [tab], [closedTabState], 1);
 
     // restore the tab's position
     tabbrowser.moveTabTo(tab, closedTab.pos);
@@ -2344,7 +2356,7 @@ let SessionStoreInternal = {
     }
 
     this.restoreHistoryPrecursor(aWindow, tabs, winData.tabs,
-      (overwriteTabs ? (parseInt(winData.selected) || 1) : 0), 0, 0);
+      (overwriteTabs ? (parseInt(winData.selected) || 1) : 0));
 
     if (aState.scratchpads) {
       ScratchpadManager.restoreSession(aState.scratchpads);
@@ -2448,39 +2460,16 @@ let SessionStoreInternal = {
    *        Array of tab data
    * @param aSelectTab
    *        Index of selected tab
-   * @param aIx
-   *        Index of the next tab to check readyness for
-   * @param aCount
-   *        Counter for number of times delaying b/c browser or history aren't ready
    * @param aRestoreImmediately
    *        Flag to indicate whether the given set of tabs aTabs should be
    *        restored/loaded immediately even if restore_on_demand = true
    */
   restoreHistoryPrecursor:
     function ssi_restoreHistoryPrecursor(aWindow, aTabs, aTabData, aSelectTab,
-                                         aIx, aCount, aRestoreImmediately = false) {
+                                         aRestoreImmediately = false)
+  {
 
     var tabbrowser = aWindow.gBrowser;
-
-    // make sure that all browsers and their histories are available
-    // - if one's not, resume this check in 100ms (repeat at most 10 times)
-    for (var t = aIx; t < aTabs.length; t++) {
-      try {
-        if (!tabbrowser.getBrowserForTab(aTabs[t]).webNavigation.sessionHistory) {
-          throw new Error();
-        }
-      }
-      catch (ex) { // in case browser or history aren't ready yet
-        if (aCount < 10) {
-          var restoreHistoryFunc = function(self) {
-            self.restoreHistoryPrecursor(aWindow, aTabs, aTabData, aSelectTab,
-                                         aIx, aCount + 1, aRestoreImmediately);
-          };
-          aWindow.setTimeout(restoreHistoryFunc, 100, this);
-          return;
-        }
-      }
-    }
 
     if (!this._isWindowLoaded(aWindow)) {
       // from now on, the data will come from the actual window
@@ -2507,7 +2496,7 @@ let SessionStoreInternal = {
       return;
     }
 
-    // Sets the tabs restoring order. 
+    // Sets the tabs restoring order.
     [aTabs, aTabData] =
       this._setTabsRestoringOrder(tabbrowser, aTabs, aTabData, aSelectTab);
 
@@ -2515,7 +2504,7 @@ let SessionStoreInternal = {
     // and show/hide tabs as necessary. We'll also set the labels, user typed
     // value, and attach a copy of the tab's data in case we close it before
     // it's been restored.
-    for (t = 0; t < aTabs.length; t++) {
+    for (let t = 0; t < aTabs.length; t++) {
       let tab = aTabs[t];
       let browser = tabbrowser.getBrowserForTab(tab);
       let tabData = aTabData[t];
@@ -2587,14 +2576,14 @@ let SessionStoreInternal = {
 
     // helper hashes for ensuring unique frame IDs and unique document
     // identifiers.
-    var idMap = { used: {} };
-    var docIdentMap = {};
+    let idMap = { used: {} };
+    let docIdentMap = {};
     this.restoreHistory(aWindow, aTabs, aTabData, idMap, docIdentMap,
                         aRestoreImmediately);
   },
 
   /**
-   * Restore history for a window
+   * Restore history for a list of tabs.
    * @param aWindow
    *        Window reference
    * @param aTabs
@@ -2955,6 +2944,43 @@ let SessionStoreInternal = {
   },
 
   /**
+   * Accumulates a list of frames that need to be restored for the
+   * given browser element. A frame is only restored if its current
+   * URL matches the one saved in the session data. Each frame to be
+   * restored is returned along with its associated session data.
+   *
+   * @param browser the browser being restored
+   * @return an array of [frame, data] pairs
+   */
+  getFramesToRestore: function (browser) {
+    function hasExpectedURL(aDocument, aURL) {
+      return !aURL || aURL.replace(/#.*/, "") == aDocument.location.href.replace(/#.*/, "");
+    }
+
+    let frameList = [];
+
+    function enumerateFrame(content, data) {
+      // Skip the frame if the user has navigated away before loading
+      // finished.
+      if (!hasExpectedURL(content.document, data.url)) {
+        return;
+      }
+
+      frameList.push([content, data]);
+
+      for (let i = 0; i < content.frames.length; i++) {
+        if (data.children && data.children[i]) {
+          enumerateFrame(content.frames[i], data.children[i]);
+        }
+      }
+    }
+
+    enumerateFrame(browser.contentWindow, browser.__SS_restore_data);
+
+    return frameList;
+  },
+
+  /**
    * Restore properties to a loaded document
    */
   restoreDocument: function ssi_restoreDocument(aWindow, aBrowser, aEvent) {
@@ -2964,76 +2990,9 @@ let SessionStoreInternal = {
       return;
     }
 
-    // always call this before injecting content into a document!
-    function hasExpectedURL(aDocument, aURL)
-      !aURL || aURL.replace(/#.*/, "") == aDocument.location.href.replace(/#.*/, "");
-
-    let selectedPageStyle = aBrowser.__SS_restore_pageStyle;
-    function restoreTextDataAndScrolling(aContent, aData, aPrefix) {
-      if (aData.formdata && hasExpectedURL(aContent.document, aData.url)) {
-        let formdata = aData.formdata;
-
-        // handle backwards compatibility
-        // this is a migration from pre-firefox 15. cf. bug 742051
-        if (!("xpath" in formdata || "id" in formdata)) {
-          formdata = { xpath: {}, id: {} };
-
-          for each (let [key, value] in Iterator(aData.formdata)) {
-            if (key.charAt(0) == "#") {
-              formdata.id[key.slice(1)] = value;
-            } else {
-              formdata.xpath[key] = value;
-            }
-          }
-        }
-
-        // for about:sessionrestore we saved the field as JSON to avoid
-        // nested instances causing humongous sessionstore.js files.
-        // cf. bug 467409
-        if ((aData.url == "about:sessionrestore" || aData.url == "about:welcomeback") &&
-            "sessionData" in formdata.id &&
-            typeof formdata.id["sessionData"] == "object") {
-          formdata.id["sessionData"] =
-            JSON.stringify(formdata.id["sessionData"]);
-        }
-
-        // update the formdata
-        aData.formdata = formdata;
-        // merge the formdata
-        DocumentUtils.mergeFormData(aContent.document, formdata);
-      }
-
-      if (aData.innerHTML) {
-        aWindow.setTimeout(function() {
-          if (aContent.document.designMode == "on" &&
-              hasExpectedURL(aContent.document, aData.url) &&
-              aContent.document.body) {
-            aContent.document.body.innerHTML = aData.innerHTML;
-          }
-        }, 0);
-      }
-      var match;
-      if (aData.scroll && (match = /(\d+),(\d+)/.exec(aData.scroll)) != null) {
-        aContent.scrollTo(match[1], match[2]);
-      }
-      Array.forEach(aContent.document.styleSheets, function(aSS) {
-        aSS.disabled = aSS.title && aSS.title != selectedPageStyle;
-      });
-      for (var i = 0; i < aContent.frames.length; i++) {
-        if (aData.children && aData.children[i] &&
-          hasExpectedURL(aContent.document, aData.url)) {
-          restoreTextDataAndScrolling(aContent.frames[i], aData.children[i], aPrefix + i + "|");
-        }
-      }
-    }
-
-    // don't restore text data and scrolling state if the user has navigated
-    // away before the loading completed (except for in-page navigation)
-    if (hasExpectedURL(aEvent.originalTarget, aBrowser.__SS_restore_data.url)) {
-      var content = aEvent.originalTarget.defaultView;
-      restoreTextDataAndScrolling(content, aBrowser.__SS_restore_data, "");
-      aBrowser.markupDocumentViewer.authorStyleDisabled = selectedPageStyle == "_nostyle";
-    }
+    let frameList = this.getFramesToRestore(aBrowser);
+    PageStyle.restore(aBrowser.docShell, frameList, aBrowser.__SS_restore_pageStyle);
+    TextAndScrollData.restore(frameList);
 
     // notify the tabbrowser that this document has been completely restored
     this._sendTabRestoredNotification(aBrowser.__SS_restore_tab);
@@ -4257,7 +4216,8 @@ let TabState = {
     }
 
     let promise = Task.spawn(function task() {
-      // Collected session history data asynchronously.
+      // Collect session history data asynchronously. Also collects
+      // text and scroll data.
       let history = yield Messenger.send(tab, "SessionStore:collectSessionHistory");
 
       // Collected session storage data asynchronously.
@@ -4265,6 +4225,8 @@ let TabState = {
 
       // Collect docShell capabilities asynchronously.
       let disallow = yield Messenger.send(tab, "SessionStore:collectDocShellCapabilities");
+
+      let pageStyle = yield Messenger.send(tab, "SessionStore:collectPageStyle");
 
       // Collect basic tab data, without session history and storage.
       let options = {omitSessionHistory: true,
@@ -4274,7 +4236,9 @@ let TabState = {
 
       // Apply collected data.
       tabData.entries = history.entries;
-      tabData.index = history.index;
+      if ("index" in history) {
+        tabData.index = history.index;
+      }
 
       if (Object.keys(storage).length) {
         tabData.storage = storage;
@@ -4284,8 +4248,9 @@ let TabState = {
         tabData.disallow = disallow.join(",");
       }
 
-      // Save text and scroll data.
-      this._updateTextAndScrollDataForTab(tab, tabData);
+      if (pageStyle) {
+        tabData.pageStyle = pageStyle;
+      }
 
       // If we're still the latest async collection for the given tab and
       // the cache hasn't been filled by collect() in the meantime, let's
@@ -4532,108 +4497,16 @@ let TabState = {
       return false;
     }
 
-    let selectedPageStyle = browser.markupDocumentViewer.authorStyleDisabled ? "_nostyle" :
-                            this._getSelectedPageStyle(browser.contentWindow);
-    if (selectedPageStyle)
+    let selectedPageStyle = PageStyle.collect(browser.docShell);
+    if (selectedPageStyle) {
       tabData.pageStyle = selectedPageStyle;
-    else if (tabData.pageStyle)
-      delete tabData.pageStyle;
-
-    this._updateTextAndScrollDataForFrame(window, browser.contentWindow,
-                                          tabData.entries[tabIndex],
-                                          includePrivateData,
-                                          !!tabData.pinned);
-    if (browser.currentURI.spec == "about:config") {
-      tabData.entries[tabIndex].formdata = {
-        id: {
-          "textbox": browser.contentDocument.getElementById("textbox").value
-        },
-        xpath: {}
-      };
     }
+
+    TextAndScrollData.updateFrame(tabData.entries[tabIndex],
+                                  browser.contentWindow,
+                                  !!tabData.pinned,
+                                  {includePrivateData: includePrivateData});
 
     return true;
   },
-
-  /**
-   * Go through all subframes and store all form data, the current
-   * scroll positions and innerHTML content of WYSIWYG editors.
-   *
-   * @param window
-   *        Window reference
-   * @param content
-   *        frame reference
-   * @param data
-   *        part of a tabData object to add the information to
-   * @param includePrivateData
-   *        always return privacy sensitive data (use with care)
-   * @param isPinned
-   *        the tab is pinned and should be treated differently for privacy
-   */
-  _updateTextAndScrollDataForFrame:
-    function (window, content, data, includePrivateData, isPinned) {
-
-    for (let i = 0; i < content.frames.length; i++) {
-      if (data.children && data.children[i])
-        this._updateTextAndScrollDataForFrame(window, content.frames[i],
-                                              data.children[i],
-                                              includePrivateData, isPinned);
-    }
-    let href = (content.parent || content).document.location.href;
-    let isHttps = makeURI(href).schemeIs("https");
-    let topURL = content.top.document.location.href;
-    let isAboutSR = topURL == "about:sessionrestore" || topURL == "about:welcomeback";
-    if (includePrivateData || isAboutSR ||
-        PrivacyLevel.canSave({isHttps: isHttps, isPinned: isPinned})) {
-      let formData = DocumentUtils.getFormData(content.document);
-
-      // We want to avoid saving data for about:sessionrestore as a string.
-      // Since it's stored in the form as stringified JSON, stringifying further
-      // causes an explosion of escape characters. cf. bug 467409
-      if (formData && isAboutSR) {
-        formData.id["sessionData"] = JSON.parse(formData.id["sessionData"]);
-      }
-
-      if (Object.keys(formData.id).length ||
-          Object.keys(formData.xpath).length) {
-        data.formdata = formData;
-      } else if (data.formdata) {
-        delete data.formdata;
-      }
-
-      // designMode is undefined e.g. for XUL documents (as about:config)
-      if ((content.document.designMode || "") == "on" && content.document.body)
-        data.innerHTML = content.document.body.innerHTML;
-    }
-
-    // get scroll position from nsIDOMWindowUtils, since it allows avoiding a
-    // flush of layout
-    let domWindowUtils = content.QueryInterface(Ci.nsIInterfaceRequestor)
-                                .getInterface(Ci.nsIDOMWindowUtils);
-    let scrollX = {}, scrollY = {};
-    domWindowUtils.getScrollXY(false, scrollX, scrollY);
-    data.scroll = scrollX.value + "," + scrollY.value;
-  },
-
-  /**
-   * determine the title of the currently enabled style sheet (if any)
-   * and recurse through the frameset if necessary
-   * @param   content is a frame reference
-   * @returns the title style sheet determined to be enabled (empty string if none)
-   */
-  _getSelectedPageStyle: function (content) {
-    const forScreen = /(?:^|,)\s*(?:all|screen)\s*(?:,|$)/i;
-    for (let i = 0; i < content.document.styleSheets.length; i++) {
-      let ss = content.document.styleSheets[i];
-      let media = ss.media.mediaText;
-      if (!ss.disabled && ss.title && (!media || forScreen.test(media)))
-        return ss.title
-    }
-    for (let i = 0; i < content.frames.length; i++) {
-      let selectedPageStyle = this._getSelectedPageStyle(content.frames[i]);
-      if (selectedPageStyle)
-        return selectedPageStyle;
-    }
-    return "";
-  }
 };

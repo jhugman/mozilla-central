@@ -12,6 +12,9 @@
 
 #include "prlock.h"
 #include "mozilla/RefPtr.h"
+#include "nsWeakPtr.h"
+#include "nsIWeakReferenceUtils.h" // for the definition of nsWeakPtr
+#include "IPeerConnection.h"
 #include "sigslot.h"
 #include "nricectx.h"
 #include "nricemediastream.h"
@@ -60,6 +63,8 @@ class DOMMediaStream;
 namespace dom {
 class RTCConfiguration;
 class MediaConstraintsInternal;
+class MediaStreamTrack;
+class RTCStatsReportInternal;
 
 #ifdef USE_FAKE_PCOBSERVER
 typedef test::AFakePCObserver PeerConnectionObserver;
@@ -121,13 +126,15 @@ public:
   }
   bool addTurnServer(const std::string& addr, uint16_t port,
                      const std::string& username,
-                     const std::string& pwd)
+                     const std::string& pwd,
+                     const std::string& transport)
   {
     // TODO(ekr@rtfm.com): Need support for SASLprep for
     // username and password. Bug # ???
     std::vector<unsigned char> password(pwd.begin(), pwd.end());
 
-    NrIceTurnServer* server(NrIceTurnServer::Create(addr, port, username, password));
+    NrIceTurnServer* server(NrIceTurnServer::Create(addr, port, username, password,
+                                                    transport));
     if (!server) {
       return false;
     }
@@ -290,6 +297,12 @@ public:
   void SetRemoteDescription (int32_t aAction, const nsAString& aSDP, ErrorResult &rv)
   {
     rv = SetRemoteDescription(aAction, NS_ConvertUTF16toUTF8(aSDP).get());
+  }
+
+  NS_IMETHODIMP_TO_ERRORRESULT(GetStats, ErrorResult &rv,
+                               mozilla::dom::MediaStreamTrack *aSelector)
+  {
+    rv = GetStats(aSelector);
   }
 
   NS_IMETHODIMP AddIceCandidate(const char* aCandidate, const char* aMid,
@@ -460,6 +473,7 @@ private:
 
 #ifdef MOZILLA_INTERNAL_API
   void virtualDestroyNSSReference() MOZ_FINAL;
+  nsresult GetTimeSinceEpoch(DOMHighResTimeStamp *result);
 #endif
 
   // Shut down media - called on main thread only
@@ -467,6 +481,17 @@ private:
 
   // ICE callbacks run on the right thread.
   nsresult IceStateChange_m(mozilla::dom::PCImplIceState aState);
+
+#ifdef MOZILLA_INTERNAL_API
+  // Fills in an RTCStatsReportInternal. Must be run on STS.
+  void GetStats_s(uint32_t trackId,
+                  DOMHighResTimeStamp now);
+
+  // Sends an RTCStatsReport to JS. Must run on main thread.
+  void OnStatsReport_m(uint32_t trackId,
+                       nsresult result,
+                       nsAutoPtr<mozilla::dom::RTCStatsReportInternal> report);
+#endif
 
   // Timecard used to measure processing time. This should be the first class
   // attribute so that we accurately measure the time required to instantiate
@@ -482,29 +507,19 @@ private:
   mozilla::dom::PCImplIceState mIceState;
 
   nsCOMPtr<nsIThread> mThread;
-  // We hold a raw pointer to PeerConnectionObserver (no WeakRefs to concretes!)
-  // which is an invariant guaranteed to exist between Initialize() and Close().
-  // We explicitly clear it in Close(). We wrap it in a helper, to encourage
-  // testing against nullptr before use. Use in Runnables requires wrapping
-  // access in RefPtr<> since they may execute after close. This is only safe
-  // to use on the main thread
+  // WeakConcretePtr to PeerConnectionObserver. TODO: Remove after bug 928535
   //
+  // This is only safe to use on the main thread
   // TODO: Remove if we ever properly wire PeerConnection for cycle-collection.
-  class WeakReminder
+  class WeakConcretePtr
   {
   public:
-    WeakReminder() : mObserver(nullptr) {}
-    void Init(PeerConnectionObserver *aObserver) {
-      mObserver = aObserver;
-    }
-    void Close() {
-      mObserver = nullptr;
-    }
-    PeerConnectionObserver *MayGet() {
-      return mObserver;
-    }
+    WeakConcretePtr() : mObserver(nullptr) {}
+    void Set(PeerConnectionObserver *aObserver);
+    PeerConnectionObserver *MayGet();
   private:
     PeerConnectionObserver *mObserver;
+    nsWeakPtr mWeakPtr;
   } mPCObserver;
   nsCOMPtr<nsPIDOMWindow> mWindow;
 

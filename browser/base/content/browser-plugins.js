@@ -704,10 +704,22 @@ var gPluginHandler = {
       else if (pluginInfo.blocklistState != Ci.nsIBlocklistService.STATE_NOT_BLOCKED) {
         url = Services.blocklist.getPluginBlocklistURL(pluginInfo.pluginTag);
       }
+      else {
+        url = Services.urlFormatter.formatURLPref("plugins.clickToActivateInfo.url");
+      }
       pluginInfo.detailsLink = url;
 
       centerActions.push(pluginInfo);
     }
+
+    if (centerActions.length == 0) {
+      // TODO: this is a temporary band-aid to avoid broken doorhangers
+      // until bug 926605 is landed.
+      notification.options.centerActions = [];
+      setTimeout(() => PopupNotifications.remove(notification), 0);
+      return;
+    }
+
     centerActions.sort(function(a, b) {
       return a.pluginName.localeCompare(b.pluginName);
     });
@@ -792,6 +804,10 @@ var gPluginHandler = {
       // so the pluginHost.getPermissionStringForType call is protected
       if (gPluginHandler.canActivatePlugin(plugin) &&
           aPluginInfo.permissionString == pluginHost.getPermissionStringForType(plugin.actualType)) {
+        let overlay = this.getPluginUI(plugin, "main");
+        if (overlay) {
+          overlay.removeEventListener("click", gPluginHandler._overlayClickListener, true);
+        }
         plugin.playPlugin();
       }
     }
