@@ -2491,7 +2491,6 @@ this.DOMApplicationRegistry = {
     let oldApp = this.webapps[id];
 
     let cleanup = this._cleanup.bind(this, id, oldApp, aNewApp, aIsUpdate);
-                                                 cleanup, download);
 
     let requestChannel;
     let zipFile;
