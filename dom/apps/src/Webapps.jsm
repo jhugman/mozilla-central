@@ -2754,7 +2754,7 @@ this.DOMApplicationRegistry = {
       certdb.openSignedJARFileAsync(
          zipFile,
          function(aRv, aZipReader) {
-           deferredOpenSignedJarFileAsync.resolve([aRv, aZipReader]);
+           deferredOpenSignedJarFileAsync.resolve([aRv, aZipReader, aHash]);
          }
       );
 
@@ -2762,7 +2762,7 @@ this.DOMApplicationRegistry = {
       //  throw new Task.resolve([rv, zipreader]);
       return deferredOpenSignedJarFileAsync.promise;
     }, null).then(function(aValues) {
-      [rv, zipReader] = aValues;
+      let [rv, zipReader, hash] = aValues;
       try {
         let isSigned;
         if (Components.isSuccessCode(rv)) {
@@ -2890,17 +2890,17 @@ this.DOMApplicationRegistry = {
       delete aOldApp.staged;
     }
 
-    self._saveApps(function() {
-      self.broadcastMessage("Webapps:UpdateState", {
+    this._saveApps((function() {
+      this.broadcastMessage("Webapps:UpdateState", {
         app: aOldApp,
         error: aError,
         manifestURL: aNewApp.manifestURL
       });
-      self.broadcastMessage("Webapps:FireEvent", {
+      this.broadcastMessage("Webapps:FireEvent", {
         eventType: "downloaderror",
         manifestURL:  aNewApp.manifestURL
       });
-    });
+    }).bind(this));
     AppDownloadManager.remove(aNewApp.manifestURL);
   },
 
@@ -2923,16 +2923,16 @@ this.DOMApplicationRegistry = {
     aOldApp.installState = "installed";
     aOldApp.readyToApplyDownload = false;
     // Save the updated registry, and cleanup the tmp directory.
-    self._saveApps(function() {
-      self.broadcastMessage("Webapps:UpdateState", {
+    this._saveApps((function() {
+      this.broadcastMessage("Webapps:UpdateState", {
         app: aOldApp,
         manifestURL: aNewApp.manifestURL
       });
-      self.broadcastMessage("Webapps:FireEvent", {
+      this.broadcastMessage("Webapps:FireEvent", {
         manifestURL: aNewApp.manifestURL,
         eventType: ["downloadsuccess", "downloadapplied"]
       });
-    });
+    }).bind(this));
     let file = FileUtils.getFile("TmpD", ["webapps", aId], false);
     if (file && file.exists()) {
       file.remove(true);
