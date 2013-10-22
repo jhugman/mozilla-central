@@ -2870,7 +2870,7 @@ this.DOMApplicationRegistry = {
 
   // Removes the directory we created, and sends an error to the DOM side.
   _cleanup: function(aId, aOldApp, aNewApp, aIsUpdate, aError) {
-    debug("Cleanup: " + aError);
+    debug("Cleanup: " + aError + "\n" + aError.stack);
     let dir = FileUtils.getDir("TmpD", ["webapps", aId], true, true);
     try {
       dir.remove(true);
