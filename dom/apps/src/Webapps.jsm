@@ -2731,9 +2731,10 @@ this.DOMApplicationRegistry = {
       let oldPackage = (responseStatus == 304 || aHash == oldApp.packageHash);
 
       if (oldPackage) {
+        debug("package's etag or hash unchanged; sending 'applied' event");
         // The package's Etag or hash has not changed.
         // We send a "applied" event right away.
-        this._sendAppliedEvent(aNewApp, oldApp, id);
+        self._sendAppliedEvent(aNewApp, oldApp, id);
         return;
       }
 
@@ -2762,6 +2763,14 @@ this.DOMApplicationRegistry = {
       //  throw new Task.resolve([rv, zipreader]);
       return deferredOpenSignedJarFileAsync.promise;
     }, null).then(function(aValues) {
+      // If the package's etag or hash hasn't changed, the previous step
+      // sends an applied event immediately and then returns without specifying
+      // a return value, so aValues is undefined.
+      // XXX Skip this step at the call site rather than here in the callee.
+      if (typeof aValues == "undefined") {
+          return;
+      }
+
       let [rv, zipReader, hash] = aValues;
       try {
         let isSigned;
