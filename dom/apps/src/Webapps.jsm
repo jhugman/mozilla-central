@@ -2462,6 +2462,65 @@ this.DOMApplicationRegistry = {
     }).bind(this));
   },
 
+  _checkDownloadSize: function(freeBytes, aNewApp) {
+    if (freeBytes) {
+      debug("Free storage: " + freeBytes + ". Download size: " +
+            aNewApp.downloadSize);
+      if (freeBytes <=
+          aNewApp.downloadSize + AppDownloadManager.MIN_REMAINING_FREESPACE) {
+        return false;
+      }
+    }
+    return true;
+  },
+
+  _ensureSufficientStorage: function(aNewApp) {
+    let deferred = Promise.defer();
+
+    let navigator = Services.wm.getMostRecentWindow("navigator:browser")
+                            .navigator;
+    let deviceStorage = null;
+
+    if (navigator.getDeviceStorage) {
+      deviceStorage = navigator.getDeviceStorage("apps");
+    }
+
+    if (deviceStorage) {
+      let req = deviceStorage.freeSpace();
+      req.onsuccess = req.onerror = function(e) {
+        let freeBytes = e.target.result;
+        let sufficientStorage = this._checkDownloadSize(freeBytes, aNewApp);
+        if (sufficientStorage) {
+          deferred.resolve();
+        } else {
+          deferred.reject("INSUFFICIENT_STORAGE");
+        }
+      }
+    } else {
+      debug("No deviceStorage");
+      // deviceStorage isn't available, so use FileUtils to find the size of
+      // available storage.
+      let dir = FileUtils.getDir(DIRECTORY_NAME, ["webapps"], true, true);
+      try {
+        let sufficientStorage = this._checkDownloadSize(dir.diskSpaceAvailable,
+                                                        aNewApp);
+        if (sufficientStorage) {
+          deferred.resolve();
+        } else {
+          deferred.reject("INSUFFICIENT_STORAGE");
+        }
+      } catch(ex) {
+        // If disk space information isn't available, we'll end up here.
+        // We should proceed anyway, otherwise devices that support neither
+        // deviceStorage nor diskSpaceAvailable will never be able to install
+        // packaged apps.
+        deferred.resolve();
+      }
+    }
+
+    return deferred.promise;
+  },
+
   downloadPackage: function(aManifest, aNewApp, aIsUpdate, aOnSuccess) {
     // Here are the steps when installing a package:
     // - create a temp directory where to store the app.
@@ -2493,59 +2552,9 @@ this.DOMApplicationRegistry = {
     let responseStatus;
     let hasher;
 
-    return Task.spawn(function() {
-      let navigator = Services.wm.getMostRecentWindow("navigator:browser")
-                                   .navigator;
-      let deviceStorage = null;
-      if (navigator.getDeviceStorage) {
-        deviceStorage = navigator.getDeviceStorage("apps");
-      }
-      let freeBytes;
-      if (deviceStorage) {
-
-        let deferredStorageSize = Promise.defer();
-
-        let req = deviceStorage.freeSpace();
-        req.onsuccess = req.onerror = function statResult(e) {
-          //freeBytes = e.target.result;
-          deferredStorageSize.resolve(e.target.result);
-        }
-
-        freeBytes = yield deferredStorageSize.promise;
-
-        // Even if we could not retrieve the device storage free space, we try
-        // to download the package.
-        if(!freeBytes) {
-          return;
-        }
-
-      } else {
-        debug("No deviceStorage");
-        // deviceStorage isn't available, so use FileUtils to find the size of
-        // available storage.
-        let dir = FileUtils.getDir(DIRECTORY_NAME, ["webapps"], true, true);
-        freeBytes = dir.diskSpaceAvailable;
-      }
-
-      // check the download size
-      try {
-        if (freeBytes) {
-          debug("Free storage: " + freeBytes + ". Download size: " + aNewApp.downloadSize);
-          if (deviceStorage & (freeBytes <= aNewApp.downloadSize +
-                                            AppDownloadManager.MIN_REMAINING_FREESPACE)) {
-            debug("ack - no storage!");
-            throw "INSUFFICIENT_STORAGE";
-          }
-        }
-      } catch(ex) {
-        debug("Error thrown - will try and download: " + ex);
-        // If disk space information isn't available, we'll end up here.
-        // We should either proceed anyway, otherwise devices that support
-        // neither deviceStorage nor diskSpaceAvailable will never be able to
-        // install packaged apps.
-      }
-
-    }, null).then(function() {
+    return Task.spawn((function() {
+      yield this._ensureSufficientStorage(aNewApp);
+    }).bind(this), null).then(function() {
       debug("About to download " + aManifest.fullPackagePath());
 
       if (isLocalFileInstall) {
