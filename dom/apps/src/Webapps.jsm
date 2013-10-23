@@ -2554,7 +2554,7 @@ this.DOMApplicationRegistry = {
 
     return Task.spawn((function() {
       yield this._ensureSufficientStorage(aNewApp);
-    }).bind(this), null).then(function() {
+
       debug("About to download " + aManifest.fullPackagePath());
 
       if (isLocalFileInstall) {
@@ -2578,7 +2578,7 @@ this.DOMApplicationRegistry = {
           previousState: aIsUpdate ? "installed" : "pending"
         }
       );
-    }, null).then(function() {
+
       let lastProgressTime = 0;
 
       requestChannel.notificationCallbacks = {
@@ -2616,7 +2616,7 @@ this.DOMApplicationRegistry = {
           throw Cr.NS_ERROR_NOT_IMPLEMENTED;
         }
       };
-    }, null).then(function() {
+    }).bind(this), null).then(function() {
       // We set the 'downloading' flag to true right before starting the fetch.
       oldApp.downloading = true;
       // We determine the app's 'installState' according to its previous
