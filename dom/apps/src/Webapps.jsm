@@ -2924,6 +2924,21 @@ this.DOMApplicationRegistry = {
     aOldApp.downloadSize = 0;
     aOldApp.installState = "installed";
     aOldApp.readyToApplyDownload = false;
+    if (aOldApp.staged && aOldApp.staged.manifestHash) {
+      // If we're here then the manifest has changed but the package
+      // hasn't. Let's clear this, so we don't keep offering
+      // a bogus update to the user
+      aOldApp.manifestHash = aOldApp.staged.manifestHash;
+      aOldApp.etag = aOldApp.staged.etag || aOldApp.etag;
+      aOldApp.staged = {};
+      // Move the staged update manifest to a non staged one.
+      let dirPath = this._getAppDir(aId).path;
+
+      // We don't really mind much if this fails.
+      OS.File.move(OS.Path.join(dirPath, "staged-update.webapp"),
+                   OS.Path.join(dirPath, "update.webapp"));
+    }
+
     // Save the updated registry, and cleanup the tmp directory.
     this._saveApps((function() {
       this.broadcastMessage("Webapps:UpdateState", {
