@@ -25,10 +25,6 @@ Cu.import("resource://gre/modules/osfile.jsm");
 Cu.import("resource://gre/modules/Task.jsm");
 Cu.import("resource://gre/modules/Promise.jsm");
 
-#ifdef MOZ_DEBUG
-const { console } = Cu.import("resource://gre/modules/devtools/Console.jsm", {});
-#endif
-
 #ifdef MOZ_WIDGET_GONK
 XPCOMUtils.defineLazyGetter(this, "libcutils", function() {
   Cu.import("resource://gre/modules/systemlibs.js");
@@ -39,9 +35,6 @@ XPCOMUtils.defineLazyGetter(this, "libcutils", function() {
 function debug(aMsg) {
 #ifdef MOZ_DEBUG
   dump("-*- Webapps.jsm : " + aMsg + "\n");
-  if(console) {
-    console.log("-*- Webapps.jsm : " + aMsg + "\n");
-  }
 #endif
 }
 
