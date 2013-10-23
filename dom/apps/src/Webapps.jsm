@@ -2489,8 +2489,6 @@ this.DOMApplicationRegistry = {
     let zipFile;
     let rv, zipReader;
     let responseStatus;
-    let listener;
-    let bufferedOutputStream, outputStream;
     let hasher;
 
     return Task.spawn(function() {
@@ -2623,19 +2621,19 @@ this.DOMApplicationRegistry = {
                                   ["webapps", id, "application.zip"], true);
 
       // We need an output stream to write the channel content to the zip file.
-      outputStream = Cc["@mozilla.org/network/file-output-stream;1"]
+      let outputStream = Cc["@mozilla.org/network/file-output-stream;1"]
                            .createInstance(Ci.nsIFileOutputStream);
       // write, create, truncate
       outputStream.init(zipFile, 0x02 | 0x08 | 0x20, parseInt("0664", 8), 0);
-      bufferedOutputStream = Cc['@mozilla.org/network/buffered-output-stream;1']
+      let bufferedOutputStream = Cc['@mozilla.org/network/buffered-output-stream;1']
                                    .createInstance(Ci.nsIBufferedOutputStream);
       bufferedOutputStream.init(outputStream, 1024);
 
       // Create a listener that will give data to the file output stream.
-      listener = Cc["@mozilla.org/network/simple-stream-listener;1"]
+      let listener = Cc["@mozilla.org/network/simple-stream-listener;1"]
                        .createInstance(Ci.nsISimpleStreamListener);
 
-      let deferred  = Promise.defer();
+      let deferred = Promise.defer();
       
 
       listener.init(bufferedOutputStream, {
@@ -2644,6 +2642,8 @@ this.DOMApplicationRegistry = {
         },
 
         onStopRequest: function(aRequest, aContext, aStatusCode) {
+          bufferedOutputStream.close();
+          outputStream.close();
           deferred.resolve(aStatusCode);
         }
       });
@@ -2653,10 +2653,6 @@ this.DOMApplicationRegistry = {
 
       return deferred.promise;
     }, null).then(function(aStatusCode) {
-
-      bufferedOutputStream.close();
-      outputStream.close();
-
       if (!Components.isSuccessCode(aStatusCode)) {
         throw "NETWORK_ERROR";
         return;
@@ -2681,9 +2677,8 @@ this.DOMApplicationRegistry = {
       // We want to use the MD5 algorithm.
       hasher.init(hasher.MD5);
 
-      return OS.File.open(zipFile.path, { read: true })
+      return OS.File.open(zipFile.path, { read: true });
     }, null).then(function opened(file) {
-
       let deferred  = Promise.defer();
       const CHUNK_SIZE = 16384;
       // Return the two-digit hexadecimal code for a byte.
@@ -2715,10 +2710,7 @@ this.DOMApplicationRegistry = {
       }
       readChunk();
       return deferred.promise;
-    }, function openError() {
-          debug("Error opening " + zipFile.path);
-          hash = null;
-    }).then(function(aHash) {
+    }, null).then(function(aHash) {
       debug("File hash computed: " + aHash);
 
       let oldPackage = (responseStatus == 304 || aHash == oldApp.packageHash);
