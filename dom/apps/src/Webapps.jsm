@@ -2325,19 +2325,21 @@ this.DOMApplicationRegistry = {
    * Bound params:
    *
    * @param aNewApp {Object} the new app data
-   * @param aInstallSuccessCallback {Function} the callback to call on install success
+   * @param aInstallSuccessCallback {Function}
+   *        the callback to call on install success
    *
    * Passed params:
    *
-   * @param aId {Integer} the uniquie id of the application
+   * @param aId {Integer} the unique ID of the application
    * @param aManifest {Object} The manifest of the application
    */
-  _onDownloadPackage: function(aNewApp, aInstallSuccessCallback,
-                               aId, aManifest) {
+  _onDownloadPackage: function(aNewApp, aInstallSuccessCallback, aId,
+                               aManifest) {
     debug("_onDownloadPackage");
     // Success! Move the zip out of TmpD.
     let app = DOMApplicationRegistry.webapps[aId];
-    let zipFile = FileUtils.getFile("TmpD", ["webapps", aId, "application.zip"], true);
+    let zipFile = FileUtils.getFile("TmpD", ["webapps", aId, "application.zip"],
+                                    true);
     let dir = this._getAppDir(aId);
     zipFile.moveTo(dir, "application.zip");
     let tmpDir = FileUtils.getDir("TmpD", ["webapps", aId], true, true);
