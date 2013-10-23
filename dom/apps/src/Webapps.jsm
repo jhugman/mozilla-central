@@ -2521,6 +2521,41 @@ this.DOMApplicationRegistry = {
     return deferred.promise;
   },
 
+  _getPackage: function(aRequestChannel, aZipFile, aNewApp) {
+    let deferred = Promise.defer();
+
+    // We need an output stream to write the channel content to the zip file.
+    let outputStream = Cc["@mozilla.org/network/file-output-stream;1"]
+                         .createInstance(Ci.nsIFileOutputStream);
+    // write, create, truncate
+    outputStream.init(aZipFile, 0x02 | 0x08 | 0x20, parseInt("0664", 8), 0);
+    let bufferedOutputStream = Cc['@mozilla.org/network/buffered-output-stream;1']
+                                 .createInstance(Ci.nsIBufferedOutputStream);
+    bufferedOutputStream.init(outputStream, 1024);
+
+    // Create a listener that will give data to the file output stream.
+    let listener = Cc["@mozilla.org/network/simple-stream-listener;1"]
+                     .createInstance(Ci.nsISimpleStreamListener);
+
+    listener.init(bufferedOutputStream, {
+      onStartRequest: function(aRequest, aContext) {
+        // Nothing to do there anymore.
+      },
+
+      onStopRequest: function(aRequest, aContext, aStatusCode) {
+        bufferedOutputStream.close();
+        outputStream.close();
+        deferred.resolve(aStatusCode);
+      }
+    });
+    aRequestChannel.asyncOpen(listener, null);
+
+    // send a first progress event to correctly set the DOM object's properties
+    this._sendDownloadProgressEvent(aNewApp, 0);
+
+    return deferred.promise;
+  },
+
   downloadPackage: function(aManifest, aNewApp, aIsUpdate, aOnSuccess) {
     // Here are the steps when installing a package:
     // - create a temp directory where to store the app.
@@ -2616,9 +2651,10 @@ this.DOMApplicationRegistry = {
           throw Cr.NS_ERROR_NOT_IMPLEMENTED;
         }
       };
-    }).bind(this), null).then(function() {
+
       // We set the 'downloading' flag to true right before starting the fetch.
       oldApp.downloading = true;
+
       // We determine the app's 'installState' according to its previous
       // state. Cancelled download should remain as 'pending'. Successfully
       // installed apps should morph to 'updating'.
@@ -2628,42 +2664,13 @@ this.DOMApplicationRegistry = {
       oldApp.progress = 0;
 
       // Staging the zip in TmpD until all the checks are done.
-      zipFile = FileUtils.getFile("TmpD", 
-                                  ["webapps", id, "application.zip"], true);
+      zipFile = FileUtils.getFile("TmpD", ["webapps", id, "application.zip"],
+                                  true);
 
-      // We need an output stream to write the channel content to the zip file.
-      let outputStream = Cc["@mozilla.org/network/file-output-stream;1"]
-                           .createInstance(Ci.nsIFileOutputStream);
-      // write, create, truncate
-      outputStream.init(zipFile, 0x02 | 0x08 | 0x20, parseInt("0664", 8), 0);
-      let bufferedOutputStream = Cc['@mozilla.org/network/buffered-output-stream;1']
-                                   .createInstance(Ci.nsIBufferedOutputStream);
-      bufferedOutputStream.init(outputStream, 1024);
+      let aStatusCode = yield this._getPackage(requestChannel, zipFile, aNewApp);
+      throw new Task.Result(aStatusCode);
 
-      // Create a listener that will give data to the file output stream.
-      let listener = Cc["@mozilla.org/network/simple-stream-listener;1"]
-                       .createInstance(Ci.nsISimpleStreamListener);
-
-      let deferred = Promise.defer();
-      
-
-      listener.init(bufferedOutputStream, {
-        onStartRequest: function(aRequest, aContext) {
-          // Nothing to do there anymore.
-        },
-
-        onStopRequest: function(aRequest, aContext, aStatusCode) {
-          bufferedOutputStream.close();
-          outputStream.close();
-          deferred.resolve(aStatusCode);
-        }
-      });
-      requestChannel.asyncOpen(listener, null);
-      // send a first progress event to correctly set the DOM object's properties
-      self._sendDownloadProgressEvent(aNewApp, 0);
-
-      return deferred.promise;
-    }, null).then(function(aStatusCode) {
+    }).bind(this), null).then(function(aStatusCode) {
       if (!Components.isSuccessCode(aStatusCode)) {
         throw "NETWORK_ERROR";
         return;
