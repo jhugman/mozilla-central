@@ -2474,8 +2474,8 @@ this.DOMApplicationRegistry = {
     return true;
   },
 
-  _getRequestChannel: function(aFullPackagePath, aIsLocalFileInstall,
-                               aOldPackageEtag) {
+  _getRequestChannel: function(aFullPackagePath, aIsLocalFileInstall, aOldApp,
+                               aNewApp) {
     let requestChannel;
 
     if (aIsLocalFileInstall) {
@@ -2487,10 +2487,46 @@ this.DOMApplicationRegistry = {
       requestChannel.loadFlags |= Ci.nsIRequest.INHIBIT_CACHING;
     }
 
-    if (aOldPackageEtag && !aIsLocalFileInstall) {
-      debug("Add If-None-Match header: " + aOldPackageEtag);
-      requestChannel.setRequestHeader("If-None-Match", aOldPackageEtag, false);
+    if (aOldApp.packageEtag && !aIsLocalFileInstall) {
+      debug("Add If-None-Match header: " + aOldApp.packageEtag);
+      requestChannel.setRequestHeader("If-None-Match", aOldApp.packageEtag,
+                                      false);
     }
+
+    requestChannel.notificationCallbacks = {
+      QueryInterface: function(aIID) {
+        if (aIID.equals(Ci.nsISupports)          ||
+            aIID.equals(Ci.nsIProgressEventSink) ||
+            aIID.equals(Ci.nsILoadContext))
+          return this;
+        throw Cr.NS_ERROR_NO_INTERFACE;
+      },
+      getInterface: function(aIID) {
+        return this.QueryInterface(aIID);
+      },
+      onProgress: (function(aRequest, aContext, aProgress, aProgressMax) {
+        aOldApp.progress = aProgress;
+        let now = Date.now();
+        if (now - lastProgressTime > MIN_PROGRESS_EVENT_DELAY) {
+          debug("onProgress: " + aProgress + "/" + aProgressMax);
+          this._sendDownloadProgressEvent(aNewApp, aProgress);
+          lastProgressTime = now;
+          this._saveApps();
+        }
+      }).bind(this),
+      onStatus: function(aRequest, aContext, aStatus, aStatusArg) { },
+
+      // nsILoadContext
+      appId: aOldApp.installerAppId,
+      isInBrowserElement: aOldApp.installerIsBrowser,
+      usePrivateBrowsing: false,
+      isContent: false,
+      associatedWindow: null,
+      topWindow : null,
+      isAppOfType: function(appType) {
+        throw Cr.NS_ERROR_NOT_IMPLEMENTED;
+      }
+    };
 
     return requestChannel;
   },
@@ -2671,7 +2707,8 @@ this.DOMApplicationRegistry = {
 
       let requestChannel = this._getRequestChannel(fullPackagePath,
                                                    isLocalFileInstall,
-                                                   oldApp.packageEtag);
+                                                   oldApp,
+                                                   aNewApp);
 
       AppDownloadManager.add(aNewApp.manifestURL,
         {
@@ -2682,42 +2719,6 @@ this.DOMApplicationRegistry = {
       );
 
       let lastProgressTime = 0;
-
-      requestChannel.notificationCallbacks = {
-        QueryInterface: function notifQI(aIID) {
-          if (aIID.equals(Ci.nsISupports)          ||
-              aIID.equals(Ci.nsIProgressEventSink) ||
-              aIID.equals(Ci.nsILoadContext))
-            return this;
-          throw Cr.NS_ERROR_NO_INTERFACE;
-        },
-        getInterface: function notifGI(aIID) {
-          return this.QueryInterface(aIID);
-        },
-        onProgress: function notifProgress(aRequest, aContext,
-                                           aProgress, aProgressMax) {
-          oldApp.progress = aProgress;
-          let now = Date.now();
-          if (now - lastProgressTime > MIN_PROGRESS_EVENT_DELAY) {
-            debug("onProgress: " + aProgress + "/" + aProgressMax);
-            this._sendDownloadProgressEvent(aNewApp, aProgress);
-            lastProgressTime = now;
-            this._saveApps();
-          }
-        },
-        onStatus: function notifStatus(aRequest, aContext, aStatus, aStatusArg) { },
-
-        // nsILoadContext
-        appId: oldApp.installerAppId,
-        isInBrowserElement: oldApp.installerIsBrowser,
-        usePrivateBrowsing: false,
-        isContent: false,
-        associatedWindow: null,
-        topWindow : null,
-        isAppOfType: function(appType) {
-          throw Cr.NS_ERROR_NOT_IMPLEMENTED;
-        }
-      };
 
       // We set the 'downloading' flag to true right before starting the fetch.
       oldApp.downloading = true;
