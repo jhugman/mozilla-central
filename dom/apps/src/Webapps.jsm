@@ -2602,7 +2602,12 @@ this.DOMApplicationRegistry = {
       onStopRequest: function(aRequest, aContext, aStatusCode) {
         bufferedOutputStream.close();
         outputStream.close();
-        deferred.resolve(aStatusCode);
+
+        if (!Components.isSuccessCode(aStatusCode)) {
+          deferred.reject("NETWORK_ERROR");
+        } else {
+          deferred.resolve();
+        }
       }
     });
     aRequestChannel.asyncOpen(listener, null);
@@ -2735,11 +2740,7 @@ this.DOMApplicationRegistry = {
       let zipFile =
         FileUtils.getFile("TmpD", ["webapps", id, "application.zip"], true);
 
-      let statusCode = yield this._getPackage(requestChannel, zipFile, aNewApp);
-
-      if (!Components.isSuccessCode(statusCode)) {
-        throw "NETWORK_ERROR";
-      }
+      yield this._getPackage(requestChannel, zipFile, aNewApp);
 
       // If we get a 4XX or a 5XX http status, bail out like if we had a
       // network error.
