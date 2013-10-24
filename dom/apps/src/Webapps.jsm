@@ -2140,7 +2140,7 @@ this.DOMApplicationRegistry = {
     }
   },
 
-  _setupApp : function(aData, aId) {
+  _setupApp: function(aData, aId) {
     let app = aData.app;
 
     // app can be uninstalled
@@ -2158,9 +2158,10 @@ this.DOMApplicationRegistry = {
     return app;
   },
 
-  _cloneApp : function(aData, aNewApp, aManifest, aId, aLocalId) {
+  _cloneApp: function(aData, aNewApp, aManifest, aId, aLocalId) {
     let appObject = AppsUtils.cloneAppObject(aNewApp);
-    appObject.appStatus = aNewApp.appStatus || Ci.nsIPrincipal.APP_STATUS_INSTALLED;
+    appObject.appStatus = 
+      aNewApp.appStatus || Ci.nsIPrincipal.APP_STATUS_INSTALLED;
 
     let appNote = JSON.stringify(appObject);
     appNote.id = aId;
@@ -2185,8 +2186,8 @@ this.DOMApplicationRegistry = {
     }
 
     appObject.localId = aLocalId;
-    appObject.basePath = FileUtils.getDir(DIRECTORY_NAME, ["webapps"], true,
-                                          true).path;
+    appObject.basePath =
+      FileUtils.getDir(DIRECTORY_NAME, ["webapps"], true, true).path;
     appObject.name = aManifest.name;
     appObject.csp = aManifest.csp || "";    
     appObject.role = aManifest.role || "";
@@ -2197,10 +2198,10 @@ this.DOMApplicationRegistry = {
   },
 
   _copyStates: function(aData, aAppObject) {
-    ["installState", "downloadAvailable",
-     "downloading", "downloadSize", "readyToApplyDownload"].forEach(function(aProp) {
-      aData.app[aProp] = aAppObject[aProp];
-     });
+    for each (let prop in ["installState", "downloadAvailable", "downloading", 
+                           "downloadSize", "readyToApplyDownload"]) {
+      aData.app[prop] = aAppObject[prop];
+    }
   },
 
   _writeManifestFile: function(aId, aIsPackage, aJsonManifest) {
@@ -2215,7 +2216,6 @@ this.DOMApplicationRegistry = {
   },
 
   confirmInstall: function(aData, aProfileDir, aInstallSuccessCallback) {
-
     debug("confirmInstall");
 
     let origin = Services.io.newURI(aData.app.origin, null, null);
@@ -2231,8 +2231,7 @@ this.DOMApplicationRegistry = {
       let dir = this._getAppDir(id);
       try {
         dir.remove(true);
-      } catch(e) {
-      }
+      } catch(e) { }
     } else {
       id = this.makeAppId();
       localId = this._nextLocalId();
@@ -2247,7 +2246,8 @@ this.DOMApplicationRegistry = {
     debug("app.origin: " + app.origin);
     let manifest = new ManifestHelper(jsonManifest, app.origin);
 
-    let [appNote, appObject] = this._cloneApp(aData, app, manifest, id, localId);
+    let [appNote, appObject] =
+      this._cloneApp(aData, app, manifest, id, localId);
 
     this.webapps[id] = appObject;
 
@@ -2255,11 +2255,15 @@ this.DOMApplicationRegistry = {
     // don't update the permissions yet.
     if (!aData.isPackage) {
       if (supportUseCurrentProfile()) {
-        PermissionsInstaller.installPermissions({ origin: appObject.origin,
-                                                  manifestURL: appObject.manifestURL,
-                                                  manifest: jsonManifest},
-                                                isReinstall,
-                                                this.uninstall.bind(this, aData, aData.mm));
+        PermissionsInstaller.installPermissions(
+          {
+            origin: appObject.origin,
+            manifestURL: appObject.manifestURL,
+            manifest: jsonManifest
+          },
+          isReinstall,
+          this.uninstall.bind(this, aData, aData.mm)
+        );
       }
 
       this.updateDataStore(this.webapps[id].localId,  this.webapps[id].origin,
@@ -2338,8 +2342,8 @@ this.DOMApplicationRegistry = {
     debug("_onDownloadPackage");
     // Success! Move the zip out of TmpD.
     let app = DOMApplicationRegistry.webapps[aId];
-    let zipFile = FileUtils.getFile("TmpD", ["webapps", aId, "application.zip"],
-                                    true);
+    let zipFile =
+      FileUtils.getFile("TmpD", ["webapps", aId, "application.zip"], true);
     let dir = this._getAppDir(aId);
     zipFile.moveTo(dir, "application.zip");
     let tmpDir = FileUtils.getDir("TmpD", ["webapps", aId], true, true);
@@ -2492,6 +2496,8 @@ this.DOMApplicationRegistry = {
       requestChannel.setRequestHeader("If-None-Match", aOldApp.packageEtag,
                                       false);
     }
+
+    let lastProgressTime = 0;
 
     requestChannel.notificationCallbacks = {
       QueryInterface: function(aIID) {
@@ -2725,10 +2731,10 @@ this.DOMApplicationRegistry = {
                       .createInstance(Ci.nsIScriptableUnicodeConverter);
     converter.charset = "UTF-8";
 
-    let manifest = JSON.parse(converter.ConvertToUnicode(
+    let newManifest = JSON.parse(converter.ConvertToUnicode(
           NetUtil.readInputStreamToString(istream, istream.available()) || ""));
 
-    if (!AppsUtils.checkManifest(manifest, aOldApp)) {
+    if (!AppsUtils.checkManifest(newManifest, aOldApp)) {
       throw "INVALID_MANIFEST";
     }
 
@@ -2739,14 +2745,14 @@ this.DOMApplicationRegistry = {
     if (aIsUpdate) {
       // Call ensureSameAppName before compareManifests as `manifest`
       // has been normalized to avoid app rename.
-      AppsUtils.ensureSameAppName(aManifest._manifest, manifest, aOldApp);
+      AppsUtils.ensureSameAppName(aManifest._manifest, newManifest, aOldApp);
     }
 
-    if (!AppsUtils.compareManifests(manifest, aManifest._manifest)) {
+    if (!AppsUtils.compareManifests(newManifest, aManifest._manifest)) {
       throw "MANIFEST_MISMATCH";
     }
 
-    if (!AppsUtils.checkInstallAllowed(manifest, aNewApp.installOrigin)) {
+    if (!AppsUtils.checkInstallAllowed(newManifest, aNewApp.installOrigin)) {
       throw "INSTALL_FROM_DENIED";
     }
 
@@ -2755,15 +2761,17 @@ this.DOMApplicationRegistry = {
                     ? Ci.nsIPrincipal.APP_STATUS_PRIVILEGED
                     : Ci.nsIPrincipal.APP_STATUS_INSTALLED;
 
-    if (AppsUtils.getAppManifestStatus(manifest) > maxStatus) {
+    if (AppsUtils.getAppManifestStatus(newManifest) > maxStatus) {
       throw "INVALID_SECURITY_LEVEL";
     }
 
-    aOldApp.appStatus = AppsUtils.getAppManifestStatus(manifest);
+    aOldApp.appStatus = AppsUtils.getAppManifestStatus(newManifest);
 
-    this._saveEtag(aIsUpdate, aOldApp, aRequestChannel, aHash, manifest);
-    this._checkOrigin(isSigned, aOldApp, manifest, aIsUpdate);
+    this._saveEtag(aIsUpdate, aOldApp, aRequestChannel, aHash, newManifest);
+    this._checkOrigin(isSigned, aOldApp, newManifest, aIsUpdate);
     this._getIds(isSigned, aZipReader, converter, aNewApp, aOldApp, aIsUpdate);
+
+    return newManifest;
   },
 
   downloadPackage: function(aManifest, aNewApp, aIsUpdate, aOnSuccess) {
@@ -2805,8 +2813,6 @@ this.DOMApplicationRegistry = {
         }
       );
 
-      let lastProgressTime = 0;
-
       // We set the 'downloading' flag to true right before starting the fetch.
       oldApp.downloading = true;
 
@@ -2844,11 +2850,12 @@ this.DOMApplicationRegistry = {
       let [rv, zipReader] = yield this._openSignedJarFile(oldApp, zipFile);
 
       try {
-        this._readPackage(rv, zipReader, zipFile, oldApp, aNewApp,
-                          isLocalFileInstall, isUpdate, aManifest,
-                          requestChannel, hash);
+        let newManifest =
+          this._readPackage(rv, zipReader, zipFile, oldApp, aNewApp,
+                            isLocalFileInstall, aIsUpdate, aManifest,
+                            requestChannel, hash);
         if (aOnSuccess) {
-          aOnSuccess(id, manifest);
+          aOnSuccess(id, newManifest);
         }
       } catch (e) {
         debug("package read error: " + e);
@@ -2986,7 +2993,7 @@ this.DOMApplicationRegistry = {
   // aStoreId must be a string of the form
   //   <installOrigin>#<storeId from ids.json>
   // aStoreVersion must be a positive integer.
-  _checkForStoreIdMatch: function (aIsUpdate, aNewApp, aStoreId, aStoreVersion) {
+  _checkForStoreIdMatch: function(aIsUpdate, aNewApp, aStoreId, aStoreVersion) {
     // Things to check:
     // 1. if it's a update:
     //   a. We should already have this storeId, or the original storeId must
@@ -3020,7 +3027,6 @@ this.DOMApplicationRegistry = {
     }
   },
 
-
   _checkSignature: function(aApp, aIsSigned, aIsLocalFileInstall) {
     // XXX Security: You CANNOT safely add a new app store for
     // installing privileged apps just by modifying this pref and
@@ -3038,8 +3044,8 @@ this.DOMApplicationRegistry = {
     // domains on the whitelist to be signed. This is a stopgap until
     // we have a real story for handling multiple app stores signing
     // apps.
-    let signedAppOriginsStr = Services.prefs.getCharPref(
-                               "dom.mozApps.signed_apps_installable_from");
+    let signedAppOriginsStr =
+      Services.prefs.getCharPref("dom.mozApps.signed_apps_installable_from");
     // If it's a local install and it's signed then we assume
     // the app origin is a valid signer.
     let isSignedAppOrigin = (aIsSigned && aIsLocalFileInstall) ||
@@ -3061,8 +3067,9 @@ this.DOMApplicationRegistry = {
 
   _checkOrigin: function(aIsSigned, aOldApp, aManifest, aIsUpdate) {
     // Check if the app declares which origin it will use.
-    if (aIsSigned && aOldApp.appStatus >=
-        Ci.nsIPrincipal.APP_STATUS_PRIVILEGED && aManifest.origin !== undefined) {
+    if (aIsSigned &&
+        aOldApp.appStatus >= Ci.nsIPrincipal.APP_STATUS_PRIVILEGED &&
+        aManifest.origin !== undefined) {
       let uri;
       try {
         uri = Services.io.newURI(aManifest.origin, null, null);
@@ -3121,15 +3128,14 @@ this.DOMApplicationRegistry = {
     } else {
       try {
         aOldApp.packageEtag = aRequestChannel.getResponseHeader("Etag");
-      } catch(e) {
-        // NO-OP
-      }
+      } catch(e) { }
       aOldApp.packageHash = aHash;
       aOldApp.appStatus = AppsUtils.getAppManifestStatus(aManifest);
     }
   },
 
-  _getIds: function(aIsSigned, aZipReader, aConverter, aNewApp, aOldApp, aIsUpdate) {
+  _getIds: function(aIsSigned, aZipReader, aConverter, aNewApp, aOldApp,
+                    aIsUpdate) {
     // Get ids.json if the file is signed
     if (aIsSigned) {
       let idsStream;
