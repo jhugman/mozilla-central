@@ -2598,6 +2598,30 @@ this.DOMApplicationRegistry = {
     return deferred.promise;
   },
 
+  _openSignedJarFile: function(aOldApp, aZipFile) {
+    let deferred = Promise.defer();
+
+    let certdb;
+    try {
+      certdb = Cc["@mozilla.org/security/x509certdb;1"]
+                 .getService(Ci.nsIX509CertDB);
+    } catch (e) {
+      debug("nsIX509CertDB error: " + e);
+      // unrecoverable error, don't bug the user
+      aOldApp.downloadAvailable = false;
+      throw "CERTDB_ERROR";
+    }
+
+    certdb.openSignedJARFileAsync(
+       aZipFile,
+       function(aRv, aZipReader) {
+         deferred.resolve([aRv, aZipReader]);
+       }
+    );
+
+    return deferred.promise;
+  },
+
   downloadPackage: function(aManifest, aNewApp, aIsUpdate, aOnSuccess) {
     // Here are the steps when installing a package:
     // - create a temp directory where to store the app.
@@ -2727,45 +2751,23 @@ this.DOMApplicationRegistry = {
 
       let hash = yield this._computeFileHash(file, zipFile.path);
 
-      throw new Task.Result(hash);
-    }).bind(this), null).then(function(aHash) {
-      debug("File hash computed: " + aHash);
+      debug("File hash computed: " + hash);
 
-      let oldPackage = (responseStatus == 304 || aHash == oldApp.packageHash);
+      let oldPackage = (responseStatus == 304 || hash == oldApp.packageHash);
 
       if (oldPackage) {
         debug("package's etag or hash unchanged; sending 'applied' event");
         // The package's Etag or hash has not changed.
         // We send a "applied" event right away.
         self._sendAppliedEvent(aNewApp, oldApp, id);
-        return;
+        throw new Task.Result();
       }
 
-      let certdb;
-      try {
-        certdb = Cc["@mozilla.org/security/x509certdb;1"]
-                   .getService(Ci.nsIX509CertDB);
-      } catch (e) {
-        debug("_onComputeFileHash error: " + e);
-        // unrecoverable error, don't bug the user
-        oldApp.downloadAvailable = false;
-        throw "CERTDB_ERROR";
-        //return;
-      }
+      let [rv, zipReader] = yield this._openSignedJarFile(oldApp, zipFile);
 
-      let deferredOpenSignedJarFileAsync = Promise.defer();
+      throw new Task.Result([rv, zipReader, hash]);
 
-      certdb.openSignedJARFileAsync(
-         zipFile,
-         function(aRv, aZipReader) {
-           deferredOpenSignedJarFileAsync.resolve([aRv, aZipReader, aHash]);
-         }
-      );
-
-      // maybe we can throw a new Task.resolve here to pass values in to next block?
-      //  throw new Task.resolve([rv, zipreader]);
-      return deferredOpenSignedJarFileAsync.promise;
-    }, null).then(function(aValues) {
+    }).bind(this), null).then(function(aValues) {
       // If the package's etag or hash hasn't changed, the previous step
       // sends an applied event immediately and then returns without specifying
       // a return value, so aValues is undefined.
