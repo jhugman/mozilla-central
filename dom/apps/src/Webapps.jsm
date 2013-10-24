@@ -2765,18 +2765,6 @@ this.DOMApplicationRegistry = {
 
       let [rv, zipReader] = yield this._openSignedJarFile(oldApp, zipFile);
 
-      throw new Task.Result([rv, zipReader, hash]);
-
-    }).bind(this), null).then(function(aValues) {
-      // If the package's etag or hash hasn't changed, the previous step
-      // sends an applied event immediately and then returns without specifying
-      // a return value, so aValues is undefined.
-      // XXX Skip this step at the call site rather than here in the callee.
-      if (typeof aValues == "undefined") {
-          return;
-      }
-
-      let [rv, zipReader, hash] = aValues;
       try {
         let isSigned;
         if (Components.isSuccessCode(rv)) {
@@ -2849,7 +2837,7 @@ this.DOMApplicationRegistry = {
           aOnSuccess(id, manifest);
         }
       } catch (e) {
-        debug("_onOpenSignedJarFileAsyncCallback error: " + e);
+        debug("package read error: " + e);
         // Something bad happened when reading the package.
         // Unrecoverable error, don't bug the user.
         // Apps with installState 'pending' does not produce any
@@ -2870,7 +2858,7 @@ this.DOMApplicationRegistry = {
           zipReader.close();
         }
       }
-    }, null).then(null, this._cleanup.bind(this, id, oldApp, aNewApp, aIsUpdate));
+    }).bind(this), null).then(null, this._cleanup.bind(this, id, oldApp, aNewApp, aIsUpdate));
   },
 
   // Removes the directory we created, and sends an error to the DOM side.
