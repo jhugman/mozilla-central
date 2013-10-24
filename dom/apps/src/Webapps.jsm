@@ -2578,7 +2578,7 @@ this.DOMApplicationRegistry = {
     return deferred.promise;
   },
 
-  _getPackage: function(aRequestChannel, aZipFile, aNewApp) {
+  _getPackage: function(aRequestChannel, aZipFile, aOldApp, aNewApp) {
     let deferred = Promise.defer();
 
     // We need an output stream to write the channel content to the zip file.
@@ -2605,9 +2605,20 @@ this.DOMApplicationRegistry = {
 
         if (!Components.isSuccessCode(aStatusCode)) {
           deferred.reject("NETWORK_ERROR");
-        } else {
-          deferred.resolve();
+          return;
         }
+
+        // If we get a 4XX or a 5XX http status, bail out like if we had a
+        // network error.
+        let responseStatus = aRequestChannel.responseStatus;
+        if (responseStatus >= 400 && responseStatus <= 599) {
+          // unrecoverable error, don't bug the user
+          aOldApp.downloadAvailable = false;
+          deferred.reject("NETWORK_ERROR");
+          return;
+        }
+
+        deferred.resolve();
       }
     });
     aRequestChannel.asyncOpen(listener, null);
@@ -2740,16 +2751,7 @@ this.DOMApplicationRegistry = {
       let zipFile =
         FileUtils.getFile("TmpD", ["webapps", id, "application.zip"], true);
 
-      yield this._getPackage(requestChannel, zipFile, aNewApp);
-
-      // If we get a 4XX or a 5XX http status, bail out like if we had a
-      // network error.
-      let responseStatus = requestChannel.responseStatus;
-      if (responseStatus >= 400 && responseStatus <= 599) {
-        // unrecoverable error, don't bug the user
-        oldApp.downloadAvailable = false;
-        throw "NETWORK_ERROR";
-      }
+      yield this._getPackage(requestChannel, zipFile, oldApp, aNewApp);
 
       let file = yield OS.File.open(zipFile.path, { read: true });
 
@@ -2757,6 +2759,7 @@ this.DOMApplicationRegistry = {
 
       debug("File hash computed: " + hash);
 
+      let responseStatus = requestChannel.responseStatus;
       let oldPackage = (responseStatus == 304 || hash == oldApp.packageHash);
 
       if (oldPackage) {
