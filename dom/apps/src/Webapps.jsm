@@ -2641,7 +2641,6 @@ this.DOMApplicationRegistry = {
       Services.io.extractScheme(fullPackagePath) === 'file';
 
 
-    let self = this;
     let id = this._appIdForManifestURL(aNewApp.manifestURL);
     let oldApp = this.webapps[id];
 
@@ -2698,9 +2697,9 @@ this.DOMApplicationRegistry = {
           let now = Date.now();
           if (now - lastProgressTime > MIN_PROGRESS_EVENT_DELAY) {
             debug("onProgress: " + aProgress + "/" + aProgressMax);
-            self._sendDownloadProgressEvent(aNewApp, aProgress);
+            this._sendDownloadProgressEvent(aNewApp, aProgress);
             lastProgressTime = now;
-            self._saveApps();
+            this._saveApps();
           }
         },
         onStatus: function notifStatus(aRequest, aContext, aStatus, aStatusArg) { },
@@ -2759,7 +2758,7 @@ this.DOMApplicationRegistry = {
         debug("package's etag or hash unchanged; sending 'applied' event");
         // The package's Etag or hash has not changed.
         // We send a "applied" event right away.
-        self._sendAppliedEvent(aNewApp, oldApp, id);
+        this._sendAppliedEvent(aNewApp, oldApp, id);
         throw new Task.Result();
       }
 
@@ -2780,7 +2779,7 @@ this.DOMApplicationRegistry = {
           zipReader.open(zipFile);
         }
 
-        self._checkSignature(aNewApp, isSigned, isLocalFileInstall);
+        this._checkSignature(aNewApp, isSigned, isLocalFileInstall);
 
         if (!zipReader.hasEntry("manifest.webapp")) {
           throw "MISSING_MANIFEST";
@@ -2829,9 +2828,9 @@ this.DOMApplicationRegistry = {
 
         oldApp.appStatus = AppsUtils.getAppManifestStatus(manifest);
 
-        self._saveEtag(aIsUpdate, oldApp, requestChannel, hash, manifest);
-        self._checkOrigin(isSigned, oldApp, manifest, aIsUpdate);
-        self._getIds(isSigned, zipReader, converter, aNewApp, oldApp, aIsUpdate);
+        this._saveEtag(aIsUpdate, oldApp, requestChannel, hash, manifest);
+        this._checkOrigin(isSigned, oldApp, manifest, aIsUpdate);
+        this._getIds(isSigned, zipReader, converter, aNewApp, oldApp, aIsUpdate);
 
         if (aOnSuccess) {
           aOnSuccess(id, manifest);
