@@ -2640,7 +2640,6 @@ this.DOMApplicationRegistry = {
     let isLocalFileInstall =
       Services.io.extractScheme(fullPackagePath) === 'file';
 
-
     let id = this._appIdForManifestURL(aNewApp.manifestURL);
     let oldApp = this.webapps[id];
 
@@ -2857,7 +2856,7 @@ this.DOMApplicationRegistry = {
           zipReader.close();
         }
       }
-    }).bind(this), null).then(null, this._cleanup.bind(this, id, oldApp, aNewApp, aIsUpdate));
+    }).bind(this), cleanup);
   },
 
   // Removes the directory we created, and sends an error to the DOM side.
