@@ -2474,6 +2474,27 @@ this.DOMApplicationRegistry = {
     return true;
   },
 
+  _getRequestChannel: function(aFullPackagePath, aIsLocalFileInstall,
+                               aOldPackageEtag) {
+    let requestChannel;
+
+    if (aIsLocalFileInstall) {
+      requestChannel = NetUtil.newChannel(aFullPackagePath)
+                              .QueryInterface(Ci.nsIFileChannel);
+    } else {
+      requestChannel = NetUtil.newChannel(aFullPackagePath)
+                              .QueryInterface(Ci.nsIHttpChannel);
+      requestChannel.loadFlags |= Ci.nsIRequest.INHIBIT_CACHING;
+    }
+
+    if (aOldPackageEtag && !aIsLocalFileInstall) {
+      debug("Add If-None-Match header: " + aOldPackageEtag);
+      requestChannel.setRequestHeader("If-None-Match", aOldPackageEtag, false);
+    }
+
+    return requestChannel;
+  },
+
   _ensureSufficientStorage: function(aNewApp) {
     let deferred = Promise.defer();
 
@@ -2634,7 +2655,6 @@ this.DOMApplicationRegistry = {
 
     let id = this._appIdForManifestURL(aNewApp.manifestURL);
     let oldApp = this.webapps[id];
-
     let cleanup = this._cleanup.bind(this, id, oldApp, aNewApp, aIsUpdate);
 
     return Task.spawn((function() {
@@ -2644,26 +2664,14 @@ this.DOMApplicationRegistry = {
 
       // Check if it's a local file install (we've downloaded/sideloaded the
       // package already or it did exist on the build).
-
       let isLocalFileInstall =
         Services.io.extractScheme(fullPackagePath) === 'file';
 
       debug("About to download " + fullPackagePath);
 
-      let requestChannel;
-      if (isLocalFileInstall) {
-        requestChannel = NetUtil.newChannel(fullPackagePath)
-                                .QueryInterface(Ci.nsIFileChannel);
-      } else {
-        requestChannel = NetUtil.newChannel(fullPackagePath)
-                                .QueryInterface(Ci.nsIHttpChannel);
-        requestChannel.loadFlags |= Ci.nsIRequest.INHIBIT_CACHING;
-      }
-      if (oldApp.packageEtag && !isLocalFileInstall) {
-        debug("Add If-None-Match header: " + oldApp.packageEtag);
-        requestChannel.setRequestHeader("If-None-Match", oldApp.packageEtag,
-                                        false);
-      }
+      let requestChannel = this._getRequestChannel(fullPackagePath,
+                                                   isLocalFileInstall,
+                                                   oldApp.packageEtag);
 
       AppDownloadManager.add(aNewApp.manifestURL,
         {
