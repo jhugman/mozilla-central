@@ -2637,11 +2637,6 @@ this.DOMApplicationRegistry = {
 
     let cleanup = this._cleanup.bind(this, id, oldApp, aNewApp, aIsUpdate);
 
-    let requestChannel;
-    let zipFile;
-    let rv, zipReader;
-    let responseStatus;
-
     return Task.spawn((function() {
       yield this._ensureSufficientStorage(aNewApp);
 
@@ -2655,6 +2650,7 @@ this.DOMApplicationRegistry = {
 
       debug("About to download " + fullPackagePath);
 
+      let requestChannel;
       if (isLocalFileInstall) {
         requestChannel = NetUtil.newChannel(fullPackagePath)
                                 .QueryInterface(Ci.nsIFileChannel);
@@ -2727,8 +2723,8 @@ this.DOMApplicationRegistry = {
       oldApp.progress = 0;
 
       // Staging the zip in TmpD until all the checks are done.
-      zipFile = FileUtils.getFile("TmpD", ["webapps", id, "application.zip"],
-                                  true);
+      let zipFile =
+        FileUtils.getFile("TmpD", ["webapps", id, "application.zip"], true);
 
       let statusCode = yield this._getPackage(requestChannel, zipFile, aNewApp);
 
@@ -2738,7 +2734,7 @@ this.DOMApplicationRegistry = {
 
       // If we get a 4XX or a 5XX http status, bail out like if we had a
       // network error.
-      responseStatus = requestChannel.responseStatus;
+      let responseStatus = requestChannel.responseStatus;
       if (responseStatus >= 400 && responseStatus <= 599) {
         // unrecoverable error, don't bug the user
         oldApp.downloadAvailable = false;
