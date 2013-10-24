@@ -2695,6 +2695,77 @@ this.DOMApplicationRegistry = {
     return deferred.promise;
   },
 
+  _readPackage: function(aRv, aZipReader, aZipFile, aOldApp, aNewApp,
+                         aIsLocalFileInstall, aIsUpdate, aManifest,
+                         aRequestChannel, aHash) {
+    let isSigned;
+    if (Components.isSuccessCode(aRv)) {
+      isSigned = true;
+    } else if (aRv == Cr.NS_ERROR_FILE_CORRUPTED) {
+      throw "APP_PACKAGE_CORRUPTED";
+    } else if (aRv != Cr.NS_ERROR_SIGNED_JAR_NOT_SIGNED) {
+      throw "INVALID_SIGNATURE";
+    } else {
+      isSigned = false;
+      aZipReader = Cc["@mozilla.org/libjar/zip-reader;1"]
+                     .createInstance(Ci.nsIZipReader);
+      aZipReader.open(aZipFile);
+    }
+
+    this._checkSignature(aNewApp, isSigned, aIsLocalFileInstall);
+
+    if (!aZipReader.hasEntry("manifest.webapp")) {
+      throw "MISSING_MANIFEST";
+    }
+
+    let istream = aZipReader.getInputStream("manifest.webapp");
+
+    // Obtain a converter to read from a UTF-8 encoded input stream.
+    let converter = Cc["@mozilla.org/intl/scriptableunicodeconverter"]
+                      .createInstance(Ci.nsIScriptableUnicodeConverter);
+    converter.charset = "UTF-8";
+
+    let manifest = JSON.parse(converter.ConvertToUnicode(
+          NetUtil.readInputStreamToString(istream, istream.available()) || ""));
+
+    if (!AppsUtils.checkManifest(manifest, aOldApp)) {
+      throw "INVALID_MANIFEST";
+    }
+
+    // For app updates we don't forbid apps to rename themselves but
+    // we still retain the old name of the app. In the future we
+    // will use UI to allow updates to rename an app after we check
+    // with the user that the rename is ok.
+    if (aIsUpdate) {
+      // Call ensureSameAppName before compareManifests as `manifest`
+      // has been normalized to avoid app rename.
+      AppsUtils.ensureSameAppName(aManifest._manifest, manifest, aOldApp);
+    }
+
+    if (!AppsUtils.compareManifests(manifest, aManifest._manifest)) {
+      throw "MANIFEST_MISMATCH";
+    }
+
+    if (!AppsUtils.checkInstallAllowed(manifest, aNewApp.installOrigin)) {
+      throw "INSTALL_FROM_DENIED";
+    }
+
+    // Local file installs can be privileged even without the signature.
+    let maxStatus = isSigned || aIsLocalFileInstall
+                    ? Ci.nsIPrincipal.APP_STATUS_PRIVILEGED
+                    : Ci.nsIPrincipal.APP_STATUS_INSTALLED;
+
+    if (AppsUtils.getAppManifestStatus(manifest) > maxStatus) {
+      throw "INVALID_SECURITY_LEVEL";
+    }
+
+    aOldApp.appStatus = AppsUtils.getAppManifestStatus(manifest);
+
+    this._saveEtag(aIsUpdate, aOldApp, aRequestChannel, aHash, manifest);
+    this._checkOrigin(isSigned, aOldApp, manifest, aIsUpdate);
+    this._getIds(isSigned, aZipReader, converter, aNewApp, aOldApp, aIsUpdate);
+  },
+
   downloadPackage: function(aManifest, aNewApp, aIsUpdate, aOnSuccess) {
     // Here are the steps when installing a package:
     // - create a temp directory where to store the app.
@@ -2773,73 +2844,9 @@ this.DOMApplicationRegistry = {
       let [rv, zipReader] = yield this._openSignedJarFile(oldApp, zipFile);
 
       try {
-        let isSigned;
-        if (Components.isSuccessCode(rv)) {
-          isSigned = true;
-        } else if (rv == Cr.NS_ERROR_FILE_CORRUPTED) {
-          throw "APP_PACKAGE_CORRUPTED";
-        } else if (rv != Cr.NS_ERROR_SIGNED_JAR_NOT_SIGNED) {
-          throw "INVALID_SIGNATURE";
-        } else {
-          isSigned = false;
-          zipReader = Cc["@mozilla.org/libjar/zip-reader;1"]
-                        .createInstance(Ci.nsIZipReader);
-          zipReader.open(zipFile);
-        }
-
-        this._checkSignature(aNewApp, isSigned, isLocalFileInstall);
-
-        if (!zipReader.hasEntry("manifest.webapp")) {
-          throw "MISSING_MANIFEST";
-        }
-
-        let istream = zipReader.getInputStream("manifest.webapp");
-
-        // Obtain a converter to read from a UTF-8 encoded input stream.
-        let converter = Cc["@mozilla.org/intl/scriptableunicodeconverter"]
-                          .createInstance(Ci.nsIScriptableUnicodeConverter);
-        converter.charset = "UTF-8";
-
-        let manifest = JSON.parse(converter.ConvertToUnicode(
-              NetUtil.readInputStreamToString(istream, istream.available()) || ""));
-
-        if (!AppsUtils.checkManifest(manifest, oldApp)) {
-          throw "INVALID_MANIFEST";
-        }
-
-        // For app updates we don't forbid apps to rename themselves but
-        // we still retain the old name of the app. In the future we
-        // will use UI to allow updates to rename an app after we check
-        // with the user that the rename is ok.
-        if (aIsUpdate) {
-          // Call ensureSameAppName before compareManifests as `manifest`
-          // has been normalized to avoid app rename.
-          AppsUtils.ensureSameAppName(aManifest._manifest, manifest, oldApp);
-        }
-
-        if (!AppsUtils.compareManifests(manifest, aManifest._manifest)) {
-          throw "MANIFEST_MISMATCH";
-        }
-
-        if (!AppsUtils.checkInstallAllowed(manifest, aNewApp.installOrigin)) {
-          throw "INSTALL_FROM_DENIED";
-        }
-
-        // Local file installs can be privileged even without the signature.
-        let maxStatus = isSigned || isLocalFileInstall
-                        ? Ci.nsIPrincipal.APP_STATUS_PRIVILEGED
-                        : Ci.nsIPrincipal.APP_STATUS_INSTALLED;
-
-        if (AppsUtils.getAppManifestStatus(manifest) > maxStatus) {
-          throw "INVALID_SECURITY_LEVEL";
-        }
-
-        oldApp.appStatus = AppsUtils.getAppManifestStatus(manifest);
-
-        this._saveEtag(aIsUpdate, oldApp, requestChannel, hash, manifest);
-        this._checkOrigin(isSigned, oldApp, manifest, aIsUpdate);
-        this._getIds(isSigned, zipReader, converter, aNewApp, oldApp, aIsUpdate);
-
+        this._readPackage(rv, zipReader, zipFile, oldApp, aNewApp,
+                          isLocalFileInstall, isUpdate, aManifest,
+                          requestChannel, hash);
         if (aOnSuccess) {
           aOnSuccess(id, manifest);
         }
