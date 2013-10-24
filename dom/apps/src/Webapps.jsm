@@ -2556,6 +2556,48 @@ this.DOMApplicationRegistry = {
     return deferred.promise;
   },
 
+  _computeFileHash: function(aFile, aZipFilePath) {
+    let deferred = Promise.defer();
+
+    // Returns the MD5 hash of a file, doing async IO off the main thread.
+
+    let hasher = Cc["@mozilla.org/security/hash;1"]
+                   .createInstance(Ci.nsICryptoHash);
+    // We want to use the MD5 algorithm.
+    hasher.init(hasher.MD5);
+
+    const CHUNK_SIZE = 16384;
+    // Return the two-digit hexadecimal code for a byte.
+    function toHexString(charCode) {
+      return ("0" + charCode.toString(16)).slice(-2);
+    }
+
+    let readChunk = function readChunk() {
+      aFile.read(CHUNK_SIZE).then(
+        function readSuccess(array) {
+          hasher.update(array, array.length);
+          if (array.length == CHUNK_SIZE) {
+            readChunk();
+          } else {
+            // We're passing false to get the binary hash and not base64.
+            let hashData = hasher.finish(false);
+            // convert the binary hash data to a hex string.
+            let hash = ([toHexString(hashData.charCodeAt(i)) for (i in hashData)]
+                      .join(""));
+            deferred.resolve(hash);
+          }
+        },
+        function readError() {
+          debug("Error reading " + aZipFilePath);
+          deferred.resolve(null);
+        }
+      );
+    }
+    readChunk();
+
+    return deferred.promise;
+  },
+
   downloadPackage: function(aManifest, aNewApp, aIsUpdate, aOnSuccess) {
     // Here are the steps when installing a package:
     // - create a temp directory where to store the app.
@@ -2585,7 +2627,6 @@ this.DOMApplicationRegistry = {
     let zipFile;
     let rv, zipReader;
     let responseStatus;
-    let hasher;
 
     return Task.spawn((function() {
       yield this._ensureSufficientStorage(aNewApp);
@@ -2667,13 +2708,10 @@ this.DOMApplicationRegistry = {
       zipFile = FileUtils.getFile("TmpD", ["webapps", id, "application.zip"],
                                   true);
 
-      let aStatusCode = yield this._getPackage(requestChannel, zipFile, aNewApp);
-      throw new Task.Result(aStatusCode);
+      let statusCode = yield this._getPackage(requestChannel, zipFile, aNewApp);
 
-    }).bind(this), null).then(function(aStatusCode) {
-      if (!Components.isSuccessCode(aStatusCode)) {
+      if (!Components.isSuccessCode(statusCode)) {
         throw "NETWORK_ERROR";
-        return;
       }
 
       // If we get a 4XX or a 5XX http status, bail out like if we had a
@@ -2683,52 +2721,14 @@ this.DOMApplicationRegistry = {
         // unrecoverable error, don't bug the user
         oldApp.downloadAvailable = false;
         throw "NETWORK_ERROR";
-        return;
-      }
-    }, null).then(function() {
-      // Returns the MD5 hash of a file, doing async IO off the main thread.
-
-      Cu.import("resource://gre/modules/osfile.jsm");
-      
-      hasher = Cc["@mozilla.org/security/hash;1"]
-                     .createInstance(Ci.nsICryptoHash);
-      // We want to use the MD5 algorithm.
-      hasher.init(hasher.MD5);
-
-      return OS.File.open(zipFile.path, { read: true });
-    }, null).then(function opened(file) {
-      let deferred  = Promise.defer();
-      const CHUNK_SIZE = 16384;
-      // Return the two-digit hexadecimal code for a byte.
-      function toHexString(charCode) {
-        return ("0" + charCode.toString(16)).slice(-2);
       }
 
-      let readChunk = function readChunk() {
-        file.read(CHUNK_SIZE).then(
-          function readSuccess(array) {
-            hasher.update(array, array.length);
-            if (array.length == CHUNK_SIZE) {
-              readChunk();
-            } else {
-              // We're passing false to get the binary hash and not base64.
-              let hashData = hasher.finish(false);
-              // convert the binary hash data to a hex string.
-              let hash = ([toHexString(hashData.charCodeAt(i)) for (i in hashData)]
-                        .join(""));
-              deferred.resolve(hash);
-            }
-          },
-          function readError() {
-            debug("Error reading " + zipFile.path);
-            deferred.resolve(null);
+      let file = yield OS.File.open(zipFile.path, { read: true });
 
-          }
-        );
-      }
-      readChunk();
-      return deferred.promise;
-    }, null).then(function(aHash) {
+      let hash = yield this._computeFileHash(file, zipFile.path);
+
+      throw new Task.Result(hash);
+    }).bind(this), null).then(function(aHash) {
       debug("File hash computed: " + aHash);
 
       let oldPackage = (responseStatus == 304 || aHash == oldApp.packageHash);
