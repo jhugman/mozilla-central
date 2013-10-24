@@ -2632,14 +2632,6 @@ this.DOMApplicationRegistry = {
     // - add the new app to the registry.
     // If we fail at any step, we backout the previous ones and return an error.
 
-    let fullPackagePath = aManifest.fullPackagePath();
-
-    // Check if it's a local file install (we've downloaded/sideloaded the
-    // package already or it did exist on the build).
-
-    let isLocalFileInstall =
-      Services.io.extractScheme(fullPackagePath) === 'file';
-
     let id = this._appIdForManifestURL(aNewApp.manifestURL);
     let oldApp = this.webapps[id];
 
@@ -2653,13 +2645,21 @@ this.DOMApplicationRegistry = {
     return Task.spawn((function() {
       yield this._ensureSufficientStorage(aNewApp);
 
-      debug("About to download " + aManifest.fullPackagePath());
+      let fullPackagePath = aManifest.fullPackagePath();
+
+      // Check if it's a local file install (we've downloaded/sideloaded the
+      // package already or it did exist on the build).
+
+      let isLocalFileInstall =
+        Services.io.extractScheme(fullPackagePath) === 'file';
+
+      debug("About to download " + fullPackagePath);
 
       if (isLocalFileInstall) {
-        requestChannel = NetUtil.newChannel(aManifest.fullPackagePath())
+        requestChannel = NetUtil.newChannel(fullPackagePath)
                                 .QueryInterface(Ci.nsIFileChannel);
       } else {
-        requestChannel = NetUtil.newChannel(aManifest.fullPackagePath())
+        requestChannel = NetUtil.newChannel(fullPackagePath)
                                 .QueryInterface(Ci.nsIHttpChannel);
         requestChannel.loadFlags |= Ci.nsIRequest.INHIBIT_CACHING;
       }
