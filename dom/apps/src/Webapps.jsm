@@ -1055,7 +1055,6 @@ this.DOMApplicationRegistry = {
     let mm = aMessage.target;
     msg.mm = mm;
    
-    debug("receiveMessage: " + aMessage.name);
     switch (aMessage.name) {
       case "Webapps:Install":
         this.doInstall(msg, mm);
@@ -2022,7 +2021,6 @@ this.DOMApplicationRegistry = {
     let app = aData.app;
 
     let sendError = function sendError(aError) {
-      debug("ERROR : " + aError);
       aData.error = aError;
       aMm.sendAsyncMessage("Webapps:Install:Return:KO", aData);
       Cu.reportError("Error installing packaged app from: " +
@@ -2031,7 +2029,6 @@ this.DOMApplicationRegistry = {
 
     let xhr = Cc["@mozilla.org/xmlextras/xmlhttprequest;1"]
                 .createInstance(Ci.nsIXMLHttpRequest);
-    debug("doInstallPackage getting: " + app.manifestURL);
     xhr.open("GET", app.manifestURL, true);
     xhr.channel.loadFlags |= Ci.nsIRequest.INHIBIT_CACHING;
     xhr.channel.notificationCallbacks = this.createLoadContext(aData.appId,
@@ -2039,11 +2036,7 @@ this.DOMApplicationRegistry = {
     xhr.responseType = "json";
 
     xhr.addEventListener("load", (function() {
-      debug("xhr status:" + xhr.status);
       if (xhr.status == 200) {
-        debug("app.installOrigin:" + app.installOrigin);
-        debug("app.origin:" + app.origin);
-        debug("xhr.getResponseHeader(content-type):" +  xhr.getResponseHeader("content-type"));
         if (!AppsUtils.checkManifestContentType(app.installOrigin, app.origin,
                                                 xhr.getResponseHeader("content-type"))) {
           sendError("INVALID_MANIFEST");
@@ -2335,7 +2328,6 @@ this.DOMApplicationRegistry = {
       // ack the install.
       this.onInstallSuccessAck(app.manifestURL);
     }
-    debug("end of confirminstall");
   },
 
 /**
@@ -2433,7 +2425,8 @@ this.DOMApplicationRegistry = {
   },
 
   _saveApps: function(aCallback) {
-    this._writeFile(this.appsFile, JSON.stringify(this.webapps, null, 2), aCallback);
+    this._writeFile(this.appsFile, JSON.stringify(this.webapps, null, 2),
+                    aCallback);
   },
 
   /**
@@ -2481,11 +2474,11 @@ this.DOMApplicationRegistry = {
     }).bind(this));
   },
 
-  _checkDownloadSize: function(freeBytes, aNewApp) {
-    if (freeBytes) {
-      debug("Free storage: " + freeBytes + ". Download size: " +
+  _checkDownloadSize: function(aFreeBytes, aNewApp) {
+    if (aFreeBytes) {
+      debug("Free storage: " + aFreeBytes + ". Download size: " +
             aNewApp.downloadSize);
-      if (freeBytes <=
+      if (aFreeBytes <=
           aNewApp.downloadSize + AppDownloadManager.MIN_REMAINING_FREESPACE) {
         return false;
       }
@@ -2607,8 +2600,9 @@ this.DOMApplicationRegistry = {
                          .createInstance(Ci.nsIFileOutputStream);
     // write, create, truncate
     outputStream.init(aZipFile, 0x02 | 0x08 | 0x20, parseInt("0664", 8), 0);
-    let bufferedOutputStream = Cc['@mozilla.org/network/buffered-output-stream;1']
-                                 .createInstance(Ci.nsIBufferedOutputStream);
+    let bufferedOutputStream =
+      Cc['@mozilla.org/network/buffered-output-stream;1']
+        .createInstance(Ci.nsIBufferedOutputStream);
     bufferedOutputStream.init(outputStream, 1024);
 
     // Create a listener that will give data to the file output stream.
