@@ -1054,7 +1054,7 @@ this.DOMApplicationRegistry = {
     let msg = aMessage.data || {};
     let mm = aMessage.target;
     msg.mm = mm;
-   
+
     switch (aMessage.name) {
       case "Webapps:Install":
         this.doInstall(msg, mm);
@@ -2167,7 +2167,7 @@ this.DOMApplicationRegistry = {
 
   _cloneApp: function(aData, aNewApp, aManifest, aId, aLocalId) {
     let appObject = AppsUtils.cloneAppObject(aNewApp);
-    appObject.appStatus = 
+    appObject.appStatus =
       aNewApp.appStatus || Ci.nsIPrincipal.APP_STATUS_INSTALLED;
 
     let appNote = JSON.stringify(appObject);
@@ -2196,7 +2196,7 @@ this.DOMApplicationRegistry = {
     appObject.basePath =
       FileUtils.getDir(DIRECTORY_NAME, ["webapps"], true, true).path;
     appObject.name = aManifest.name;
-    appObject.csp = aManifest.csp || "";    
+    appObject.csp = aManifest.csp || "";
     appObject.role = aManifest.role || "";
     appObject.installerAppId = aData.appId;
     appObject.installerIsBrowser = aData.isBrowser;
@@ -2205,7 +2205,7 @@ this.DOMApplicationRegistry = {
   },
 
   _copyStates: function(aData, aAppObject) {
-    for each (let prop in ["installState", "downloadAvailable", "downloading", 
+    for each (let prop in ["installState", "downloadAvailable", "downloading",
                            "downloadSize", "readyToApplyDownload"]) {
       aData.app[prop] = aAppObject[prop];
     }
@@ -2984,7 +2984,7 @@ this.DOMApplicationRegistry = {
     let isSignedAppOrigin = (aIsSigned && aIsLocalFileInstall) ||
                              signedAppOriginsStr.split(",").
                                    indexOf(aApp.installOrigin) > -1;
-    if(!aIsSigned && isSignedAppOrigin) {              
+    if (!aIsSigned && isSignedAppOrigin) {
       // Packaged apps installed from these origins must be signed;
       // if not, assume somebody stripped the signature.
       throw "INVALID_SIGNATURE";
