@@ -2592,14 +2592,18 @@ this.DOMApplicationRegistry = {
     return deferred.promise;
   },
 
-  _getPackage: function(aRequestChannel, aZipFile, aOldApp, aNewApp) {
+  _getPackage: function(aRequestChannel, aId, aOldApp, aNewApp) {
     let deferred = Promise.defer();
+
+    // Staging the zip in TmpD until all the checks are done.
+    let zipFile =
+      FileUtils.getFile("TmpD", ["webapps", aId, "application.zip"], true);
 
     // We need an output stream to write the channel content to the zip file.
     let outputStream = Cc["@mozilla.org/network/file-output-stream;1"]
                          .createInstance(Ci.nsIFileOutputStream);
     // write, create, truncate
-    outputStream.init(aZipFile, 0x02 | 0x08 | 0x20, parseInt("0664", 8), 0);
+    outputStream.init(zipFile, 0x02 | 0x08 | 0x20, parseInt("0664", 8), 0);
     let bufferedOutputStream =
       Cc['@mozilla.org/network/buffered-output-stream;1']
         .createInstance(Ci.nsIBufferedOutputStream);
@@ -2633,7 +2637,7 @@ this.DOMApplicationRegistry = {
           return;
         }
 
-        deferred.resolve();
+        deferred.resolve(zipFile);
       }
     });
     aRequestChannel.asyncOpen(listener, null);
@@ -2833,11 +2837,7 @@ this.DOMApplicationRegistry = {
       // initialize the progress to 0 right now
       oldApp.progress = 0;
 
-      // Staging the zip in TmpD until all the checks are done.
-      let zipFile =
-        FileUtils.getFile("TmpD", ["webapps", id, "application.zip"], true);
-
-      yield this._getPackage(requestChannel, zipFile, oldApp, aNewApp);
+      let zipFile = yield this._getPackage(requestChannel, id, oldApp, aNewApp);
 
       let file = yield OS.File.open(zipFile.path, { read: true });
 
