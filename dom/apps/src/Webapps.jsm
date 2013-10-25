@@ -2486,6 +2486,163 @@ this.DOMApplicationRegistry = {
     return true;
   },
 
+  downloadPackage: function(aManifest, aNewApp, aIsUpdate, aOnSuccess) {
+    // Here are the steps when installing a package:
+    // - create a temp directory where to store the app.
+    // - download the zip in this directory.
+    // - check the signature on the zip.
+    // - extract the manifest from the zip and check it.
+    // - ask confirmation to the user.
+    // - add the new app to the registry.
+    // If we fail at any step, we revert the previous ones and return an error.
+
+    // We define these outside the task to use them in its reject handler.
+    let id = this._appIdForManifestURL(aNewApp.manifestURL);
+    let oldApp = this.webapps[id];
+
+    return Task.spawn((function() {
+      yield this._ensureSufficientStorage(aNewApp);
+
+      let fullPackagePath = aManifest.fullPackagePath();
+
+      // Check if it's a local file install (we've downloaded/sideloaded the
+      // package already or it did exist on the build).
+      let isLocalFileInstall =
+        Services.io.extractScheme(fullPackagePath) === 'file';
+
+      debug("About to download " + fullPackagePath);
+
+      let requestChannel = this._getRequestChannel(fullPackagePath,
+                                                   isLocalFileInstall,
+                                                   oldApp,
+                                                   aNewApp);
+
+      AppDownloadManager.add(
+        aNewApp.manifestURL,
+        {
+          channel: requestChannel,
+          appId: id,
+          previousState: aIsUpdate ? "installed" : "pending"
+        }
+      );
+
+      // We set the 'downloading' flag to true right before starting the fetch.
+      oldApp.downloading = true;
+
+      // We determine the app's 'installState' according to its previous
+      // state. Cancelled download should remain as 'pending'. Successfully
+      // installed apps should morph to 'updating'.
+      oldApp.installState = aIsUpdate ? "updating" : "pending";
+
+      // initialize the progress to 0 right now
+      oldApp.progress = 0;
+
+      let zipFile = yield this._getPackage(requestChannel, id, oldApp, aNewApp);
+
+      let file = yield OS.File.open(zipFile.path, { read: true });
+
+      let hash = yield this._computeFileHash(file, zipFile.path);
+
+      debug("File hash computed: " + hash);
+
+      let responseStatus = requestChannel.responseStatus;
+      let oldPackage = (responseStatus == 304 || hash == oldApp.packageHash);
+
+      if (oldPackage) {
+        debug("package's etag or hash unchanged; sending 'applied' event");
+        // The package's Etag or hash has not changed.
+        // We send a "applied" event right away.
+        this._sendAppliedEvent(aNewApp, oldApp, id);
+        throw new Task.Result();
+      }
+
+      let [rv, zipReader] = yield this._openSignedJarFile(oldApp, zipFile);
+
+      try {
+        let newManifest =
+          this._readPackage(rv, zipReader, zipFile, oldApp, aNewApp,
+                            isLocalFileInstall, aIsUpdate, aManifest,
+                            requestChannel, hash);
+        if (aOnSuccess) {
+          aOnSuccess(id, newManifest);
+        }
+      } catch (e) {
+        debug("package read error: " + e);
+        // Something bad happened when reading the package.
+        // Unrecoverable error, don't bug the user.
+        // Apps with installState 'pending' does not produce any
+        // notification, so we are safe with its current
+        // downloadAvailable state.
+        if (oldApp.installState !== "pending") {
+          oldApp.downloadAvailable = false;
+        }
+        if (typeof e == 'object') {
+          Cu.reportError("Error while reading package:" + e);
+          throw "INVALID_PACKAGE";
+        } else {
+          throw e;
+        }
+      } finally {
+        if (zipReader) {
+          zipReader.close();
+        }
+      }
+
+      AppDownloadManager.remove(aNewApp.manifestURL);
+
+    }).bind(this)).then(
+      null,
+      this._revertDownloadPackage.bind(this, id, oldApp, aNewApp, aIsUpdate)
+    );
+  },
+
+  _ensureSufficientStorage: function(aNewApp) {
+    let deferred = Promise.defer();
+
+    let navigator = Services.wm.getMostRecentWindow("navigator:browser")
+                            .navigator;
+    let deviceStorage = null;
+
+    if (navigator.getDeviceStorage) {
+      deviceStorage = navigator.getDeviceStorage("apps");
+    }
+
+    if (deviceStorage) {
+      let req = deviceStorage.freeSpace();
+      req.onsuccess = req.onerror = function(e) {
+        let freeBytes = e.target.result;
+        let sufficientStorage = this._checkDownloadSize(freeBytes, aNewApp);
+        if (sufficientStorage) {
+          deferred.resolve();
+        } else {
+          deferred.reject("INSUFFICIENT_STORAGE");
+        }
+      }
+    } else {
+      debug("No deviceStorage");
+      // deviceStorage isn't available, so use FileUtils to find the size of
+      // available storage.
+      let dir = FileUtils.getDir(DIRECTORY_NAME, ["webapps"], true, true);
+      try {
+        let sufficientStorage = this._checkDownloadSize(dir.diskSpaceAvailable,
+                                                        aNewApp);
+        if (sufficientStorage) {
+          deferred.resolve();
+        } else {
+          deferred.reject("INSUFFICIENT_STORAGE");
+        }
+      } catch(ex) {
+        // If disk space information isn't available, we'll end up here.
+        // We should proceed anyway, otherwise devices that support neither
+        // deviceStorage nor diskSpaceAvailable will never be able to install
+        // packaged apps.
+        deferred.resolve();
+      }
+    }
+
+    return deferred.promise;
+  },
+
   _getRequestChannel: function(aFullPackagePath, aIsLocalFileInstall, aOldApp,
                                aNewApp) {
     let requestChannel;
@@ -2545,51 +2702,17 @@ this.DOMApplicationRegistry = {
     return requestChannel;
   },
 
-  _ensureSufficientStorage: function(aNewApp) {
-    let deferred = Promise.defer();
-
-    let navigator = Services.wm.getMostRecentWindow("navigator:browser")
-                            .navigator;
-    let deviceStorage = null;
-
-    if (navigator.getDeviceStorage) {
-      deviceStorage = navigator.getDeviceStorage("apps");
-    }
-
-    if (deviceStorage) {
-      let req = deviceStorage.freeSpace();
-      req.onsuccess = req.onerror = function(e) {
-        let freeBytes = e.target.result;
-        let sufficientStorage = this._checkDownloadSize(freeBytes, aNewApp);
-        if (sufficientStorage) {
-          deferred.resolve();
-        } else {
-          deferred.reject("INSUFFICIENT_STORAGE");
-        }
-      }
-    } else {
-      debug("No deviceStorage");
-      // deviceStorage isn't available, so use FileUtils to find the size of
-      // available storage.
-      let dir = FileUtils.getDir(DIRECTORY_NAME, ["webapps"], true, true);
-      try {
-        let sufficientStorage = this._checkDownloadSize(dir.diskSpaceAvailable,
-                                                        aNewApp);
-        if (sufficientStorage) {
-          deferred.resolve();
-        } else {
-          deferred.reject("INSUFFICIENT_STORAGE");
-        }
-      } catch(ex) {
-        // If disk space information isn't available, we'll end up here.
-        // We should proceed anyway, otherwise devices that support neither
-        // deviceStorage nor diskSpaceAvailable will never be able to install
-        // packaged apps.
-        deferred.resolve();
-      }
-    }
-
-    return deferred.promise;
+  _sendDownloadProgressEvent: function(aNewApp, aProgress) {
+    this.broadcastMessage("Webapps:UpdateState", {
+      app: {
+        progress: aProgress
+      },
+      manifestURL: aNewApp.manifestURL
+    });
+    this.broadcastMessage("Webapps:FireEvent", {
+      eventType: "progress",
+      manifestURL: aNewApp.manifestURL
+    });
   },
 
   _getPackage: function(aRequestChannel, aId, aOldApp, aNewApp) {
@@ -2690,6 +2813,56 @@ this.DOMApplicationRegistry = {
     return deferred.promise;
   },
 
+  /**
+   * Send an "applied" event right away for the package being installed.
+   *
+   * XXX We use this to exit the app update process early when the downloaded
+   * package is identical to the last one we installed.  Presumably we do
+   * something similar after updating the app, and we could refactor both cases
+   * to use the same code to send the "applied" event.
+   *
+   * @param aNewApp {Object} the new app data
+   * @param aOldApp {Object} the currently stored app data
+   * @param aId {String} the unique id of the app
+   */
+  _sendAppliedEvent: function(aNewApp, aOldApp, aId) {
+    aOldApp.downloading = false;
+    aOldApp.downloadAvailable = false;
+    aOldApp.downloadSize = 0;
+    aOldApp.installState = "installed";
+    aOldApp.readyToApplyDownload = false;
+    if (aOldApp.staged && aOldApp.staged.manifestHash) {
+      // If we're here then the manifest has changed but the package
+      // hasn't. Let's clear this, so we don't keep offering
+      // a bogus update to the user
+      aOldApp.manifestHash = aOldApp.staged.manifestHash;
+      aOldApp.etag = aOldApp.staged.etag || aOldApp.etag;
+      aOldApp.staged = {};
+      // Move the staged update manifest to a non staged one.
+      let dirPath = this._getAppDir(aId).path;
+
+      // We don't really mind much if this fails.
+      OS.File.move(OS.Path.join(dirPath, "staged-update.webapp"),
+                   OS.Path.join(dirPath, "update.webapp"));
+    }
+
+    // Save the updated registry, and cleanup the tmp directory.
+    this._saveApps((function() {
+      this.broadcastMessage("Webapps:UpdateState", {
+        app: aOldApp,
+        manifestURL: aNewApp.manifestURL
+      });
+      this.broadcastMessage("Webapps:FireEvent", {
+        manifestURL: aNewApp.manifestURL,
+        eventType: ["downloadsuccess", "downloadapplied"]
+      });
+    }).bind(this));
+    let file = FileUtils.getFile("TmpD", ["webapps", aId], false);
+    if (file && file.exists()) {
+      file.remove(true);
+    }
+  },
+
   _openSignedJarFile: function(aOldApp, aZipFile) {
     let deferred = Promise.defer();
 
@@ -2787,255 +2960,6 @@ this.DOMApplicationRegistry = {
     return newManifest;
   },
 
-  downloadPackage: function(aManifest, aNewApp, aIsUpdate, aOnSuccess) {
-    // Here are the steps when installing a package:
-    // - create a temp directory where to store the app.
-    // - download the zip in this directory.
-    // - check the signature on the zip.
-    // - extract the manifest from the zip and check it.
-    // - ask confirmation to the user.
-    // - add the new app to the registry.
-    // If we fail at any step, we backout the previous ones and return an error.
-
-    let id = this._appIdForManifestURL(aNewApp.manifestURL);
-    let oldApp = this.webapps[id];
-    let cleanup = this._cleanup.bind(this, id, oldApp, aNewApp, aIsUpdate);
-
-    return Task.spawn((function() {
-      yield this._ensureSufficientStorage(aNewApp);
-
-      let fullPackagePath = aManifest.fullPackagePath();
-
-      // Check if it's a local file install (we've downloaded/sideloaded the
-      // package already or it did exist on the build).
-      let isLocalFileInstall =
-        Services.io.extractScheme(fullPackagePath) === 'file';
-
-      debug("About to download " + fullPackagePath);
-
-      let requestChannel = this._getRequestChannel(fullPackagePath,
-                                                   isLocalFileInstall,
-                                                   oldApp,
-                                                   aNewApp);
-
-      AppDownloadManager.add(aNewApp.manifestURL,
-        {
-          channel: requestChannel,
-          appId: id,
-          previousState: aIsUpdate ? "installed" : "pending"
-        }
-      );
-
-      // We set the 'downloading' flag to true right before starting the fetch.
-      oldApp.downloading = true;
-
-      // We determine the app's 'installState' according to its previous
-      // state. Cancelled download should remain as 'pending'. Successfully
-      // installed apps should morph to 'updating'.
-      oldApp.installState = aIsUpdate ? "updating" : "pending";
-
-      // initialize the progress to 0 right now
-      oldApp.progress = 0;
-
-      let zipFile = yield this._getPackage(requestChannel, id, oldApp, aNewApp);
-
-      let file = yield OS.File.open(zipFile.path, { read: true });
-
-      let hash = yield this._computeFileHash(file, zipFile.path);
-
-      debug("File hash computed: " + hash);
-
-      let responseStatus = requestChannel.responseStatus;
-      let oldPackage = (responseStatus == 304 || hash == oldApp.packageHash);
-
-      if (oldPackage) {
-        debug("package's etag or hash unchanged; sending 'applied' event");
-        // The package's Etag or hash has not changed.
-        // We send a "applied" event right away.
-        this._sendAppliedEvent(aNewApp, oldApp, id);
-        throw new Task.Result();
-      }
-
-      let [rv, zipReader] = yield this._openSignedJarFile(oldApp, zipFile);
-
-      try {
-        let newManifest =
-          this._readPackage(rv, zipReader, zipFile, oldApp, aNewApp,
-                            isLocalFileInstall, aIsUpdate, aManifest,
-                            requestChannel, hash);
-        if (aOnSuccess) {
-          aOnSuccess(id, newManifest);
-        }
-      } catch (e) {
-        debug("package read error: " + e);
-        // Something bad happened when reading the package.
-        // Unrecoverable error, don't bug the user.
-        // Apps with installState 'pending' does not produce any
-        // notification, so we are safe with its current
-        // downloadAvailable state.
-        if (oldApp.installState !== "pending") {
-          oldApp.downloadAvailable = false;
-        }
-        if (typeof e == 'object') {
-          Cu.reportError("Error while reading package:" + e);
-          cleanup("INVALID_PACKAGE");
-        } else {
-          cleanup(e);
-        }
-      } finally {
-        AppDownloadManager.remove(aNewApp.manifestURL);
-        if (zipReader) {
-          zipReader.close();
-        }
-      }
-    }).bind(this), cleanup);
-  },
-
-  // Removes the directory we created, and sends an error to the DOM side.
-  _cleanup: function(aId, aOldApp, aNewApp, aIsUpdate, aError) {
-    debug("Cleanup: " + aError + "\n" + aError.stack);
-    let dir = FileUtils.getDir("TmpD", ["webapps", aId], true, true);
-    try {
-      dir.remove(true);
-    } catch (e) { }
-
-    // We avoid notifying the error to the DOM side if the app download
-    // was cancelled via cancelDownload, which already sends its own
-    // notification.
-    if (aOldApp.isCanceling) {
-      delete aOldApp.isCanceling;
-      return;
-    }
-
-    let download = AppDownloadManager.get(aNewApp.manifestURL);
-    aOldApp.downloading = false;
-
-    // If there were not enough storage to download the package we
-    // won't have a record of the download details, so we just set the
-    // installState to 'pending' at first download and to 'installed' when
-    // updating.
-    aOldApp.installState = download ? download.previousState
-                                    : aIsUpdate ? "installed"
-                                                : "pending";
-
-    if (aOldApp.staged) {
-      delete aOldApp.staged;
-    }
-
-    this._saveApps((function() {
-      this.broadcastMessage("Webapps:UpdateState", {
-        app: aOldApp,
-        error: aError,
-        manifestURL: aNewApp.manifestURL
-      });
-      this.broadcastMessage("Webapps:FireEvent", {
-        eventType: "downloaderror",
-        manifestURL:  aNewApp.manifestURL
-      });
-    }).bind(this));
-    AppDownloadManager.remove(aNewApp.manifestURL);
-  },
-
-  /**
-   * Send an "applied" event right away for the package being installed.
-   *
-   * XXX We use this to exit the app update process early when the downloaded
-   * package is identical to the last one we installed.  Presumably we do
-   * something similar after updating the app, and we could refactor both cases
-   * to use the same code to send the "applied" event.
-   *
-   * @param aNewApp {Object} the new app data
-   * @param aOldApp {Object} the currently stored app data
-   * @param aId {String} the unique id of the app
-   */
-  _sendAppliedEvent: function(aNewApp, aOldApp, aId) {
-    aOldApp.downloading = false;
-    aOldApp.downloadAvailable = false;
-    aOldApp.downloadSize = 0;
-    aOldApp.installState = "installed";
-    aOldApp.readyToApplyDownload = false;
-    if (aOldApp.staged && aOldApp.staged.manifestHash) {
-      // If we're here then the manifest has changed but the package
-      // hasn't. Let's clear this, so we don't keep offering
-      // a bogus update to the user
-      aOldApp.manifestHash = aOldApp.staged.manifestHash;
-      aOldApp.etag = aOldApp.staged.etag || aOldApp.etag;
-      aOldApp.staged = {};
-      // Move the staged update manifest to a non staged one.
-      let dirPath = this._getAppDir(aId).path;
-
-      // We don't really mind much if this fails.
-      OS.File.move(OS.Path.join(dirPath, "staged-update.webapp"),
-                   OS.Path.join(dirPath, "update.webapp"));
-    }
-
-    // Save the updated registry, and cleanup the tmp directory.
-    this._saveApps((function() {
-      this.broadcastMessage("Webapps:UpdateState", {
-        app: aOldApp,
-        manifestURL: aNewApp.manifestURL
-      });
-      this.broadcastMessage("Webapps:FireEvent", {
-        manifestURL: aNewApp.manifestURL,
-        eventType: ["downloadsuccess", "downloadapplied"]
-      });
-    }).bind(this));
-    let file = FileUtils.getFile("TmpD", ["webapps", aId], false);
-    if (file && file.exists()) {
-      file.remove(true);
-    }
-  },
-
-  _sendDownloadProgressEvent: function(aNewApp, aProgress) {
-    this.broadcastMessage("Webapps:UpdateState", {
-      app: {
-        progress: aProgress
-      },
-      manifestURL: aNewApp.manifestURL
-    });
-    this.broadcastMessage("Webapps:FireEvent", {
-      eventType: "progress",
-      manifestURL: aNewApp.manifestURL
-    });
-  },
-
-  // aStoreId must be a string of the form
-  //   <installOrigin>#<storeId from ids.json>
-  // aStoreVersion must be a positive integer.
-  _checkForStoreIdMatch: function(aIsUpdate, aNewApp, aStoreId, aStoreVersion) {
-    // Things to check:
-    // 1. if it's a update:
-    //   a. We should already have this storeId, or the original storeId must
-    //      start with STORE_ID_PENDING_PREFIX
-    //   b. The manifestURL for the stored app should be the same one we're
-    //      updating
-    //   c. And finally the version of the update should be higher than the one
-    //      on the already installed package
-    // 2. else
-    //   a. We should not have this storeId on the list
-    // We're currently launching WRONG_APP_STORE_ID for all the mismatch kind of
-    // errors, and APP_STORE_VERSION_ROLLBACK for the version error.
-
-    // Does an app with this storeID exist already?
-    let appId = this.getAppLocalIdByStoreId(aStoreId);
-    let isInstalled = appId != Ci.nsIScriptSecurityManager.NO_APP_ID;
-    if (aIsUpdate) {
-      let isDifferent = aNewApp.localId !== appId;
-      let isPending = aNewApp.storeId.indexOf(STORE_ID_PENDING_PREFIX) == 0;
-
-      if ((!isInstalled && !isPending) || (isInstalled && isDifferent)) {
-        throw "WRONG_APP_STORE_ID";
-      }
-
-      if (!isPending && (aNewApp.storeVersion >= aStoreVersion)) {
-        throw "APP_STORE_VERSION_ROLLBACK";
-      }
-
-    } else if (isInstalled) {
-      throw "WRONG_APP_STORE_ID";
-    }
-  },
-
   _checkSignature: function(aApp, aIsSigned, aIsLocalFileInstall) {
     // XXX Security: You CANNOT safely add a new app store for
     // installing privileged apps just by modifying this pref and
@@ -3071,6 +2995,26 @@ this.DOMApplicationRegistry = {
       // we assume to be under the control of the install origin,
       // even if it has a different origin.
       throw "INSTALL_FROM_DENIED";
+    }
+  },
+
+  _saveEtag: function(aIsUpdate, aOldApp, aRequestChannel, aHash, aManifest) {
+    // Save the new Etag for the package.
+    if (aIsUpdate) {
+      if (!aOldApp.staged) {
+        aOldApp.staged = { };
+      }
+      try {
+        aOldApp.staged.packageEtag = aRequestChannel.getResponseHeader("Etag");
+      } catch(e) { }
+      aOldApp.staged.packageHash = aHash;
+      aOldApp.staged.appStatus = AppsUtils.getAppManifestStatus(aManifest);
+    } else {
+      try {
+        aOldApp.packageEtag = aRequestChannel.getResponseHeader("Etag");
+      } catch(e) { }
+      aOldApp.packageHash = aHash;
+      aOldApp.appStatus = AppsUtils.getAppManifestStatus(aManifest);
     }
   },
 
@@ -3123,26 +3067,6 @@ this.DOMApplicationRegistry = {
     }
   },
 
-  _saveEtag: function(aIsUpdate, aOldApp, aRequestChannel, aHash, aManifest) {
-    // Save the new Etag for the package.
-    if (aIsUpdate) {
-      if (!aOldApp.staged) {
-        aOldApp.staged = { };
-      }
-      try {
-        aOldApp.staged.packageEtag = aRequestChannel.getResponseHeader("Etag");
-      } catch(e) { }
-      aOldApp.staged.packageHash = aHash;
-      aOldApp.staged.appStatus = AppsUtils.getAppManifestStatus(aManifest);
-    } else {
-      try {
-        aOldApp.packageEtag = aRequestChannel.getResponseHeader("Etag");
-      } catch(e) { }
-      aOldApp.packageHash = aHash;
-      aOldApp.appStatus = AppsUtils.getAppManifestStatus(aManifest);
-    }
-  },
-
   _getIds: function(aIsSigned, aZipReader, aConverter, aNewApp, aOldApp,
                     aIsUpdate) {
     // Get ids.json if the file is signed
@@ -3167,6 +3091,88 @@ this.DOMApplicationRegistry = {
       aOldApp.storeId = storeId;
       aOldApp.storeVersion = ids.version;
     }
+  },
+
+  // aStoreId must be a string of the form
+  //   <installOrigin>#<storeId from ids.json>
+  // aStoreVersion must be a positive integer.
+  _checkForStoreIdMatch: function(aIsUpdate, aNewApp, aStoreId, aStoreVersion) {
+    // Things to check:
+    // 1. if it's a update:
+    //   a. We should already have this storeId, or the original storeId must
+    //      start with STORE_ID_PENDING_PREFIX
+    //   b. The manifestURL for the stored app should be the same one we're
+    //      updating
+    //   c. And finally the version of the update should be higher than the one
+    //      on the already installed package
+    // 2. else
+    //   a. We should not have this storeId on the list
+    // We're currently launching WRONG_APP_STORE_ID for all the mismatch kind of
+    // errors, and APP_STORE_VERSION_ROLLBACK for the version error.
+
+    // Does an app with this storeID exist already?
+    let appId = this.getAppLocalIdByStoreId(aStoreId);
+    let isInstalled = appId != Ci.nsIScriptSecurityManager.NO_APP_ID;
+    if (aIsUpdate) {
+      let isDifferent = aNewApp.localId !== appId;
+      let isPending = aNewApp.storeId.indexOf(STORE_ID_PENDING_PREFIX) == 0;
+
+      if ((!isInstalled && !isPending) || (isInstalled && isDifferent)) {
+        throw "WRONG_APP_STORE_ID";
+      }
+
+      if (!isPending && (aNewApp.storeVersion >= aStoreVersion)) {
+        throw "APP_STORE_VERSION_ROLLBACK";
+      }
+
+    } else if (isInstalled) {
+      throw "WRONG_APP_STORE_ID";
+    }
+  },
+
+  // Removes the directory we created, and sends an error to the DOM side.
+  _revertDownloadPackage: function(aId, aOldApp, aNewApp, aIsUpdate, aError) {
+    debug("Cleanup: " + aError + "\n" + aError.stack);
+    let dir = FileUtils.getDir("TmpD", ["webapps", aId], true, true);
+    try {
+      dir.remove(true);
+    } catch (e) { }
+
+    // We avoid notifying the error to the DOM side if the app download
+    // was cancelled via cancelDownload, which already sends its own
+    // notification.
+    if (aOldApp.isCanceling) {
+      delete aOldApp.isCanceling;
+      return;
+    }
+
+    let download = AppDownloadManager.get(aNewApp.manifestURL);
+    aOldApp.downloading = false;
+
+    // If there were not enough storage to download the package we
+    // won't have a record of the download details, so we just set the
+    // installState to 'pending' at first download and to 'installed' when
+    // updating.
+    aOldApp.installState = download ? download.previousState
+                                    : aIsUpdate ? "installed"
+                                                : "pending";
+
+    if (aOldApp.staged) {
+      delete aOldApp.staged;
+    }
+
+    this._saveApps((function() {
+      this.broadcastMessage("Webapps:UpdateState", {
+        app: aOldApp,
+        error: aError,
+        manifestURL: aNewApp.manifestURL
+      });
+      this.broadcastMessage("Webapps:FireEvent", {
+        eventType: "downloaderror",
+        manifestURL:  aNewApp.manifestURL
+      });
+    }).bind(this));
+    AppDownloadManager.remove(aNewApp.manifestURL);
   },
 
   doUninstall: function(aData, aMm) {
