@@ -2474,18 +2474,6 @@ this.DOMApplicationRegistry = {
     }).bind(this));
   },
 
-  _checkDownloadSize: function(aFreeBytes, aNewApp) {
-    if (aFreeBytes) {
-      debug("Free storage: " + aFreeBytes + ". Download size: " +
-            aNewApp.downloadSize);
-      if (aFreeBytes <=
-          aNewApp.downloadSize + AppDownloadManager.MIN_REMAINING_FREESPACE) {
-        return false;
-      }
-    }
-    return true;
-  },
-
   downloadPackage: function(aManifest, aNewApp, aIsUpdate, aOnSuccess) {
     // Here are the steps when installing a package:
     // - create a temp directory where to store the app.
@@ -2641,6 +2629,18 @@ this.DOMApplicationRegistry = {
     }
 
     return deferred.promise;
+  },
+
+  _checkDownloadSize: function(aFreeBytes, aNewApp) {
+    if (aFreeBytes) {
+      debug("Free storage: " + aFreeBytes + ". Download size: " +
+            aNewApp.downloadSize);
+      if (aFreeBytes <=
+          aNewApp.downloadSize + AppDownloadManager.MIN_REMAINING_FREESPACE) {
+        return false;
+      }
+    }
+    return true;
   },
 
   _getRequestChannel: function(aFullPackagePath, aIsLocalFileInstall, aOldApp,
