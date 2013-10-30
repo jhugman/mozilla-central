@@ -15,6 +15,8 @@
 
 #include <limits> /* for std::numeric_limits */
 
+#include "jstypes.h"
+
 #include "js/Anchor.h"
 #include "js/RootingAPI.h"
 #include "js/Utility.h"
@@ -841,23 +843,32 @@ JSVAL_EXTRACT_NON_DOUBLE_TYPE_IMPL(jsval_layout l)
 
 #endif  /* JS_BITS_PER_WORD */
 
-static inline double
-JS_CANONICALIZE_NAN(double d)
-{
-    if (MOZ_UNLIKELY(d != d)) {
-        jsval_layout l;
-        l.asBits = 0x7FF8000000000000LL;
-        return l.asDouble;
-    }
-    return d;
-}
-
 static inline jsval_layout JSVAL_TO_IMPL(JS::Value v);
 static inline JS_VALUE_CONSTEXPR JS::Value IMPL_TO_JSVAL(jsval_layout l);
 
 namespace JS {
 
 static inline JS_VALUE_CONSTEXPR JS::Value UndefinedValue();
+
+/**
+ * Returns a generic quiet NaN value, with all payload bits set to zero.
+ *
+ * Among other properties, this NaN's bit pattern conforms to JS::Value's
+ * bit pattern restrictions.
+ */
+static MOZ_ALWAYS_INLINE double
+GenericNaN()
+{
+  return mozilla::SpecificNaN(0, 0x8000000000000ULL);
+}
+
+static inline double
+CanonicalizeNaN(double d)
+{
+    if (MOZ_UNLIKELY(mozilla::IsNaN(d)))
+        return GenericNaN();
+    return d;
+}
 
 /*
  * JS::Value is the interface for a single JavaScript Engine value.  A few
@@ -927,6 +938,10 @@ class Value
 
     void setDouble(double d) {
         data = DOUBLE_TO_JSVAL_IMPL(d);
+    }
+
+    void setNaN() {
+        setDouble(GenericNaN());
     }
 
     double &getDoubleRef() {
@@ -1274,6 +1289,14 @@ DoubleValue(double dbl)
 }
 
 static inline Value
+DoubleNaNValue()
+{
+    Value v;
+    v.setNaN();
+    return v;
+}
+
+static inline Value
 Float32Value(float f)
 {
     Value v;
@@ -1551,6 +1574,7 @@ class UnbarrieredMutableValueOperations : public ValueOperations<Outer>
     void setUndefined() { value()->setUndefined(); }
     void setInt32(int32_t i) { value()->setInt32(i); }
     void setDouble(double d) { value()->setDouble(d); }
+    void setNaN() { setDouble(JS::GenericNaN()); }
     void setBoolean(bool b) { value()->setBoolean(b); }
     void setMagic(JSWhyMagic why) { value()->setMagic(why); }
     bool setNumber(uint32_t ui) { return value()->setNumber(ui); }

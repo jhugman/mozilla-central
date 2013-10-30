@@ -39,7 +39,7 @@ CompositableHost::~CompositableHost()
 
   RefPtr<TextureHost> it = mFirstTexture;
   while (it) {
-    if (it->GetFlags() & TEXTURE_DEALLOCATE_HOST) {
+    if (!(it->GetFlags() & TEXTURE_DEALLOCATE_CLIENT)) {
       it->DeallocateSharedData();
     }
     it = it->GetNextSibling();
@@ -55,7 +55,7 @@ CompositableHost::AddTextureHost(TextureHost* aTexture)
   RefPtr<TextureHost> second = mFirstTexture;
   mFirstTexture = aTexture;
   aTexture->SetNextSibling(second);
-  aTexture->SetCompositableQuirks(GetCompositableQuirks());
+  aTexture->SetCompositableBackendSpecificData(GetCompositableBackendSpecificData());
 }
 
 void
@@ -75,6 +75,9 @@ CompositableHost::RemoveTextureHost(uint64_t aTextureID)
       toRemove->SetNextSibling(nullptr);
     }
     it = it->GetNextSibling();
+  }
+  if (!mFirstTexture && mBackendData) {
+    mBackendData->ClearData();
   }
 }
 
@@ -164,7 +167,7 @@ CompositableHost::RemoveMaskEffect()
 }
 
 // implemented in TextureHostOGL.cpp
-TemporaryRef<CompositableQuirks> CreateCompositableQuirksOGL();
+TemporaryRef<CompositableBackendSpecificData> CreateCompositableBackendSpecificDataOGL();
 
 /* static */ TemporaryRef<CompositableHost>
 CompositableHost::Create(const TextureInfo& aTextureInfo)
@@ -196,8 +199,8 @@ CompositableHost::Create(const TextureInfo& aTextureInfo)
     MOZ_CRASH("Unknown CompositableType");
   }
   if (result) {
-    RefPtr<CompositableQuirks> quirks = CreateCompositableQuirksOGL();
-    result->SetCompositableQuirks(quirks);
+    RefPtr<CompositableBackendSpecificData> data = CreateCompositableBackendSpecificDataOGL();
+    result->SetCompositableBackendSpecificData(data);
   }
   return result;
 }
@@ -234,7 +237,14 @@ void
 CompositableParent::ActorDestroy(ActorDestroyReason why)
 {
   if (mHost) {
-    mHost->Detach();
+    // XXX: sadness warning. We should be able to do this whenever we get ActorDestroy,
+    // not just for abnormal shutdowns (which is the only case we _need_ to - so that
+    // we don't double release our shmems). But, for some reason, that causes a
+    // crash, we don't know why. (Bug 925773).
+    if (why == AbnormalShutdown) {
+      mHost->OnActorDestroy();
+    }
+    mHost->Detach(nullptr, CompositableHost::FORCE_DETACH);
   }
 }
 

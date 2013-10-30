@@ -7,6 +7,8 @@
 #ifndef js_GCAPI_h
 #define js_GCAPI_h
 
+#include "mozilla/NullPtr.h"
+
 #include "js/HeapAPI.h"
 #include "js/RootingAPI.h"
 #include "js/Value.h"
@@ -226,7 +228,7 @@ class JS_PUBLIC_API(ObjectPtr)
     Heap<JSObject *> value;
 
   public:
-    ObjectPtr() : value(NULL) {}
+    ObjectPtr() : value(nullptr) {}
 
     ObjectPtr(JSObject *obj) : value(obj) {}
 
@@ -236,7 +238,7 @@ class JS_PUBLIC_API(ObjectPtr)
     void finalize(JSRuntime *rt) {
         if (IsIncrementalBarrierNeeded(rt))
             IncrementalObjectBarrier(value);
-        value = NULL;
+        value = nullptr;
     }
 
     void init(JSObject *obj) { value = obj; }
@@ -287,7 +289,7 @@ ExposeGCThingToActiveJS(void *thing, JSGCTraceKind kind)
      * All live objects in the nursery are moved to tenured at the beginning of
      * each GC slice, so the gray marker never sees nursery things.
      */
-    if (uintptr_t(thing) >= rt->gcNurseryStart_ && uintptr_t(thing) < rt->gcNurseryEnd_)
+    if (js::gc::IsInsideNursery(rt, thing))
         return;
 #endif
     if (IsIncrementalBarrierNeededOnGCThing(rt, thing, kind))

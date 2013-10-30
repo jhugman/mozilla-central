@@ -3,8 +3,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/ContentEvents.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/MathAlgorithms.h"
+#include "mozilla/MouseEvents.h"
 #include "mozilla/Likely.h"
 
 #include "nsCOMPtr.h"
@@ -21,7 +23,6 @@
 #include "nsIContent.h"
 #include "nsStyleContext.h"
 #include "nsIBoxObject.h"
-#include "nsGUIEvent.h"
 #include "nsAsyncDOMEvent.h"
 #include "nsIDOMDataContainerEvent.h"
 #include "nsIDOMMouseEvent.h"
@@ -925,17 +926,18 @@ nsTreeBodyFrame::CheckOverflow(const ScrollParts& aParts)
   nsCOMPtr<nsIContent> content = mContent;
 
   if (verticalOverflowChanged) {
-    nsScrollPortEvent event(true, mVerticalOverflow ? NS_SCROLLPORT_OVERFLOW
-                            : NS_SCROLLPORT_UNDERFLOW, nullptr);
-    event.orient = nsScrollPortEvent::vertical;
+    InternalScrollPortEvent event(true,
+      mVerticalOverflow ? NS_SCROLLPORT_OVERFLOW : NS_SCROLLPORT_UNDERFLOW,
+      nullptr);
+    event.orient = InternalScrollPortEvent::vertical;
     nsEventDispatcher::Dispatch(content, presContext, &event);
   }
 
   if (horizontalOverflowChanged) {
-    nsScrollPortEvent event(true,
-                            mHorizontalOverflow ? NS_SCROLLPORT_OVERFLOW
-                            : NS_SCROLLPORT_UNDERFLOW, nullptr);
-    event.orient = nsScrollPortEvent::horizontal;
+    InternalScrollPortEvent event(true,
+      mHorizontalOverflow ? NS_SCROLLPORT_OVERFLOW : NS_SCROLLPORT_UNDERFLOW,
+      nullptr);
+    event.orient = InternalScrollPortEvent::horizontal;
     nsEventDispatcher::Dispatch(content, presContext, &event);
   }
 
@@ -2549,10 +2551,10 @@ nsTreeBodyFrame::GetCursor(const nsPoint& aPoint,
   return nsLeafBoxFrame::GetCursor(aPoint, aCursor);
 }
 
-static uint32_t GetDropEffect(nsGUIEvent* aEvent)
+static uint32_t GetDropEffect(WidgetGUIEvent* aEvent)
 {
   NS_ASSERTION(aEvent->eventStructType == NS_DRAG_EVENT, "wrong event type");
-  nsDragEvent* dragEvent = static_cast<nsDragEvent *>(aEvent);
+  WidgetDragEvent* dragEvent = aEvent->AsDragEvent();
   nsContentUtils::SetDataTransferInEvent(dragEvent);
 
   uint32_t action = 0;
@@ -2563,7 +2565,7 @@ static uint32_t GetDropEffect(nsGUIEvent* aEvent)
 
 NS_IMETHODIMP
 nsTreeBodyFrame::HandleEvent(nsPresContext* aPresContext,
-                             nsGUIEvent* aEvent,
+                             WidgetGUIEvent* aEvent,
                              nsEventStatus* aEventStatus)
 {
   if (aEvent->message == NS_MOUSE_ENTER_SYNTH || aEvent->message == NS_MOUSE_MOVE) {
@@ -2698,9 +2700,9 @@ nsTreeBodyFrame::HandleEvent(nsPresContext* aPresContext,
 
         // The dataTransfer was initialized by the call to GetDropEffect above.
         bool canDropAtNewLocation = false;
-        nsDragEvent* dragEvent = static_cast<nsDragEvent *>(aEvent);
         mView->CanDrop(mSlots->mDropRow, mSlots->mDropOrient,
-                       dragEvent->dataTransfer, &canDropAtNewLocation);
+                       aEvent->AsDragEvent()->dataTransfer,
+                       &canDropAtNewLocation);
 
         if (canDropAtNewLocation) {
           // Invalidate row at the new location.
@@ -2730,7 +2732,7 @@ nsTreeBodyFrame::HandleEvent(nsPresContext* aPresContext,
     }
 
     NS_ASSERTION(aEvent->eventStructType == NS_DRAG_EVENT, "wrong event type");
-    nsDragEvent* dragEvent = static_cast<nsDragEvent*>(aEvent);
+    WidgetDragEvent* dragEvent = aEvent->AsDragEvent();
     nsContentUtils::SetDataTransferInEvent(dragEvent);
 
     mView->Drop(mSlots->mDropRow, mSlots->mDropOrient, dragEvent->dataTransfer);
@@ -3390,7 +3392,7 @@ nsTreeBodyFrame::PaintTwisty(int32_t              aRowIndex,
           
         // Paint the image.
         nsLayoutUtils::DrawSingleUnscaledImage(&aRenderingContext, image,
-            gfxPattern::FILTER_NEAREST, pt, &aDirtyRect,
+            GraphicsFilter::FILTER_NEAREST, pt, &aDirtyRect,
             imgIContainer::FLAG_NONE, &imageSize);
       }
     }
@@ -3525,7 +3527,7 @@ nsTreeBodyFrame::PaintImage(int32_t              aRowIndex,
 
     gfxContext* ctx = aRenderingContext.ThebesContext();
     if (opacity != 1.0f) {
-      ctx->PushGroup(gfxASurface::CONTENT_COLOR_ALPHA);
+      ctx->PushGroup(GFX_CONTENT_COLOR_ALPHA);
     }
 
     nsLayoutUtils::DrawImage(&aRenderingContext, image,
@@ -3642,7 +3644,7 @@ nsTreeBodyFrame::PaintText(int32_t              aRowIndex,
 
   gfxContext* ctx = aRenderingContext.ThebesContext();
   if (opacity != 1.0f) {
-    ctx->PushGroup(gfxASurface::CONTENT_COLOR_ALPHA);
+    ctx->PushGroup(GFX_CONTENT_COLOR_ALPHA);
   }
 
   nsLayoutUtils::DrawString(this, &aRenderingContext, text.get(), text.Length(),
@@ -3713,7 +3715,7 @@ nsTreeBodyFrame::PaintCheckbox(int32_t              aRowIndex,
 
     // Paint the image.
     nsLayoutUtils::DrawSingleUnscaledImage(&aRenderingContext, image,
-        gfxPattern::FILTER_NEAREST, pt, &aDirtyRect,
+        GraphicsFilter::FILTER_NEAREST, pt, &aDirtyRect,
         imgIContainer::FLAG_NONE, &imageSize);
   }
 }
@@ -4332,7 +4334,9 @@ nsTreeBodyFrame::CanAutoScroll(int32_t aRowIndex)
 // For non-containers, if the mouse is in the top 50% of the row, the drop is
 // _before_ and the bottom 50% _after_
 void 
-nsTreeBodyFrame::ComputeDropPosition(nsGUIEvent* aEvent, int32_t* aRow, int16_t* aOrient,
+nsTreeBodyFrame::ComputeDropPosition(WidgetGUIEvent* aEvent,
+                                     int32_t* aRow,
+                                     int16_t* aOrient,
                                      int16_t* aScrollLines)
 {
   *aOrient = -1;
@@ -4471,7 +4475,7 @@ void
 nsTreeBodyFrame::FireScrollEvent()
 {
   mScrollEvent.Forget();
-  nsGUIEvent event(true, NS_SCROLL_EVENT, nullptr);
+  WidgetGUIEvent event(true, NS_SCROLL_EVENT, nullptr);
   // scroll events fired at elements don't bubble
   event.mFlags.mBubbles = false;
   nsEventDispatcher::Dispatch(GetContent(), PresContext(), &event);
@@ -4488,6 +4492,22 @@ nsTreeBodyFrame::PostScrollEvent()
     NS_WARNING("failed to dispatch ScrollEvent");
   } else {
     mScrollEvent = ev;
+  }
+}
+
+void
+nsTreeBodyFrame::ScrollbarActivityStarted() const
+{
+  if (mScrollbarActivity) {
+    mScrollbarActivity->ActivityStarted();
+  }
+}
+
+void
+nsTreeBodyFrame::ScrollbarActivityStopped() const
+{
+  if (mScrollbarActivity) {
+    mScrollbarActivity->ActivityStopped();
   }
 }
 

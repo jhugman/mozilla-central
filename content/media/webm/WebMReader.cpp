@@ -9,7 +9,6 @@
 #include "MediaResource.h"
 #include "WebMReader.h"
 #include "WebMBufferedParser.h"
-#include "VideoUtils.h"
 #include "mozilla/dom/TimeRanges.h"
 #include "VorbisUtils.h"
 
@@ -200,7 +199,7 @@ WebMReader::~WebMReader()
 
 nsresult WebMReader::Init(MediaDecoderReader* aCloneDonor)
 {
-  if (vpx_codec_dec_init(&mVP8, vpx_codec_vp8_dx(), NULL, 0)) {
+  if (vpx_codec_dec_init(&mVP8, vpx_codec_vp8_dx(), nullptr, 0)) {
     return NS_ERROR_FAILURE;
   }
 
@@ -256,8 +255,8 @@ void WebMReader::Cleanup()
   }
 }
 
-nsresult WebMReader::ReadMetadata(VideoInfo* aInfo,
-                                    MetadataTags** aTags)
+nsresult WebMReader::ReadMetadata(MediaInfo* aInfo,
+                                  MetadataTags** aTags)
 {
   NS_ASSERTION(mDecoder->OnDecodeThread(), "Should be on decode thread.");
 
@@ -297,8 +296,6 @@ nsresult WebMReader::ReadMetadata(VideoInfo* aInfo,
     return NS_ERROR_FAILURE;
   }
 
-  mInfo.mHasAudio = false;
-  mInfo.mHasVideo = false;
   for (uint32_t track = 0; track < ntracks; ++track) {
     int id = nestegg_track_codec_id(mContext, track);
     if (id == -1) {
@@ -344,27 +341,27 @@ nsresult WebMReader::ReadMetadata(VideoInfo* aInfo,
 
       mVideoTrack = track;
       mHasVideo = true;
-      mInfo.mHasVideo = true;
+      mInfo.mVideo.mHasVideo = true;
 
-      mInfo.mDisplay = displaySize;
+      mInfo.mVideo.mDisplay = displaySize;
       mPicture = pictureRect;
       mInitialFrame = frameSize;
 
       switch (params.stereo_mode) {
       case NESTEGG_VIDEO_MONO:
-        mInfo.mStereoMode = STEREO_MODE_MONO;
+        mInfo.mVideo.mStereoMode = STEREO_MODE_MONO;
         break;
       case NESTEGG_VIDEO_STEREO_LEFT_RIGHT:
-        mInfo.mStereoMode = STEREO_MODE_LEFT_RIGHT;
+        mInfo.mVideo.mStereoMode = STEREO_MODE_LEFT_RIGHT;
         break;
       case NESTEGG_VIDEO_STEREO_BOTTOM_TOP:
-        mInfo.mStereoMode = STEREO_MODE_BOTTOM_TOP;
+        mInfo.mVideo.mStereoMode = STEREO_MODE_BOTTOM_TOP;
         break;
       case NESTEGG_VIDEO_STEREO_TOP_BOTTOM:
-        mInfo.mStereoMode = STEREO_MODE_TOP_BOTTOM;
+        mInfo.mVideo.mStereoMode = STEREO_MODE_TOP_BOTTOM;
         break;
       case NESTEGG_VIDEO_STEREO_RIGHT_LEFT:
-        mInfo.mStereoMode = STEREO_MODE_RIGHT_LEFT;
+        mInfo.mVideo.mStereoMode = STEREO_MODE_RIGHT_LEFT;
         break;
       }
     }
@@ -378,7 +375,7 @@ nsresult WebMReader::ReadMetadata(VideoInfo* aInfo,
 
       mAudioTrack = track;
       mHasAudio = true;
-      mInfo.mHasAudio = true;
+      mInfo.mAudio.mHasAudio = true;
 
       // Get the Vorbis header data
       unsigned int nheaders = 0;
@@ -421,9 +418,9 @@ nsresult WebMReader::ReadMetadata(VideoInfo* aInfo,
         return NS_ERROR_FAILURE;
       }
 
-      mInfo.mAudioRate = mVorbisDsp.vi->rate;
-      mInfo.mAudioChannels = mVorbisDsp.vi->channels;
-      mChannels = mInfo.mAudioChannels;
+      mInfo.mAudio.mRate = mVorbisDsp.vi->rate;
+      mInfo.mAudio.mChannels = mVorbisDsp.vi->channels;
+      mChannels = mInfo.mAudio.mChannels;
     }
   }
 
@@ -855,7 +852,7 @@ bool WebMReader::DecodeVideoFrame(bool &aKeyframeSkip,
       aKeyframeSkip = false;
     }
 
-    if (vpx_codec_decode(&mVP8, data, length, NULL, 0)) {
+    if (vpx_codec_decode(&mVP8, data, length, nullptr, 0)) {
       return false;
     }
 
@@ -867,7 +864,7 @@ bool WebMReader::DecodeVideoFrame(bool &aKeyframeSkip,
       continue;
     }
 
-    vpx_codec_iter_t  iter = NULL;
+    vpx_codec_iter_t  iter = nullptr;
     vpx_image_t      *img;
 
     while ((img = vpx_codec_get_frame(&mVP8, &iter))) {
@@ -905,11 +902,11 @@ bool WebMReader::DecodeVideoFrame(bool &aKeyframeSkip,
         picture.height = (img->d_h * mPicture.height) / mInitialFrame.height;
       }
 
-      VideoData *v = VideoData::Create(mInfo,
+      VideoData *v = VideoData::Create(mInfo.mVideo,
                                        mDecoder->GetImageContainer(),
                                        holder->mOffset,
                                        tstamp_usecs,
-                                       next_tstamp / NS_PER_USEC,
+                                       (next_tstamp / NS_PER_USEC) - tstamp_usecs,
                                        b,
                                        si.is_kf,
                                        -1,

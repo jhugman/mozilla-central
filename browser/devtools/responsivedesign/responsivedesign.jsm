@@ -15,7 +15,7 @@ Cu.import("resource:///modules/devtools/shared/event-emitter.js");
 
 var require = Cu.import("resource://gre/modules/devtools/Loader.jsm", {}).devtools.require;
 let Telemetry = require("devtools/shared/telemetry");
-let {TouchEventHandler} = require("devtools/shared/touch-events");
+let {TouchEventHandler} = require("devtools/touch-events");
 
 this.EXPORTED_SYMBOLS = ["ResponsiveUIManager"];
 
@@ -116,6 +116,7 @@ function ResponsiveUI(aWindow, aTab)
   this.container = aWindow.gBrowser.getBrowserContainer(this.browser);
   this.stack = this.container.querySelector(".browserStack");
   this._telemetry = new Telemetry();
+  this._floatingScrollbars = !this.mainWindow.matchMedia("(-moz-overlay-scrollbars)").matches;
 
 
   // Try to load presets from prefs
@@ -210,7 +211,6 @@ function ResponsiveUI(aWindow, aTab)
 
 ResponsiveUI.prototype = {
   _transitionsEnabled: true,
-  _floatingScrollbars: Services.appinfo.OS != "Darwin",
   get transitionsEnabled() this._transitionsEnabled,
   set transitionsEnabled(aValue) {
     this._transitionsEnabled = aValue;

@@ -17,6 +17,7 @@
 #include "nsIDocument.h"
 #include "nsIDOMDOMException.h"
 #include "nsIException.h"
+#include "nsIProgrammingLanguage.h"
 #include "nsMemory.h"
 #include "prprf.h"
 #include "xpcprivate.h"
@@ -161,6 +162,7 @@ NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(Exception)
   NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
+  tmp->mThrownJSVal.setNull();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CI_INTERFACE_GETTER1(Exception, nsIXPCException)

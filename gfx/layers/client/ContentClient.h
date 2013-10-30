@@ -8,7 +8,7 @@
 
 #include <stdint.h>                     // for uint32_t
 #include "ThebesLayerBuffer.h"          // for ThebesLayerBuffer, etc
-#include "gfxASurface.h"                // for gfxASurface, etc
+#include "gfxTypes.h"
 #include "gfxPlatform.h"                // for gfxPlatform
 #include "mozilla/Assertions.h"         // for MOZ_CRASH
 #include "mozilla/Attributes.h"         // for MOZ_OVERRIDE
@@ -29,6 +29,7 @@
 
 class gfxContext;
 struct gfxMatrix;
+class gfxASurface;
 
 namespace mozilla {
 namespace gfx {
@@ -162,6 +163,8 @@ public:
     MOZ_CRASH("Should not be called on non-remote ContentClient");
   }
 
+  virtual void OnActorDestroy() MOZ_OVERRIDE {}
+
 private:
   BasicLayerManager* mManager;
 };
@@ -193,7 +196,7 @@ public:
     , mDeprecatedTextureClient(nullptr)
     , mIsNewBuffer(false)
     , mFrontAndBackBufferDiffer(false)
-    , mContentType(gfxASurface::CONTENT_COLOR_ALPHA)
+    , mContentType(GFX_CONTENT_COLOR_ALPHA)
   {}
 
   typedef ThebesLayerBuffer::PaintState PaintState;
@@ -245,6 +248,8 @@ public:
   {
     return mTextureInfo;
   }
+
+  virtual void OnActorDestroy() MOZ_OVERRIDE;
 
 protected:
   virtual nsIntRegion GetUpdatedRegion(const nsIntRegion& aRegionToDraw,
@@ -309,6 +314,8 @@ protected:
   virtual void DestroyFrontBuffer() MOZ_OVERRIDE;
   virtual void LockFrontBuffer() MOZ_OVERRIDE;
 
+  virtual void OnActorDestroy() MOZ_OVERRIDE;
+
 private:
   void UpdateDestinationFrom(const RotatedBuffer& aSource,
                              const nsIntRegion& aUpdateRegion);
@@ -355,7 +362,7 @@ class ContentClientIncremental : public ContentClientRemote
 public:
   ContentClientIncremental(CompositableForwarder* aFwd)
     : ContentClientRemote(aFwd)
-    , mContentType(gfxASurface::CONTENT_COLOR_ALPHA)
+    , mContentType(GFX_CONTENT_COLOR_ALPHA)
     , mHasBuffer(false)
     , mHasBufferOnWhite(false)
   {
@@ -394,6 +401,8 @@ public:
     }
   }
 
+  virtual void OnActorDestroy() MOZ_OVERRIDE {}
+
 private:
 
   enum BufferType{
@@ -403,7 +412,7 @@ private:
 
   void NotifyBufferCreated(ContentType aType, uint32_t aFlags)
   {
-    mTextureInfo.mTextureFlags = aFlags | TEXTURE_DEALLOCATE_HOST;
+    mTextureInfo.mTextureFlags = aFlags & ~TEXTURE_DEALLOCATE_CLIENT;
     mContentType = aType;
 
     mForwarder->CreatedIncrementalBuffer(this,

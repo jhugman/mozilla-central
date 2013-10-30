@@ -32,6 +32,7 @@ class ContentParent;
 class ContentChild;
 struct StructuredCloneData;
 class ClonedMessageData;
+class MessageManagerReporter;
 
 namespace ipc {
 
@@ -54,11 +55,12 @@ public:
     return true;
   }
 
-  virtual bool DoSendSyncMessage(JSContext* aCx,
-                                 const nsAString& aMessage,
-                                 const mozilla::dom::StructuredCloneData& aData,
-                                 JS::Handle<JSObject *> aCpows,
-                                 InfallibleTArray<nsString>* aJSONRetVal)
+  virtual bool DoSendBlockingMessage(JSContext* aCx,
+                                     const nsAString& aMessage,
+                                     const mozilla::dom::StructuredCloneData& aData,
+                                     JS::Handle<JSObject *> aCpows,
+                                     InfallibleTArray<nsString>* aJSONRetVal,
+                                     bool aIsSync)
   {
     return true;
   }
@@ -120,7 +122,7 @@ struct nsMessageListenerInfo
 class CpowHolder
 {
   public:
-    virtual bool ToObject(JSContext* cx, JSObject** objp) = 0;
+    virtual bool ToObject(JSContext* cx, JS::MutableHandleObject objp) = 0;
 };
 
 class MOZ_STACK_CLASS SameProcessCpowHolder : public CpowHolder
@@ -131,7 +133,7 @@ class MOZ_STACK_CLASS SameProcessCpowHolder : public CpowHolder
     {
     }
 
-    bool ToObject(JSContext* aCx, JSObject** aObjp);
+    bool ToObject(JSContext* aCx, JS::MutableHandleObject aObjp);
 
   private:
     JS::Rooted<JSObject*> mObj;
@@ -142,6 +144,7 @@ class nsFrameMessageManager MOZ_FINAL : public nsIContentFrameMessageManager,
                                         public nsIFrameScriptLoader,
                                         public nsIProcessChecker
 {
+  friend class mozilla::dom::MessageManagerReporter;
   typedef mozilla::dom::StructuredCloneData StructuredCloneData;
 public:
   nsFrameMessageManager(mozilla::dom::ipc::MessageManagerCallback* aCallback,
@@ -208,7 +211,7 @@ public:
   NewProcessMessageManager(mozilla::dom::ContentParent* aProcess);
 
   nsresult ReceiveMessage(nsISupports* aTarget, const nsAString& aMessage,
-                          bool aSync, const StructuredCloneData* aCloneData,
+                          bool aIsSync, const StructuredCloneData* aCloneData,
                           CpowHolder* aCpows,
                           InfallibleTArray<nsString>* aJSONRetVal);
 
@@ -255,6 +258,14 @@ public:
   {
     return sChildProcessManager;
   }
+private:
+  nsresult SendMessage(const nsAString& aMessageName,
+                       const JS::Value& aJSON,
+                       const JS::Value& aObjects,
+                       JSContext* aCx,
+                       uint8_t aArgc,
+                       JS::Value* aRetval,
+                       bool aIsSync);
 protected:
   friend class MMListenerRemover;
   nsTArray<nsMessageListenerInfo> mListeners;

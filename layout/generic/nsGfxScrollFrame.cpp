@@ -5,13 +5,14 @@
 
 /* rendering object to wrap rendering objects that should be scrollable */
 
+#include "nsGfxScrollFrame.h"
+
 #include "base/compiler_specific.h"
 #include "nsCOMPtr.h"
 #include "nsPresContext.h"
 #include "nsView.h"
 #include "nsIScrollable.h"
 #include "nsContainerFrame.h"
-#include "nsGfxScrollFrame.h"
 #include "nsGkAtoms.h"
 #include "nsINameSpaceManager.h"
 #include "nsContentList.h"
@@ -24,7 +25,6 @@
 #include "nsITextControlFrame.h"
 #include "nsIDOMHTMLTextAreaElement.h"
 #include "nsNodeInfoManager.h"
-#include "nsGUIEvent.h"
 #include "nsContentCreatorFunctions.h"
 #include "nsAutoPtr.h"
 #include "nsPresState.h"
@@ -33,6 +33,7 @@
 #include "nsContentUtils.h"
 #include "nsLayoutUtils.h"
 #include "nsBidiUtils.h"
+#include "mozilla/ContentEvents.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/dom/Element.h"
@@ -49,6 +50,7 @@
 #include "nsSVGIntegrationUtils.h"
 #include "nsIScrollPositionListener.h"
 #include "StickyScrollContainer.h"
+#include "nsIFrameInlines.h"
 #include <algorithm>
 #include <cstdlib> // for std::abs(int/long)
 #include <cmath> // for std::abs(float/double)
@@ -73,6 +75,22 @@ nsHTMLScrollFrame::nsHTMLScrollFrame(nsIPresShell* aShell, nsStyleContext* aCont
   : nsContainerFrame(aContext),
     mInner(ALLOW_THIS_IN_INITIALIZER_LIST(this), aIsRoot)
 {
+}
+
+void
+nsHTMLScrollFrame::ScrollbarActivityStarted() const
+{
+  if (mInner.mScrollbarActivity) {
+    mInner.mScrollbarActivity->ActivityStarted();
+  }
+}
+
+void
+nsHTMLScrollFrame::ScrollbarActivityStopped() const
+{
+  if (mInner.mScrollbarActivity) {
+    mInner.mScrollbarActivity->ActivityStopped();
+  }
 }
 
 nsresult
@@ -898,6 +916,22 @@ nsXULScrollFrame::nsXULScrollFrame(nsIPresShell* aShell, nsStyleContext* aContex
 {
   SetLayoutManager(nullptr);
   mInner.mClipAllDescendants = aClipAllDescendants;
+}
+
+void
+nsXULScrollFrame::ScrollbarActivityStarted() const
+{
+  if (mInner.mScrollbarActivity) {
+    mInner.mScrollbarActivity->ActivityStarted();
+  }
+}
+
+void
+nsXULScrollFrame::ScrollbarActivityStopped() const
+{
+  if (mInner.mScrollbarActivity) {
+    mInner.mScrollbarActivity->ActivityStopped();
+  }
 }
 
 nsMargin
@@ -2277,7 +2311,7 @@ nsGfxScrollFrameInner::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     dirtyRect = ExpandRect(dirtyRect);
   }
 
-  nsDisplayListCollection set;
+  nsDisplayListCollection scrolledContent;
   {
     DisplayListClipState::AutoSaveRestore clipState(aBuilder);
 
@@ -2301,7 +2335,7 @@ nsGfxScrollFrameInner::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
       }
     }
 
-    mOuter->BuildDisplayListForChild(aBuilder, mScrolledFrame, dirtyRect, aLists);
+    mOuter->BuildDisplayListForChild(aBuilder, mScrolledFrame, dirtyRect, scrolledContent);
   }
 
   // Since making new layers is expensive, only use nsDisplayScrollLayer
@@ -2318,8 +2352,13 @@ nsGfxScrollFrameInner::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
       (scrollRange.width > 0 || scrollRange.height > 0) &&
       ((styles.mHorizontal != NS_STYLE_OVERFLOW_HIDDEN && mHScrollbarBox) ||
        (styles.mVertical   != NS_STYLE_OVERFLOW_HIDDEN && mVScrollbarBox));
-    // TODO Turn this on for inprocess OMTC
+    // TODO Turn this on for inprocess OMTC on all platforms
     bool wantSubAPZC = (XRE_GetProcessType() == GeckoProcessType_Content);
+#ifdef XP_WIN
+    if (XRE_GetWindowsEnvironment() == WindowsEnvironmentType_Metro) {
+      wantSubAPZC = true;
+    }
+#endif
     mShouldBuildLayer =
       wantSubAPZC &&
       hasScrollableOverflow &&
@@ -2332,10 +2371,26 @@ nsGfxScrollFrameInner::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     ScrollLayerWrapper wrapper(mOuter, mScrolledFrame);
 
     if (usingDisplayport) {
+      DisplayListClipState::AutoSaveRestore clipState(aBuilder);
+
+      // For root scrollframes in documents where the CSS viewport has been
+      // modified, the CSS viewport no longer corresponds to what is visible,
+      // so we don't want to clip the content to it. For root scrollframes
+      // in documents where the CSS viewport is NOT modified, the mScrollPort
+      // is the same as the CSS viewport, modulo scrollbars.
+      if (!(mIsRoot && mOuter->PresContext()->PresShell()->GetIsViewportOverridden())) {
+        nsRect clip = mScrollPort + aBuilder->ToReferenceFrame(mOuter);
+        if (mClipAllDescendants) {
+          clipState.ClipContentDescendants(clip);
+        } else {
+          clipState.ClipContainingBlockDescendants(clip);
+        }
+      }
+
       // Once a displayport is set, assume that scrolling needs to be fast
       // so create a layer with all the content inside. The compositor
       // process will be able to scroll the content asynchronously.
-      wrapper.WrapListsInPlace(aBuilder, mOuter, aLists);
+      wrapper.WrapListsInPlace(aBuilder, mOuter, scrolledContent);
     }
 
     // In case we are not using displayport or the nsDisplayScrollLayers are
@@ -2343,8 +2398,9 @@ nsGfxScrollFrameInner::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     // metadata about this scroll box to the compositor process.
     nsDisplayScrollInfoLayer* layerItem = new (aBuilder) nsDisplayScrollInfoLayer(
       aBuilder, mScrolledFrame, mOuter);
-    aLists.BorderBackground()->AppendNewToBottom(layerItem);
+    scrolledContent.BorderBackground()->AppendNewToBottom(layerItem);
   }
+  scrolledContent.MoveTo(aLists);
 
   // Now display overlay scrollbars and the resizer, if we have one.
   AppendScrollPartsTo(aBuilder, aDirtyRect, aLists, createLayersForScrollbars,
@@ -2752,14 +2808,14 @@ nsGfxScrollFrameInner::FireScrollPortEvent()
   // DOM event.
   bool both = vertChanged && horizChanged &&
                 newVerticalOverflow == newHorizontalOverflow;
-  nsScrollPortEvent::orientType orient;
+  InternalScrollPortEvent::orientType orient;
   if (both) {
-    orient = nsScrollPortEvent::both;
+    orient = InternalScrollPortEvent::both;
     mHorizontalOverflow = newHorizontalOverflow;
     mVerticalOverflow = newVerticalOverflow;
   }
   else if (vertChanged) {
-    orient = nsScrollPortEvent::vertical;
+    orient = InternalScrollPortEvent::vertical;
     mVerticalOverflow = newVerticalOverflow;
     if (horizChanged) {
       // We need to dispatch a separate horizontal DOM event. Do that the next
@@ -2769,15 +2825,14 @@ nsGfxScrollFrameInner::FireScrollPortEvent()
     }
   }
   else {
-    orient = nsScrollPortEvent::horizontal;
+    orient = InternalScrollPortEvent::horizontal;
     mHorizontalOverflow = newHorizontalOverflow;
   }
 
-  nsScrollPortEvent event(true,
-                          (orient == nsScrollPortEvent::horizontal ?
-                           mHorizontalOverflow : mVerticalOverflow) ?
-                            NS_SCROLLPORT_OVERFLOW : NS_SCROLLPORT_UNDERFLOW,
-                          nullptr);
+  InternalScrollPortEvent event(true,
+    (orient == InternalScrollPortEvent::horizontal ? mHorizontalOverflow :
+                                                     mVerticalOverflow) ?
+    NS_SCROLLPORT_OVERFLOW : NS_SCROLLPORT_UNDERFLOW, nullptr);
   event.orient = orient;
   return nsEventDispatcher::Dispatch(mOuter->GetContent(),
                                      mOuter->PresContext(), &event);
@@ -3115,7 +3170,7 @@ nsGfxScrollFrameInner::FireScrollEvent()
 {
   mScrollEvent.Forget();
 
-  nsGUIEvent event(true, NS_SCROLL_EVENT, nullptr);
+  WidgetGUIEvent event(true, NS_SCROLL_EVENT, nullptr);
   nsEventStatus status = nsEventStatus_eIgnore;
   nsIContent* content = mOuter->GetContent();
   nsPresContext* prescontext = mOuter->PresContext();
@@ -3179,10 +3234,7 @@ void
 nsXULScrollFrame::RemoveHorizontalScrollbar(nsBoxLayoutState& aState, bool aOnBottom)
 {
   // removing a scrollbar should always fit
-#ifdef DEBUG
-  bool result =
-#endif
-  AddRemoveScrollbar(aState, aOnBottom, true, false);
+  DebugOnly<bool> result = AddRemoveScrollbar(aState, aOnBottom, true, false);
   NS_ASSERTION(result, "Removing horizontal scrollbar failed to fit??");
 }
 
@@ -3190,10 +3242,7 @@ void
 nsXULScrollFrame::RemoveVerticalScrollbar(nsBoxLayoutState& aState, bool aOnRight)
 {
   // removing a scrollbar should always fit
-#ifdef DEBUG
-  bool result =
-#endif
-  AddRemoveScrollbar(aState, aOnRight, false, false);
+  DebugOnly<bool> result = AddRemoveScrollbar(aState, aOnRight, false, false);
   NS_ASSERTION(result, "Removing vertical scrollbar failed to fit??");
 }
 
@@ -3743,9 +3792,15 @@ nsGfxScrollFrameInner::UpdateOverflow()
       GetScrollPosition() != nsPoint()) {
     // If there are scrollbars, or we're not at the beginning of the pane,
     // the scroll position may change. In this case, mark the frame as
-    // needing reflow.
+    // needing reflow. Don't use NS_FRAME_IS_DIRTY as dirty as that means
+    // we have to reflow the frame and all its descendants, and we don't
+    // have to do that here. Only this frame needs to be reflowed.
     mOuter->PresContext()->PresShell()->FrameNeedsReflow(
-      mOuter, nsIPresShell::eResize, NS_FRAME_IS_DIRTY);
+      mOuter, nsIPresShell::eResize, NS_FRAME_HAS_DIRTY_CHILDREN);
+    // Ensure that next time nsHTMLScrollFrame::Reflow runs, we don't skip
+    // updating the scrollbars. (Because the overflow area of the scrolled
+    // frame has probably just been updated, Reflow won't see it change.)
+    mSkippedScrollbarLayout = true;
     return false;  // reflowing will update overflow
   }
   return mOuter->nsContainerFrame::UpdateOverflow();
@@ -4203,7 +4258,7 @@ nsGfxScrollFrameInner::FireScrolledAreaEvent()
 {
   mScrolledAreaEvent.Forget();
 
-  nsScrollAreaEvent event(true, NS_SCROLLEDAREACHANGED, nullptr);
+  InternalScrollAreaEvent event(true, NS_SCROLLEDAREACHANGED, nullptr);
   nsPresContext *prescontext = mOuter->PresContext();
   nsIContent* content = mOuter->GetContent();
 

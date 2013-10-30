@@ -58,21 +58,12 @@ ThrowExceptionObject(JSContext* aCx, nsIException* aException)
     return false;
   }
 
-  nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
-  nsresult rv = nsContentUtils::XPConnect()->WrapNative(aCx, glob, aException,
-                                                        NS_GET_IID(nsIException),
-                                                        getter_AddRefs(holder));
-  if (NS_FAILED(rv) ||! holder) {
+  JS::Rooted<JS::Value> val(aCx);
+  if (!WrapObject(aCx, glob, aException, &NS_GET_IID(nsIException), &val)) {
     return false;
   }
 
-  JS::RootedObject obj(aCx, holder->GetJSObject());
-  if (!obj) {
-    return false;
-  }
-
-  JS::RootedValue exn(aCx, JS::ObjectOrNullValue(obj));
-  JS_SetPendingException(aCx, exn);
+  JS_SetPendingException(aCx, val);
 
   return true;
 }
@@ -123,7 +114,16 @@ Throw(JSContext* aCx, nsresult aRv, const char* aMessage)
     nsresult nr;
     if (NS_SUCCEEDED(existingException->GetResult(&nr)) && 
         aRv == nr) {
-      // Just reuse the existing exception.
+      // Reuse the existing exception.
+
+      // Clear pending exception
+      runtime->SetPendingException(nullptr);
+
+      if (!ThrowExceptionObject(aCx, existingException)) {
+        // If we weren't able to throw an exception we're
+        // most likely out of memory
+        JS_ReportOutOfMemory(aCx);
+      }
       return false;
     }
   }

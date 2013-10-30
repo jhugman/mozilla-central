@@ -13,6 +13,8 @@ using namespace js;
 using namespace js::jit;
 using namespace mozilla;
 
+using JS::GenericNaN;
+
 #if defined(XP_WIN)
 # define XMM_sig(p,i) ((p)->Xmm##i)
 # define EIP_sig(p) ((p)->Eip)
@@ -56,12 +58,12 @@ using namespace mozilla;
 #elif defined(__linux__) || defined(SOLARIS)
 # if defined(__linux__)
 #  define XMM_sig(p,i) ((p)->uc_mcontext.fpregs->_xmm[i])
+#  define EIP_sig(p) ((p)->uc_mcontext.gregs[REG_EIP])
 # else
 #  define XMM_sig(p,i) ((p)->uc_mcontext.fpregs.fp_reg_set.fpchip_state.xmm[i])
+#  define EIP_sig(p) ((p)->uc_mcontext.gregs[REG_PC])
 # endif
-# define EIP_sig(p) ((p)->uc_mcontext.gregs[REG_EIP])
 # define RIP_sig(p) ((p)->uc_mcontext.gregs[REG_RIP])
-# define PC_sig(p) ((p)->uc_mcontext.arm_pc)
 # define RAX_sig(p) ((p)->uc_mcontext.gregs[REG_RAX])
 # define RCX_sig(p) ((p)->uc_mcontext.gregs[REG_RCX])
 # define RDX_sig(p) ((p)->uc_mcontext.gregs[REG_RDX])
@@ -77,7 +79,11 @@ using namespace mozilla;
 # define R12_sig(p) ((p)->uc_mcontext.gregs[REG_R12])
 # define R13_sig(p) ((p)->uc_mcontext.gregs[REG_R13])
 # define R14_sig(p) ((p)->uc_mcontext.gregs[REG_R14])
-# define R15_sig(p) ((p)->uc_mcontext.gregs[REG_R15])
+# if defined(__linux__) && defined(__arm__)
+#  define R15_sig(p) ((p)->uc_mcontext.arm_pc)
+# else
+#  define R15_sig(p) ((p)->uc_mcontext.gregs[REG_R15])
+# endif
 #elif defined(__NetBSD__)
 # define XMM_sig(p,i) (((struct fxsave64 *)(p)->uc_mcontext.__fpregs)->fx_xmm[i])
 # define EIP_sig(p) ((p)->uc_mcontext.__gregs[_REG_EIP])
@@ -121,7 +127,11 @@ using namespace mozilla;
 # define R12_sig(p) ((p)->uc_mcontext.mc_r12)
 # define R13_sig(p) ((p)->uc_mcontext.mc_r13)
 # define R14_sig(p) ((p)->uc_mcontext.mc_r14)
-# define R15_sig(p) ((p)->uc_mcontext.mc_r15)
+# if defined(__FreeBSD__) && defined(__arm__)
+#  define R15_sig(p) ((p)->uc_mcontext.__gregs[_REG_R15])
+# else
+#  define R15_sig(p) ((p)->uc_mcontext.mc_r15)
+# endif
 #elif defined(XP_MACOSX)
 // Mach requires special treatment.
 #else
@@ -137,7 +147,7 @@ InnermostAsmJSActivation()
 {
     PerThreadData *threadData = TlsPerThreadData.get();
     if (!threadData)
-        return NULL;
+        return nullptr;
 
     return threadData->asmJSActivationStackFromOwnerThread();
 }
@@ -147,9 +157,9 @@ RuntimeForCurrentThread()
 {
     PerThreadData *threadData = TlsPerThreadData.get();
     if (!threadData)
-        return NULL;
+        return nullptr;
 
-    return threadData->runtimeFromMainThread();
+    return threadData->runtimeIfOnOwnerThread();
 }
 #endif // !defined(XP_MACOSX)
 
@@ -250,14 +260,14 @@ SetXMMRegToNaN(bool isFloat32, T *xmm_reg)
     if (isFloat32) {
         JS_STATIC_ASSERT(sizeof(T) == 4 * sizeof(float));
         float *floats = reinterpret_cast<float*>(xmm_reg);
-        floats[0] = js_NaN;
+        floats[0] = GenericNaN();
         floats[1] = 0;
         floats[2] = 0;
         floats[3] = 0;
     } else {
         JS_STATIC_ASSERT(sizeof(T) == 2 * sizeof(double));
         double *dbls = reinterpret_cast<double*>(xmm_reg);
-        dbls[0] = js_NaN;
+        dbls[0] = GenericNaN();
         dbls[1] = 0;
     }
 }
@@ -271,7 +281,7 @@ LookupHeapAccess(const AsmJSModule &module, uint8_t *pc)
     size_t targetOffset = pc - module.codeBase();
 
     if (module.numHeapAccesses() == 0)
-        return NULL;
+        return nullptr;
 
     size_t low = 0;
     size_t high = module.numHeapAccesses() - 1;
@@ -290,7 +300,7 @@ LookupHeapAccess(const AsmJSModule &module, uint8_t *pc)
     if (targetOffset == module.heapAccess(high).offset())
         return &module.heapAccess(high);
 
-    return NULL;
+    return nullptr;
 }
 #endif
 
@@ -308,7 +318,8 @@ LookupHeapAccess(const AsmJSModule &module, uint8_t *pc)
 #if defined(JS_CPU_X64)
 # if defined(__DragonFly__)
 #  include <machine/npx.h> // for union savefpu
-# elif defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__FreeBSD_kernel__)
+# elif defined(__FreeBSD__) || defined(__FreeBSD_kernel__) || \
+       defined(__NetBSD__) || defined(__OpenBSD__)
 #  include <machine/fpu.h> // for struct savefpu/fxsave64
 # endif
 #endif
@@ -364,10 +375,11 @@ enum { REG_EIP = 14 };
 
 #if defined(ANDROID) && defined(MOZ_LINKER)
 // Apparently, on some Android systems, the signal handler is always passed
-// NULL as the faulting address. This would cause the asm.js signal handler to
-// think that a safe out-of-bounds access was a NULL-deref. This brokenness is
-// already detected by ElfLoader (enabled by MOZ_LINKER), so reuse that check
-// to disable asm.js compilation on systems where the signal handler is broken.
+// nullptr as the faulting address. This would cause the asm.js signal handler
+// to think that a safe out-of-bounds access was a nullptr-deref. This
+// brokenness is already detected by ElfLoader (enabled by MOZ_LINKER), so
+// reuse that check to disable asm.js compilation on systems where the signal
+// handler is broken.
 extern "C" MFBT_API bool IsSignalHandlingBroken();
 #else
 static bool IsSignalHandlingBroken() { return false; }
@@ -377,20 +389,20 @@ static bool IsSignalHandlingBroken() { return false; }
 # define CONTEXT ucontext_t
 #endif
 
+#if defined(JS_CPU_X64)
+# define PC_sig(p) RIP_sig(p)
+#elif defined(JS_CPU_X86)
+# define PC_sig(p) EIP_sig(p)
+#elif defined(JS_CPU_ARM)
+# define PC_sig(p) R15_sig(p)
+#endif
+
 #if !defined(XP_MACOSX)
 static uint8_t **
 ContextToPC(CONTEXT *context)
 {
-# if defined(JS_CPU_X64)
-    JS_STATIC_ASSERT(sizeof(RIP_sig(context)) == sizeof(void*));
-    return reinterpret_cast<uint8_t**>(&RIP_sig(context));
-# elif defined(JS_CPU_X86)
-    JS_STATIC_ASSERT(sizeof(EIP_sig(context)) == sizeof(void*));
-    return reinterpret_cast<uint8_t**>(&EIP_sig(context));
-# elif defined(JS_CPU_ARM)
     JS_STATIC_ASSERT(sizeof(PC_sig(context)) == sizeof(void*));
     return reinterpret_cast<uint8_t**>(&PC_sig(context));
-# endif
 }
 
 # if defined(JS_CPU_X64)
@@ -787,12 +799,12 @@ AsmJSMachExceptionHandlerThread(void *threadArg)
                  MACH_MSG_TIMEOUT_NONE, MACH_PORT_NULL);
     }
 
-    return NULL;
+    return nullptr;
 }
 
 AsmJSMachExceptionHandler::AsmJSMachExceptionHandler()
   : installed_(false),
-    thread_(NULL),
+    thread_(nullptr),
     port_(MACH_PORT_NULL)
 {}
 
@@ -811,7 +823,7 @@ AsmJSMachExceptionHandler::uninstall()
             MOZ_CRASH();
         installed_ = false;
     }
-    if (thread_ != NULL) {
+    if (thread_ != nullptr) {
         // Break the handler thread out of the mach_msg loop.
         mach_msg_header_t msg;
         msg.msgh_bits = MACH_MSGH_BITS(MACH_MSG_TYPE_COPY_SEND, 0);
@@ -828,8 +840,8 @@ AsmJSMachExceptionHandler::uninstall()
         }
 
         // Wait for the handler thread to complete before deallocating the port.
-        pthread_join(thread_, NULL);
-        thread_ = NULL;
+        pthread_join(thread_, nullptr);
+        thread_ = nullptr;
     }
     if (port_ != MACH_PORT_NULL) {
         DebugOnly<kern_return_t> kret = mach_port_destroy(mach_task_self(), port_);
@@ -854,7 +866,7 @@ AsmJSMachExceptionHandler::install(JSRuntime *rt)
         goto error;
 
     // Create a thread to block on reading port_.
-    if (pthread_create(&thread_, NULL, AsmJSMachExceptionHandlerThread, rt))
+    if (pthread_create(&thread_, nullptr, AsmJSMachExceptionHandlerThread, rt))
         goto error;
 
     // Direct exceptions on this thread to port_ (and thus our handler thread).
@@ -975,7 +987,7 @@ AsmJSFaultHandler(int signum, siginfo_t *info, void *context)
     if (sPrevHandler.sa_flags & SA_SIGINFO)
         sPrevHandler.sa_sigaction(signum, info, context);
     else if (sPrevHandler.sa_handler == SIG_DFL || sPrevHandler.sa_handler == SIG_IGN)
-        sigaction(signum, &sPrevHandler, NULL);
+        sigaction(signum, &sPrevHandler, nullptr);
     else
         sPrevHandler.sa_handler(signum);
 }

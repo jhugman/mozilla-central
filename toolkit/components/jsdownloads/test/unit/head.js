@@ -466,6 +466,31 @@ function promiseStartExternalHelperAppServiceDownload(aSourceUrl) {
 }
 
 /**
+ * Waits for a download to finish, in case it has not finished already.
+ *
+ * @param aDownload
+ *        The Download object to wait upon.
+ *
+ * @return {Promise}
+ * @resolves When the download has finished successfully.
+ * @rejects JavaScript exception if the download failed.
+ */
+function promiseDownloadStopped(aDownload) {
+  if (!aDownload.stopped) {
+    // The download is in progress, wait for the current attempt to finish and
+    // report any errors that may occur.
+    return aDownload.start();
+  }
+
+  if (aDownload.succeeded) {
+    return Promise.resolve();
+  }
+
+  // The download failed or was canceled.
+  return Promise.reject(aDownload.error || new Error("Download canceled."));
+}
+
+/**
  * Waits for a download to reach half of its progress, in case it has not
  * reached the expected progress already.
  *
@@ -773,6 +798,13 @@ add_task(function test_common_initialize()
                          TEST_DATA_SHORT_GZIP_ENCODED_SECOND.length);
     });
 
+  // This URL will emulate being blocked by Windows Parental controls
+  gHttpServer.registerPathHandler("/parentalblocked.zip",
+    function (aRequest, aResponse) {
+      aResponse.setStatusLine(aRequest.httpVersion, 450,
+                              "Blocked by Windows Parental Controls");
+    });
+
   // Disable integration with the host application requiring profile access.
   DownloadIntegration.dontLoadList = true;
   DownloadIntegration.dontLoadObservers = true;
@@ -808,7 +840,9 @@ add_task(function test_common_initialize()
                                             aSuggestedFileExtension,
                                             aForcePrompt)
         {
+          // The dialog should create the empty placeholder file.
           let file = getTempFile(TEST_TARGET_FILE_NAME);
+          file.create(Ci.nsIFile.NORMAL_FILE_TYPE, FileUtils.PERMS_FILE);
           aLauncher.saveDestinationAvailable(file);
         },
       }.QueryInterface(aIid);

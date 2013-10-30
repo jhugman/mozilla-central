@@ -13,8 +13,8 @@
  * @param           aRoot   Bookmark root to show in the view.
  */
 function BookmarksView(aSet, aLimit, aRoot, aFilterUnpinned) {
-  this._set = aSet;
-  this._set.controller = this;
+  View.call(this, aSet);
+
   this._inBatch = false; // batch up grid updates to avoid redundant arrangeItems calls
 
   this._limit = aLimit;
@@ -25,12 +25,10 @@ function BookmarksView(aSet, aLimit, aRoot, aFilterUnpinned) {
   this._changes = new BookmarkChangeListener(this);
   this._pinHelper = new ItemPinHelper("metro.bookmarks.unpinned");
   this._bookmarkService.addObserver(this._changes, false);
-  Services.obs.addObserver(this, "metro_viewstate_changed", false);
   StartUI.chromeWin.addEventListener('MozAppbarDismissing', this, false);
   StartUI.chromeWin.addEventListener('BookmarksNeedsRefresh', this, false);
   window.addEventListener("TabClose", this, true);
 
-  this._adjustDOMforViewState();
   this.root = aRoot;
 }
 
@@ -62,11 +60,11 @@ BookmarksView.prototype = Util.extend(Object.create(View.prototype), {
 
   destruct: function bv_destruct() {
     this._bookmarkService.removeObserver(this._changes);
-    Services.obs.removeObserver(this, "metro_viewstate_changed");
     if (StartUI.chromeWin) {
       StartUI.chromeWin.removeEventListener('MozAppbarDismissing', this, false);
       StartUI.chromeWin.removeEventListener('BookmarksNeedsRefresh', this, false);
     }
+    View.prototype.destruct.call(this);
   },
 
   handleItemClick: function bv_handleItemClick(aItem) {
@@ -75,11 +73,11 @@ BookmarksView.prototype = Util.extend(Object.create(View.prototype), {
   },
 
   _getItemForBookmarkId: function bv__getItemForBookmark(aBookmarkId) {
-    return this._set.querySelector("richgriditem[bookmarkId='" + aBookmarkId + "']");
+    return this._set.querySelector("richgriditem[anonid='" + aBookmarkId + "']");
   },
 
   _getBookmarkIdForItem: function bv__getBookmarkForItem(aItem) {
-    return +aItem.getAttribute("bookmarkId");
+    return +aItem.getAttribute("anonid");
   },
 
   _updateItemWithAttrs: function dv__updateItemWithAttrs(anItem, aAttrs) {
@@ -156,7 +154,8 @@ BookmarksView.prototype = Util.extend(Object.create(View.prototype), {
   },
 
   clearBookmarks: function bv_clearBookmarks() {
-    this._set.clearAll();
+    if ('clearAll' in this._set)
+      this._set.clearAll();
   },
 
   addBookmark: function bv_addBookmark(aBookmarkId, aPos) {
@@ -164,7 +163,7 @@ BookmarksView.prototype = Util.extend(Object.create(View.prototype), {
     let uri = this._bookmarkService.getBookmarkURI(aBookmarkId);
     let title = this._bookmarkService.getItemTitle(aBookmarkId) || uri.spec;
     let item = this._set.insertItemAt(aPos || index, title, uri.spec, this._inBatch);
-    item.setAttribute("bookmarkId", aBookmarkId);
+    item.setAttribute("anonid", aBookmarkId);
     this._setContextActions(item);
     this._updateFavicon(item, uri);
   },
@@ -200,6 +199,7 @@ BookmarksView.prototype = Util.extend(Object.create(View.prototype), {
     let uri = this._bookmarkService.getBookmarkURI(aBookmarkId);
     let title = this._bookmarkService.getItemTitle(aBookmarkId) || uri.spec;
 
+    item.setAttribute("anonid", aBookmarkId);
     item.setAttribute("value", uri.spec);
     item.setAttribute("label", title);
 
@@ -275,15 +275,6 @@ BookmarksView.prototype = Util.extend(Object.create(View.prototype), {
     this._sendNeedsRefresh();
   },
 
-  // nsIObservers
-  observe: function (aSubject, aTopic, aState) {
-    switch(aTopic) {
-      case "metro_viewstate_changed":
-        this.onViewStateChange(aState);
-        break;
-    }
-  },
-
   handleEvent: function bv_handleEvent(aEvent) {
     switch (aEvent.type){
       case "MozAppbarDismissing":
@@ -316,6 +307,7 @@ let BookmarksStartView = {
   init: function init() {
     this._view = new BookmarksView(this._grid, StartUI.maxResultsPerSection, Bookmarks.metroRoot, true);
     this._view.getBookmarks();
+    this._grid.removeAttribute("fade");
   },
 
   uninit: function uninit() {

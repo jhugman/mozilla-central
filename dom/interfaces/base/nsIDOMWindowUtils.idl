@@ -43,7 +43,7 @@ interface nsIDOMEventTarget;
 interface nsIRunnable;
 interface nsICompositionStringSynthesizer;
 
-[scriptable, uuid(a1383ae5-e828-4c9a-929d-5293e61beb64)]
+[scriptable, uuid(928356ff-26b2-434e-a7ce-c1a660162d81)]
 interface nsIDOMWindowUtils : nsISupports {
 
   /**
@@ -749,7 +749,7 @@ interface nsIDOMWindowUtils : nsISupports {
                                        in boolean aTrusted);
 
   /**
-   * Sets nsEvent::mFlags::mOnlyChromeDispatch to true to ensure that
+   * Sets WidgetEvent::mFlags::mOnlyChromeDispatch to true to ensure that
    * the event is propagated only to chrome.
    * Event's .target property will be aTarget.
    * Returns the same value as what EventTarget.dispatchEvent does.
@@ -815,7 +815,7 @@ interface nsIDOMWindowUtils : nsISupports {
                                                    in long aX,
                                                    in long aY);
 
-  // NOTE: following values are same as NS_QUERY_* in nsGUIEvent.h
+  // NOTE: following values are same as NS_QUERY_* in BasicEvents.h
 
   /**
    * QUERY_SELECTED_TEXT queries the first selection range's information.
@@ -1087,6 +1087,12 @@ interface nsIDOMWindowUtils : nsISupports {
    */
   nsIDOMWindow getOuterWindowWithId(in unsigned long long aOuterWindowID);
 
+  /**
+   * Return this window's frame element.
+   * Ignores all chrome/content or mozbrowser boundaries.
+   */
+  readonly attribute nsIDOMElement containerElement;
+
   [noscript] void RenderDocument(in nsConstRect aRect,
                                  in uint32_t aFlags,
                                  in nscolor aBackgroundColor,
@@ -1297,10 +1303,12 @@ interface nsIDOMWindowUtils : nsISupports {
                                               in float aBottom, in float aLeft);
 
   /**
-   * Prevent this window (and any child windows) from displaying any further
-   * dialogs (e.g. window.alert()).
+   * These are used to control whether dialogs (alert, prompt, confirm) are
+   * allowed.
    */
-  void preventFurtherDialogs();
+  void disableDialogs();
+  void enableDialogs();
+  bool areDialogsEnabled();
 
   const unsigned long AGENT_SHEET = 0;
   const unsigned long USER_SHEET = 1;

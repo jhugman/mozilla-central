@@ -14,7 +14,7 @@
     "layout/base/tests/test_bug465448.xul":"",
 
     "layout/forms/test/test_bug478219.xhtml":"window.closed not working, bug 907795",
-
+    "content/media/test":"bug 918299",
     "content/media/test/test_bug448534.html": "Timed out, bug 894922? Bug 902677 is for the timing out of a lot of media tests",
     "content/media/mediasource/test/test_MediaSource.html": " ReferenceError: MediaSource is not defined",
     "content/media/test/test_autoplay_contentEditable.html": "bug 899074 - timeouts",
@@ -57,6 +57,7 @@
     "content/media/test/test_source.html": "",
     "content/media/test/test_source_media.html": "",
     "content/media/test/test_streams_element_capture.html": "bug 900172 - timeouts",
+    "content/media/test/test_streams_element_capture_reset.html": "bug 901102",
     "content/media/test/test_streams_gc.html": "Value being assigned to HTMLMediaElement.currentTime is not a finite floating-point value",
     "content/media/test/test_unseekable.html":"",
     "content/media/webaudio":"bug 916135",
@@ -66,14 +67,14 @@
     "content/media/webspeech/synth/test/test_speech_simple.html": "Test timed out",
 
     "dom/imptests/editing/selecttest/test_addRange.html": "oom?, bug 775227",
-    "dom/imptests/webapps/DOMCore/tests/approved/test_Range-insertNode.html":"oom?, bug 775227",
-    "dom/imptests/webapps/DOMCore/tests/approved/test_Range-cloneContents.html":"",
-    "dom/imptests/webapps/DOMCore/tests/approved/test_Range-compareBoundaryPoints.html":"times out, bug 862196",
-    "dom/imptests/webapps/DOMCore/tests/approved/test_Range-deleteContents.html":"",
-    "dom/imptests/webapps/DOMCore/tests/approved/test_Range-extractContents.html":"",
-    "dom/imptests/webapps/DOMCore/tests/approved/test_Range-set.html":"",
-    "dom/imptests/webapps/DOMCore/tests/approved/test_Range-surroundContents.html":"",
-    "dom/imptests/webapps/DOMCore/tests/approved/test_Range-mutations.html":"Test timed out.",
+    "dom/imptests/html/dom/ranges/test_Range-insertNode.html":"oom?, bug 775227",
+    "dom/imptests/html/dom/ranges/test_Range-cloneContents.html":"",
+    "dom/imptests/html/dom/ranges/test_Range-compareBoundaryPoints.html":"times out, bug 862196",
+    "dom/imptests/html/dom/ranges/test_Range-deleteContents.html":"",
+    "dom/imptests/html/dom/ranges/test_Range-extractContents.html":"",
+    "dom/imptests/html/dom/ranges/test_Range-set.html":"",
+    "dom/imptests/html/dom/ranges/test_Range-surroundContents.html":"",
+    "dom/imptests/html/dom/ranges/test_Range-mutations.html":"Test timed out.",
     "dom/encoding/test/test_stringencoding.html":"Test timed out on b2g board",
 
     "content/events/test/test_bug615597.html":"bug 900969, 5 tests",
@@ -91,8 +92,7 @@
     "content/base/test/test_bug431701.html":"xmlhttprequest causes crash, bug 902271",
     "content/base/test/test_bug422537.html":"xmlhttprequest causes crash, bug 902271",
 
-    "content/base/test/test_bug338583.html":"43 total - bug 901343, specialpowers.wrap issue createsystemxhr",
-    "content/base/test/test_bug804395.html":"bug 901343, specialpowers.wrap issue createsystemxhr",
+    "content/base/test/test_bug338583.html":"https not working, bug 907770",
 
     "content/base/test/test_bug475156.html":"36 total - bug 902611",
     "content/base/test/test_bug422403-1.html":"bug 901343, specialpowers.wrap issue [nsIChannel.open]",
@@ -186,9 +186,12 @@
     "content/html/content/test/test_iframe_sandbox_navigation2.html":"Crash, bug 904659",
     "content/html/content/test/test_iframe_sandbox_navigation.html":"Crash, bug 904659",
 
+    "content/html/content/test/test_iframe_sandbox_popups.html":"multiple concurrent window.open()s fail on B2G",
+    "content/html/content/test/test_iframe_sandbox_popups_inheritance.html":"multiple concurrent window.open()s fail on B2G",
+    "content/html/content/test/test_iframe_sandbox_modal.html":"modal tests fail on B2G",
+
     "content/html/content/test/test_iframe_sandbox_plugins.html":"plugins not supported",
     "content/html/content/test/test_object_plugin_nav.html":"plugins not supported",
-    "content/html/document/test/test_bug199692.html":"needs popup to be sized to 600*600",
     "content/html/document/test/test_bug741266.html":"needs control of popup window size",
     "docshell/test/navigation/test_popup-navigates-children.html":"Needs multiple window.open support, also uses docshelltreenode",
     "docshell/test/test_bug590573.html":"queryinterfaces into webnavigation, might suffer from something similar as bug 823022",
@@ -198,15 +201,16 @@
     "dom/indexedDB/test/test_lowDiskSpace.html":"this needs probably modification for notifyObserversInParentProcess to be similar as pushPermissions",
 
     "content/base/test/test_object.html":"needs plugin support",
+    "content/base/test/test_bug827160.html": "needs plugin support",
 
     "content/base/test/csp/test_CSP_evalscript.html":"observer not working",
     "content/base/test/csp/test_CSP_evalscript_getCRMFRequest.html":"observer not working",
     "content/base/test/csp/test_CSP_frameancestors.html":"observer not working",
     "content/base/test/csp/test_CSP.html":"observer not working",
     "content/base/test/csp/test_bug836922_npolicies.html":"observer not working",
+    "content/base/test/csp/test_CSP_bug916446.html":"observer not working",
 
     "content/base/test/test_CrossSiteXHR_origin.html":"https not working, bug 907770",
-    "content/base/test/test_bug326337.html":"popup windows don't have specialpowers installed, could be solved with sendmessage/receivemessage",
     "content/base/test/test_plugin_freezing.html":"",
     "content/base/test/test_bug466409.html":"",
     "content/base/test/test_bug482935.html":"",
@@ -249,7 +253,6 @@
     "content/base/test/test_bug422403-2.xhtml":"",
     "content/base/test/test_bug424359-1.html":"",
     "content/base/test/test_bug424359-2.html":"",
-    "content/base/test/test_bug426308.html":"",
     "content/base/test/test_mixed_content_blocker_bug803225.html":"",
     "content/html/document/test/test_non-ascii-cookie.html":"",
 
@@ -290,7 +293,6 @@
     "dom/file/test/test_workers.html":"",
     "dom/file/test/test_write_read_data.html":"",
 
-    "dom/imptests/editing/conformancetest/test_event.html":"1 failure, bug 908879",
     "dom/imptests/editing/conformancetest/test_runtest.html":"takes too long",
 
     "dom/media/tests/mochitest/test_dataChannel_basicAudio.html":"bug 908473",
@@ -322,7 +324,7 @@
     "dom/media/tests/mochitest/test_peerConnection_throwInCallbacks.html":"",
 
     "dom/network/tests/test_networkstats_basics.html":"Will be fixed in bug 858005",
-    "dom/permission/tests/test_permission_basics.html":"Bug 907770",
+    "dom/permission/tests/test_permission_basics.html":"https not working, bug 907770",
 
     "dom/tests/mochitest/bugs/test_bug335976.xhtml":"",
     "dom/tests/mochitest/bugs/test_bug369306.html":"test timed out, can't focus back from popup window to opener?",

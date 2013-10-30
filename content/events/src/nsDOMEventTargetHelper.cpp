@@ -154,7 +154,7 @@ nsDOMEventTargetHelper::RemoveEventListener(const nsAString& aType,
                                             nsIDOMEventListener* aListener,
                                             bool aUseCapture)
 {
-  nsEventListenerManager* elm = GetListenerManager(false);
+  nsEventListenerManager* elm = GetExistingListenerManager();
   if (elm) {
     elm->RemoveEventListener(aType, aListener, aUseCapture);
   }
@@ -181,7 +181,7 @@ nsDOMEventTargetHelper::AddEventListener(const nsAString& aType,
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
-  nsEventListenerManager* elm = GetListenerManager(true);
+  nsEventListenerManager* elm = GetOrCreateListenerManager();
   NS_ENSURE_STATE(elm);
   elm->AddEventListener(aType, aListener, aUseCapture, aWantsUntrusted);
   return NS_OK;
@@ -189,7 +189,7 @@ nsDOMEventTargetHelper::AddEventListener(const nsAString& aType,
 
 void
 nsDOMEventTargetHelper::AddEventListener(const nsAString& aType,
-                                         nsIDOMEventListener* aListener,
+                                         EventListener* aListener,
                                          bool aUseCapture,
                                          const Nullable<bool>& aWantsUntrusted,
                                          ErrorResult& aRv)
@@ -205,7 +205,7 @@ nsDOMEventTargetHelper::AddEventListener(const nsAString& aType,
     wantsUntrusted = aWantsUntrusted.Value();
   }
 
-  nsEventListenerManager* elm = GetListenerManager(true);
+  nsEventListenerManager* elm = GetOrCreateListenerManager();
   if (!elm) {
     aRv.Throw(NS_ERROR_UNEXPECTED);
     return;
@@ -308,7 +308,7 @@ nsDOMEventTargetHelper::PostHandleEvent(nsEventChainPostVisitor& aVisitor)
 }
 
 nsresult
-nsDOMEventTargetHelper::DispatchDOMEvent(nsEvent* aEvent,
+nsDOMEventTargetHelper::DispatchDOMEvent(WidgetEvent* aEvent,
                                          nsIDOMEvent* aDOMEvent,
                                          nsPresContext* aPresContext,
                                          nsEventStatus* aEventStatus)
@@ -319,12 +319,18 @@ nsDOMEventTargetHelper::DispatchDOMEvent(nsEvent* aEvent,
 }
 
 nsEventListenerManager*
-nsDOMEventTargetHelper::GetListenerManager(bool aCreateIfNotFound)
+nsDOMEventTargetHelper::GetOrCreateListenerManager()
 {
-  if (!mListenerManager && aCreateIfNotFound) {
+  if (!mListenerManager) {
     mListenerManager = new nsEventListenerManager(this);
   }
 
+  return mListenerManager;
+}
+
+nsEventListenerManager*
+nsDOMEventTargetHelper::GetExistingListenerManager() const
+{
   return mListenerManager;
 }
 

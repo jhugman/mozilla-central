@@ -74,10 +74,11 @@ DocAccessible::
   DocAccessible(nsIDocument* aDocument, nsIContent* aRootContent,
                   nsIPresShell* aPresShell) :
   HyperTextAccessibleWrap(aRootContent, this),
-  mDocumentNode(aDocument), mScrollPositionChangedTicks(0),
   // XXX aaronl should we use an algorithm for the initial cache size?
   mAccessibleCache(kDefaultCacheSize),
   mNodeToAccessibleMap(kDefaultCacheSize),
+  mDocumentNode(aDocument),
+  mScrollPositionChangedTicks(0),
   mLoadState(eTreeConstructionPending), mDocFlags(0), mLoadEventType(0),
   mVirtualCursor(nullptr),
   mPresShell(aPresShell)
@@ -1782,6 +1783,14 @@ DocAccessible::UpdateTree(Accessible* aContainer, nsIContent* aChildNode,
       nsINode* containerNode = aContainer->GetNode();
       for (uint32_t idx = 0; idx < aContainer->ContentChildCount();) {
         Accessible* child = aContainer->ContentChildAt(idx);
+
+        // If accessible doesn't have its own content then we assume parent
+        // will handle its update.
+        if (!child->HasOwnContent()) {
+          idx++;
+          continue;
+        }
+
         nsINode* childNode = child->GetContent();
         while (childNode != aChildNode && childNode != containerNode &&
                (childNode = childNode->GetParentNode()));

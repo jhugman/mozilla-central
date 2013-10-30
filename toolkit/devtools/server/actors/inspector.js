@@ -76,6 +76,10 @@ HELPER_SHEET += ":-moz-devtools-highlighted { outline: 2px dashed #F06!important
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/devtools/LayoutHelpers.jsm");
 
+loader.lazyGetter(this, "DOMParser", function() {
+ return Cc["@mozilla.org/xmlextras/domparser;1"].createInstance(Ci.nsIDOMParser);
+});
+
 exports.register = function(handle) {
   handle.addTabActor(InspectorActor, "inspectorActor");
 };
@@ -143,6 +147,11 @@ var NodeActor = protocol.ActorClass({
    */
   get conn() this.walker.conn,
 
+  isDocumentElement: function() {
+    return this.rawNode.ownerDocument &&
+        this.rawNode.ownerDocument.documentElement === this.rawNode;
+  },
+
   // Returns the JSON representation of this object over the wire.
   form: function(detail) {
     if (detail === "actorid") {
@@ -177,8 +186,7 @@ var NodeActor = protocol.ActorClass({
       pseudoClassLocks: this.writePseudoClassLocks(),
     };
 
-    if (this.rawNode.ownerDocument &&
-        this.rawNode.ownerDocument.documentElement === this.rawNode) {
+    if (this.isDocumentElement()) {
       form.isDocumentElement = true;
     }
 
@@ -724,25 +732,26 @@ var ProgressListener = Class({
     this.webProgress = null;
   },
 
-  onStateChange: makeInfallible(function stateChange(progress, request, flag, status) {
+  onStateChange: makeInfallible(function stateChange(progress, request, flags, status) {
     if (!this.webProgress) {
       console.warn("got an onStateChange after destruction");
       return;
     }
 
-    let isWindow = flag & Ci.nsIWebProgressListener.STATE_IS_WINDOW;
-    let isDocument = flag & Ci.nsIWebProgressListener.STATE_IS_DOCUMENT;
+    let isWindow = flags & Ci.nsIWebProgressListener.STATE_IS_WINDOW;
+    let isDocument = flags & Ci.nsIWebProgressListener.STATE_IS_DOCUMENT;
     if (!(isWindow || isDocument)) {
       return;
     }
 
-    if (isDocument && (flag & Ci.nsIWebProgressListener.STATE_START)) {
+    if (isDocument && (flags & Ci.nsIWebProgressListener.STATE_START)) {
       events.emit(this, "windowchange-start", progress.DOMWindow);
     }
-    if (isWindow && (flag & Ci.nsIWebProgressListener.STATE_STOP)) {
+    if (isWindow && (flags & Ci.nsIWebProgressListener.STATE_STOP)) {
       events.emit(this, "windowchange-stop", progress.DOMWindow);
     }
   }),
+
   onProgressChange: function() {},
   onSecurityChange: function() {},
   onStatusChange: function() {},
@@ -933,7 +942,6 @@ var WalkerActor = protocol.ActorClass({
     }
 
     this._installHelperSheet(node);
-    this.layoutHelpers.scrollIntoViewIfNeeded(node.rawNode);
     DOMUtils.addPseudoClassLock(node.rawNode, HIGHLIGHTED_PSEUDO_CLASS);
     this._highlightTimeout = setTimeout(this._unhighlight.bind(this), HIGHLIGHTED_TIMEOUT);
 
@@ -1325,11 +1333,13 @@ var WalkerActor = protocol.ActorClass({
    * @param string selector
    */
   querySelector: method(function(baseNode, selector) {
+    if (!baseNode) {
+      return {}
+    };
     let node = baseNode.rawNode.querySelector(selector);
 
     if (!node) {
-      return {
-      }
+      return {}
     };
 
     let node = this._ref(node);
@@ -1546,6 +1556,62 @@ var WalkerActor = protocol.ActorClass({
   }),
 
   /**
+   * Set a node's outerHTML property.
+   */
+  setOuterHTML: method(function(node, value) {
+    let parsedDOM = DOMParser.parseFromString(value, "text/html");
+    let rawNode = node.rawNode;
+    let parentNode = rawNode.parentNode;
+
+    // Special case for head and body.  Setting document.body.outerHTML
+    // creates an extra <head> tag, and document.head.outerHTML creates
+    // an extra <body>.  So instead we will call replaceChild with the
+    // parsed DOM, assuming that they aren't trying to set both tags at once.
+    if (rawNode.tagName === "BODY") {
+      if (parsedDOM.head.innerHTML === "") {
+        parentNode.replaceChild(parsedDOM.body, rawNode);
+      } else {
+        rawNode.outerHTML = value;
+      }
+    } else if (rawNode.tagName === "HEAD") {
+      if (parsedDOM.body.innerHTML === "") {
+        parentNode.replaceChild(parsedDOM.head, rawNode);
+      } else {
+        rawNode.outerHTML = value;
+      }
+    } else if (node.isDocumentElement()) {
+      // Unable to set outerHTML on the document element.  Fall back by
+      // setting attributes manually, then replace the body and head elements.
+      let finalAttributeModifications = [];
+      let attributeModifications = {};
+      for (let attribute of rawNode.attributes) {
+        attributeModifications[attribute.name] = null;
+      }
+      for (let attribute of parsedDOM.documentElement.attributes) {
+        attributeModifications[attribute.name] = attribute.value;
+      }
+      for (let key in attributeModifications) {
+        finalAttributeModifications.push({
+          attributeName: key,
+          newValue: attributeModifications[key]
+        });
+      }
+      node.modifyAttributes(finalAttributeModifications);
+      rawNode.replaceChild(parsedDOM.head, rawNode.querySelector("head"));
+      rawNode.replaceChild(parsedDOM.body, rawNode.querySelector("body"));
+    } else {
+      rawNode.outerHTML = value;
+    }
+  }, {
+    request: {
+      node: Arg(0, "domnode"),
+      value: Arg(1),
+    },
+    response: {
+    }
+  }),
+
+  /**
    * Removes a node from its parent node.
    *
    * @returns The node's nextSibling before it was removed.
@@ -1736,7 +1802,8 @@ var WalkerActor = protocol.ActorClass({
 
   onFrameLoad: function(window) {
     let frame = this.layoutHelpers.getFrameElement(window);
-    if (!frame && !this.rootDoc) {
+    let isTopLevel = this.layoutHelpers.isTopLevelWindow(window);
+    if (!frame && !this.rootDoc && isTopLevel) {
       this.rootDoc = window.document;
       this.rootNode = this.document();
       this.queueMutation({

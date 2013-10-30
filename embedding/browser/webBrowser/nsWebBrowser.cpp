@@ -26,7 +26,6 @@
 #include "nsIWebBrowserStream.h"
 #include "nsIPresShell.h"
 #include "nsIURIContentListener.h"
-#include "nsGUIEvent.h"
 #include "nsISHistoryListener.h"
 #include "nsIURI.h"
 #include "nsIWebBrowserPersist.h"
@@ -36,6 +35,7 @@
 #include "nsFocusManager.h"
 #include "Layers.h"
 #include "gfxContext.h"
+#include "nsILoadContext.h"
 
 // for painting the background window
 #include "mozilla/LookAndFeel.h"

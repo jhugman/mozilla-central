@@ -17,6 +17,7 @@
 #include "nsDirectoryServiceDefs.h"
 #include "nsICertOverrideService.h"
 #include "mozilla/Preferences.h"
+#include "nsThreadUtils.h"
 
 #ifndef MOZ_DISABLE_CRYPTOLEGACY
 #include "nsIDOMNode.h"
@@ -933,6 +934,12 @@ void nsNSSComponent::setValidationOptions()
                            ocspMode_FailureIsVerificationFailure
                            : ocspMode_FailureIsNotAVerificationFailure);
 
+  int OCSPTimeoutSeconds = 3;
+  if (ocspRequired || anyFreshRequired) {
+    OCSPTimeoutSeconds = 10;
+  }
+  CERT_SetOCSPTimeout(OCSPTimeoutSeconds);
+
   mDefaultCertVerifier = new CertVerifier(
       aiaDownloadEnabled ? 
         CertVerifier::missing_cert_download_on : CertVerifier::missing_cert_download_off,
@@ -1035,7 +1042,6 @@ static void configureMD5(bool enabled)
 
 static const bool SUPPRESS_WARNING_PREF_DEFAULT = false;
 static const bool MD5_ENABLED_DEFAULT = false;
-static const bool TLS_SESSION_TICKETS_ENABLED_DEFAULT = true;
 static const bool REQUIRE_SAFE_NEGOTIATION_DEFAULT = false;
 static const bool ALLOW_UNRESTRICTED_RENEGO_DEFAULT = false;
 static const bool FALSE_START_ENABLED_DEFAULT = true;
@@ -1195,11 +1201,7 @@ nsNSSComponent::InitializeNSS(bool showWarningBox)
                                              MD5_ENABLED_DEFAULT);
       configureMD5(md5Enabled);
 
-      // Configure TLS session tickets
-      bool tlsSessionTicketsEnabled =
-        Preferences::GetBool("security.enable_tls_session_tickets",
-                             TLS_SESSION_TICKETS_ENABLED_DEFAULT);
-      SSL_OptionSetDefault(SSL_ENABLE_SESSION_TICKETS, tlsSessionTicketsEnabled);
+      SSL_OptionSetDefault(SSL_ENABLE_SESSION_TICKETS, true);
 
       bool requireSafeNegotiation =
         Preferences::GetBool("security.ssl.require_safe_negotiation",
@@ -1214,11 +1216,10 @@ nsNSSComponent::InitializeNSS(bool showWarningBox)
                              SSL_RENEGOTIATE_UNRESTRICTED :
                              SSL_RENEGOTIATE_REQUIRES_XTN);
 
-#ifdef SSL_ENABLE_FALSE_START // Requires NSS 3.12.8
-      bool falseStartEnabled = Preferences::GetBool("security.ssl.enable_false_start",
-                                                    FALSE_START_ENABLED_DEFAULT);
-      SSL_OptionSetDefault(SSL_ENABLE_FALSE_START, falseStartEnabled);
-#endif
+//    Bug 920248: temporarily disable false start
+//    bool falseStartEnabled = Preferences::GetBool("security.ssl.enable_false_start",
+//                                                  FALSE_START_ENABLED_DEFAULT);
+      SSL_OptionSetDefault(SSL_ENABLE_FALSE_START, false);
 
       // Disable any ciphers that NSS might have enabled by default
       for (uint16_t i = 0; i < SSL_NumImplementedCiphers; ++i)
@@ -1632,11 +1633,6 @@ nsNSSComponent::Observe(nsISupports *aSubject, const char *aTopic,
                                              MD5_ENABLED_DEFAULT);
       configureMD5(md5Enabled);
       clearSessionCache = true;
-    } else if (prefName.Equals("security.enable_tls_session_tickets")) {
-      bool tlsSessionTicketsEnabled =
-        Preferences::GetBool("security.enable_tls_session_tickets",
-                             TLS_SESSION_TICKETS_ENABLED_DEFAULT);
-      SSL_OptionSetDefault(SSL_ENABLE_SESSION_TICKETS, tlsSessionTicketsEnabled);
     } else if (prefName.Equals("security.ssl.require_safe_negotiation")) {
       bool requireSafeNegotiation =
         Preferences::GetBool("security.ssl.require_safe_negotiation",
@@ -1650,12 +1646,11 @@ nsNSSComponent::Observe(nsISupports *aSubject, const char *aTopic,
                            allowUnrestrictedRenego ?
                              SSL_RENEGOTIATE_UNRESTRICTED :
                              SSL_RENEGOTIATE_REQUIRES_XTN);
-#ifdef SSL_ENABLE_FALSE_START // Requires NSS 3.12.8
     } else if (prefName.Equals("security.ssl.enable_false_start")) {
-      bool falseStartEnabled = Preferences::GetBool("security.ssl.enable_false_start",
-                                                    FALSE_START_ENABLED_DEFAULT);
-      SSL_OptionSetDefault(SSL_ENABLE_FALSE_START, falseStartEnabled);
-#endif
+//    Bug 920248: temporarily disable false start
+//    bool falseStartEnabled = Preferences::GetBool("security.ssl.enable_false_start",
+//                                                  FALSE_START_ENABLED_DEFAULT);
+      SSL_OptionSetDefault(SSL_ENABLE_FALSE_START, false);
     } else if (prefName.Equals("security.OCSP.enabled")
                || prefName.Equals("security.CRL_download.enabled")
                || prefName.Equals("security.fresh_revocation_info.require")

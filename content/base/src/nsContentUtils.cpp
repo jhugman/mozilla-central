@@ -38,8 +38,11 @@
 #include "mozilla/dom/HTMLTemplateElement.h"
 #include "mozilla/dom/TextDecoder.h"
 #include "mozilla/Likely.h"
+#include "mozilla/MouseEvents.h"
+#include "mozilla/MutationEvent.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Selection.h"
+#include "mozilla/TextEvents.h"
 #include "mozilla/Util.h"
 #include "nsAString.h"
 #include "nsAttrName.h"
@@ -90,6 +93,7 @@
 #include "nsIContentViewer.h"
 #include "nsIDocShell.h"
 #include "nsIDocument.h"
+#include "nsIDocumentEncoder.h"
 #include "nsIDOMDocument.h"
 #include "nsIDOMDocumentType.h"
 #include "nsIDOMEvent.h"
@@ -144,7 +148,6 @@
 #include "nsIXPConnect.h"
 #include "nsJSUtils.h"
 #include "nsLWBrkCIID.h"
-#include "nsMutationEvent.h"
 #include "nsNetCID.h"
 #include "nsNetUtil.h"
 #include "nsNodeInfoManager.h"
@@ -664,7 +667,19 @@ nsContentUtils::Atob(const nsAString& aAsciiBase64String,
     return NS_ERROR_DOM_INVALID_CHARACTER_ERR;
   }
 
-  nsresult rv = Base64Decode(aAsciiBase64String, aBinaryData);
+  const PRUnichar* start = aAsciiBase64String.BeginReading();
+  const PRUnichar* end = aAsciiBase64String.EndReading();
+  nsString trimmedString;
+  if (!trimmedString.SetCapacity(aAsciiBase64String.Length(), fallible_t())) {
+    return NS_ERROR_DOM_INVALID_CHARACTER_ERR;
+  }
+  while (start < end) {
+    if (!nsContentUtils::IsHTMLWhitespace(*start)) {
+      trimmedString.Append(*start);
+    }
+    start++;
+  }
+  nsresult rv = Base64Decode(trimmedString, aBinaryData);
   if (NS_FAILED(rv) && rv == NS_ERROR_INVALID_ARG) {
     return NS_ERROR_DOM_INVALID_CHARACTER_ERR;
   }
@@ -921,6 +936,7 @@ nsContentUtils::ParseSandboxAttributeToFlags(const nsAString& aSandboxAttrValue)
   // If there's a sandbox attribute at all (and there is if this is being
   // called), start off by setting all the restriction flags.
   uint32_t out = SANDBOXED_NAVIGATION |
+                 SANDBOXED_AUXILIARY_NAVIGATION |
                  SANDBOXED_TOPLEVEL_NAVIGATION |
                  SANDBOXED_PLUGINS |
                  SANDBOXED_ORIGIN |
@@ -951,6 +967,8 @@ nsContentUtils::ParseSandboxAttributeToFlags(const nsAString& aSandboxAttrValue)
         out &= ~SANDBOXED_TOPLEVEL_NAVIGATION;
       } else if (token.LowerCaseEqualsLiteral("allow-pointer-lock")) {
         out &= ~SANDBOXED_POINTER_LOCK;
+      } else if (token.LowerCaseEqualsLiteral("allow-popups")) {
+        out &= ~SANDBOXED_AUXILIARY_NAVIGATION;
       }
     }
   }
@@ -3012,6 +3030,24 @@ nsresult nsContentUtils::FormatLocalizedString(PropertiesFile aFile,
                                       getter_Copies(aResult));
 }
 
+/* static */ void
+nsContentUtils::LogSimpleConsoleError(const nsAString& aErrorText,
+                                      const char * classification)
+{
+  nsCOMPtr<nsIScriptError> scriptError =
+    do_CreateInstance(NS_SCRIPTERROR_CONTRACTID);
+  if (scriptError) {
+    nsCOMPtr<nsIConsoleService> console =
+      do_GetService(NS_CONSOLESERVICE_CONTRACTID);
+    if (console && NS_SUCCEEDED(scriptError->Init(aErrorText, EmptyString(),
+                                                  EmptyString(), 0, 0,
+                                                  nsIScriptError::errorFlag,
+                                                  classification))) {
+      console->LogMessage(scriptError);
+    }
+  }
+}
+
 /* static */ nsresult
 nsContentUtils::ReportToConsole(uint32_t aErrorFlags,
                                 const nsACString& aCategory,
@@ -3609,7 +3645,7 @@ nsContentUtils::HasMutationListeners(nsINode* aNode,
   if (aNode->IsInDoc()) {
     nsCOMPtr<EventTarget> piTarget(do_QueryInterface(window));
     if (piTarget) {
-      nsEventListenerManager* manager = piTarget->GetListenerManager(false);
+      nsEventListenerManager* manager = piTarget->GetExistingListenerManager();
       if (manager && manager->HasMutationListeners()) {
         return true;
       }
@@ -3620,7 +3656,7 @@ nsContentUtils::HasMutationListeners(nsINode* aNode,
   // might not be in our chain.  If we don't have a window, we might have a
   // mutation listener.  Check quickly to see.
   while (aNode) {
-    nsEventListenerManager* manager = aNode->GetListenerManager(false);
+    nsEventListenerManager* manager = aNode->GetExistingListenerManager();
     if (manager && manager->HasMutationListeners()) {
       return true;
     }
@@ -3688,7 +3724,7 @@ nsContentUtils::MaybeFireNodeRemoved(nsINode* aChild, nsINode* aParent,
 
   if (HasMutationListeners(aChild,
         NS_EVENT_BITS_MUTATION_NODEREMOVED, aParent)) {
-    nsMutationEvent mutation(true, NS_MUTATION_NODEREMOVED);
+    InternalMutationEvent mutation(true, NS_MUTATION_NODEREMOVED);
     mutation.mRelatedNode = do_QueryInterface(aParent);
 
     mozAutoSubtreeModified subtree(aOwnerDoc, aParent);
@@ -3742,28 +3778,12 @@ nsContentUtils::TraverseListenerManager(nsINode *aNode,
 }
 
 nsEventListenerManager*
-nsContentUtils::GetListenerManager(nsINode *aNode,
-                                   bool aCreateIfNotFound)
+nsContentUtils::GetListenerManagerForNode(nsINode *aNode)
 {
-  if (!aCreateIfNotFound && !aNode->HasFlag(NODE_HAS_LISTENERMANAGER)) {
-    return nullptr;
-  }
-  
   if (!sEventListenerManagersHash.ops) {
     // We're already shut down, don't bother creating an event listener
     // manager.
 
-    return nullptr;
-  }
-
-  if (!aCreateIfNotFound) {
-    EventListenerManagerMapEntry *entry =
-      static_cast<EventListenerManagerMapEntry *>
-                 (PL_DHashTableOperate(&sEventListenerManagersHash, aNode,
-                                          PL_DHASH_LOOKUP));
-    if (PL_DHASH_ENTRY_IS_BUSY(entry)) {
-      return entry->mListenerManager;
-    }
     return nullptr;
   }
 
@@ -3783,6 +3803,31 @@ nsContentUtils::GetListenerManager(nsINode *aNode,
   }
 
   return entry->mListenerManager;
+}
+
+nsEventListenerManager*
+nsContentUtils::GetExistingListenerManagerForNode(const nsINode *aNode)
+{
+  if (!aNode->HasFlag(NODE_HAS_LISTENERMANAGER)) {
+    return nullptr;
+  }
+  
+  if (!sEventListenerManagersHash.ops) {
+    // We're already shut down, don't bother creating an event listener
+    // manager.
+
+    return nullptr;
+  }
+
+  EventListenerManagerMapEntry *entry =
+    static_cast<EventListenerManagerMapEntry *>
+               (PL_DHashTableOperate(&sEventListenerManagersHash, aNode,
+                                        PL_DHASH_LOOKUP));
+  if (PL_DHASH_ENTRY_IS_BUSY(entry)) {
+    return entry->mListenerManager;
+  }
+
+  return nullptr;
 }
 
 /* static */
@@ -4533,13 +4578,6 @@ nsContentUtils::GetLocalizedEllipsis()
   return nsDependentString(sBuf);
 }
 
-//static
-nsEvent*
-nsContentUtils::GetNativeEvent(nsIDOMEvent* aDOMEvent)
-{
-  return aDOMEvent ? aDOMEvent->GetInternalNSEvent() : nullptr;
-}
-
 static bool
 HasASCIIDigit(const nsTArray<nsShortcutCandidate>& aCandidates)
 {
@@ -4579,8 +4617,8 @@ nsContentUtils::GetAccelKeyCandidates(nsIDOMKeyEvent* aDOMKeyEvent,
   if (!eventType.EqualsLiteral("keypress"))
     return;
 
-  nsKeyEvent* nativeKeyEvent =
-    static_cast<nsKeyEvent*>(GetNativeEvent(aDOMKeyEvent));
+  WidgetKeyboardEvent* nativeKeyEvent =
+    aDOMKeyEvent->GetInternalNSEvent()->AsKeyboardEvent();
   if (nativeKeyEvent) {
     NS_ASSERTION(nativeKeyEvent->eventStructType == NS_KEY_EVENT,
                  "wrong type of native event");
@@ -4671,7 +4709,7 @@ nsContentUtils::GetAccelKeyCandidates(nsIDOMKeyEvent* aDOMKeyEvent,
 
 /* static */
 void
-nsContentUtils::GetAccessKeyCandidates(nsKeyEvent* aNativeKeyEvent,
+nsContentUtils::GetAccessKeyCandidates(WidgetKeyboardEvent* aNativeKeyEvent,
                                        nsTArray<uint32_t>& aCandidates)
 {
   NS_PRECONDITION(aCandidates.IsEmpty(), "aCandidates must be empty");
@@ -4959,7 +4997,7 @@ nsContentUtils::GetDragSession()
 
 /* static */
 nsresult
-nsContentUtils::SetDataTransferInEvent(nsDragEvent* aDragEvent)
+nsContentUtils::SetDataTransferInEvent(WidgetDragEvent* aDragEvent)
 {
   if (aDragEvent->dataTransfer || !aDragEvent->mFlags.mIsTrusted)
     return NS_OK;
@@ -5061,7 +5099,8 @@ nsContentUtils::FilterDropEffect(uint32_t aAction, uint32_t aEffectAllowed)
 
 /* static */
 bool
-nsContentUtils::CheckForSubFrameDrop(nsIDragSession* aDragSession, nsDragEvent* aDropEvent)
+nsContentUtils::CheckForSubFrameDrop(nsIDragSession* aDragSession,
+                                     WidgetDragEvent* aDropEvent)
 {
   nsCOMPtr<nsIContent> target = do_QueryInterface(aDropEvent->originalTarget);
   if (!target) {
@@ -5634,14 +5673,14 @@ nsContentUtils::DispatchXULCommand(nsIContent* aTarget,
 nsresult
 nsContentUtils::WrapNative(JSContext *cx, JS::Handle<JSObject*> scope,
                            nsISupports *native, nsWrapperCache *cache,
-                           const nsIID* aIID, JS::Value *vp,
+                           const nsIID* aIID, JS::MutableHandleValue vp,
                            nsIXPConnectJSObjectHolder **aHolder,
                            bool aAllowWrapping)
 {
   if (!native) {
     NS_ASSERTION(!aHolder || !*aHolder, "*aHolder should be null!");
 
-    *vp = JSVAL_NULL;
+    vp.setNull();
 
     return NS_OK;
   }
@@ -5660,7 +5699,7 @@ nsContentUtils::WrapNative(JSContext *cx, JS::Handle<JSObject*> scope,
   nsresult rv = NS_OK;
   AutoPushJSContext context(cx);
   rv = sXPConnect->WrapNativeToJSVal(context, scope, native, cache, aIID,
-                                     aAllowWrapping, vp, aHolder);
+                                     aAllowWrapping, vp.address(), aHolder);
   return rv;
 }
 
@@ -5703,8 +5742,7 @@ nsContentUtils::CreateBlobBuffer(JSContext* aCx,
     return NS_ERROR_OUT_OF_MEMORY;
   }
   JS::Rooted<JSObject*> scope(aCx, JS::CurrentGlobalOrNull(aCx));
-  return nsContentUtils::WrapNative(aCx, scope, blob, aBlob.address(), nullptr,
-                                    true);
+  return nsContentUtils::WrapNative(aCx, scope, blob, aBlob, nullptr, true);
 }
 
 void

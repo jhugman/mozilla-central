@@ -273,18 +273,18 @@ nsSVGImageFrame::TransformContextForPainting(gfxContext* aGfxContext,
     imageTransform =
       GetRasterImageTransform(nativeWidth, nativeHeight, FOR_PAINTING,
                               aTransformRoot);
-
-    // NOTE: We need to cancel out the effects of Full-Page-Zoom, or else
-    // it'll get applied an extra time by DrawSingleUnscaledImage.
-    nscoord appUnitsPerDevPx = PresContext()->AppUnitsPerDevPixel();
-    gfxFloat pageZoomFactor =
-      nsPresContext::AppUnitsToFloatCSSPixels(appUnitsPerDevPx);
-    imageTransform.Scale(pageZoomFactor, pageZoomFactor);
   }
 
   if (imageTransform.IsSingular()) {
     return false;
   }
+
+  // NOTE: We need to cancel out the effects of Full-Page-Zoom, or else
+  // it'll get applied an extra time by DrawSingleUnscaledImage.
+  nscoord appUnitsPerDevPx = PresContext()->AppUnitsPerDevPixel();
+  gfxFloat pageZoomFactor =
+    nsPresContext::AppUnitsToFloatCSSPixels(appUnitsPerDevPx);
+  imageTransform.Scale(pageZoomFactor, pageZoomFactor);
 
   aGfxContext->Multiply(imageTransform);
   return true;
@@ -343,7 +343,7 @@ nsSVGImageFrame::PaintSVG(nsRenderingContext *aContext,
     }
 
     if (opacity != 1.0f || StyleDisplay()->mMixBlendMode != NS_STYLE_BLEND_NORMAL) {
-      ctx->PushGroup(gfxASurface::CONTENT_COLOR_ALPHA);
+      ctx->PushGroup(GFX_CONTENT_COLOR_ALPHA);
     }
 
     nscoord appUnitsPerDevPx = PresContext()->AppUnitsPerDevPixel();

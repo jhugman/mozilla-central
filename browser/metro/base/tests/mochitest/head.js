@@ -34,9 +34,9 @@ splitPath.push('mochitest');
 const mochitestPath = splitPath.join('/') + '/';
 
 [
-  "BookmarksHelper.js",
-  "HistoryHelper.js",
-  "ViewStateHelper.js"
+  "helpers/BookmarksHelper.js",
+  "helpers/HistoryHelper.js",
+  "helpers/ViewStateHelper.js"
 ].forEach(function(lib) {
   Services.scriptloader.loadSubScript(mochitestPath + lib, this);
 }, this);
@@ -47,7 +47,7 @@ const mochitestPath = splitPath.join('/') + '/';
 
 function isLandscapeMode()
 {
-  return (Services.metro.snappedState == Ci.nsIWinMetroUtils.fullScreenLandscape);
+  return Elements.windowState.getAttribute("viewstate") == "landscape";
 }
 
 function setDevPixelEqualToPx()
@@ -396,11 +396,12 @@ function waitForCondition(aCondition, aTimeoutMs, aIntervalMs) {
   let timeoutMs = aTimeoutMs || kDefaultWait;
   let intervalMs = aIntervalMs || kDefaultInterval;
   let startTime = Date.now();
+  let stack = new Error().stack;
 
   function testCondition() {
     let now = Date.now();
     if((now - startTime) > timeoutMs) {
-      deferred.reject( new Error("Timed out waiting for condition to be true") );
+      deferred.reject( new Error("Timed out waiting for condition to be true at " + stack) );
       return;
     }
 

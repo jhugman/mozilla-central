@@ -60,18 +60,19 @@ struct EffectChain;
 /**
  * A base class for doing CompositableHost and platform dependent task on TextureHost.
  */
-class CompositableQuirks : public RefCounted<CompositableQuirks>
+class CompositableBackendSpecificData : public RefCounted<CompositableBackendSpecificData>
 {
 public:
-  CompositableQuirks()
+  CompositableBackendSpecificData()
   {
-    MOZ_COUNT_CTOR(CompositableQuirks);
+    MOZ_COUNT_CTOR(CompositableBackendSpecificData);
   }
-  virtual ~CompositableQuirks()
+  virtual ~CompositableBackendSpecificData()
   {
-    MOZ_COUNT_DTOR(CompositableQuirks);
+    MOZ_COUNT_DTOR(CompositableBackendSpecificData);
   }
   virtual void SetCompositor(Compositor* aCompositor) {}
+  virtual void ClearData() {}
 };
 
 /**
@@ -99,12 +100,21 @@ public:
 
   virtual CompositableType GetType() = 0;
 
-  virtual CompositableQuirks* GetCompositableQuirks() { return mQuirks; }
-
-  virtual void SetCompositableQuirks(CompositableQuirks* aQuirks)
+  virtual CompositableBackendSpecificData* GetCompositableBackendSpecificData()
   {
-    mQuirks = aQuirks;
+    return mBackendData;
   }
+
+  virtual void SetCompositableBackendSpecificData(CompositableBackendSpecificData* aBackendData)
+  {
+    mBackendData = aBackendData;
+  }
+
+  /**
+   * Our IPDL actor is being destroyed, get rid of any shmem resources now and
+   * don't worry about compositing anymore.
+   */
+  virtual void OnActorDestroy() = 0;
 
   // If base class overrides, it should still call the parent implementation
   virtual void SetCompositor(Compositor* aCompositor);
@@ -237,6 +247,7 @@ public:
   static const AttachFlags NO_FLAGS = 0;
   static const AttachFlags ALLOW_REATTACH = 1;
   static const AttachFlags KEEP_ATTACHED = 2;
+  static const AttachFlags FORCE_DETACH = 2;
 
   virtual void Attach(Layer* aLayer,
                       Compositor* aCompositor,
@@ -257,10 +268,12 @@ public:
   // attached to that layer. If we are part of a normal layer, then we will be
   // detached in any case. if aLayer is null, then we will only detach if we are
   // not async.
-  void Detach(Layer* aLayer = nullptr)
+  // Only force detach if the IPDL tree is being shutdown.
+  void Detach(Layer* aLayer = nullptr, AttachFlags aFlags = NO_FLAGS)
   {
     if (!mKeepAttached ||
-        aLayer == mLayer) {
+        aLayer == mLayer ||
+        aFlags & FORCE_DETACH) {
       SetLayer(nullptr);
       SetCompositor(nullptr);
       mAttached = false;
@@ -292,7 +305,7 @@ protected:
   TextureInfo mTextureInfo;
   Compositor* mCompositor;
   Layer* mLayer;
-  RefPtr<CompositableQuirks> mQuirks;
+  RefPtr<CompositableBackendSpecificData> mBackendData;
   RefPtr<TextureHost> mFirstTexture;
   bool mAttached;
   bool mKeepAttached;
@@ -300,6 +313,14 @@ protected:
 
 class CompositableParentManager;
 
+/**
+ * IPDL actor used by CompositableHost to match with its corresponding
+ * CompositableClient on the content side.
+ *
+ * CompositableParent is owned by the IPDL system. It's deletion is triggered
+ * by either the CompositableChild's deletion, or by the IPDL communication
+ * goind down.
+ */
 class CompositableParent : public PCompositableParent
 {
 public:

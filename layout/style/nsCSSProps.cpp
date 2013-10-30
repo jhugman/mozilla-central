@@ -197,7 +197,7 @@ nsCSSProps::BuildShorthandsContainingTable()
     for (const nsCSSProperty* subprops = SubpropertyEntryFor(shorthand);
          *subprops != eCSSProperty_UNKNOWN;
          ++subprops) {
-      NS_ABORT_IF_FALSE(0 < *subprops &&
+      NS_ABORT_IF_FALSE(0 <= *subprops &&
                         *subprops < eCSSProperty_COUNT_no_shorthands,
                         "subproperty must be a longhand");
       ++occurrenceCounts[*subprops];
@@ -911,6 +911,8 @@ const int32_t nsCSSProps::kCursorKTable[] = {
   eCSSKeyword_ns_resize, NS_STYLE_CURSOR_NS_RESIZE,
   eCSSKeyword_ew_resize, NS_STYLE_CURSOR_EW_RESIZE,
   eCSSKeyword_none, NS_STYLE_CURSOR_NONE,
+  eCSSKeyword_grab, NS_STYLE_CURSOR_GRAB,
+  eCSSKeyword_grabbing, NS_STYLE_CURSOR_GRABBING,
   eCSSKeyword_zoom_in, NS_STYLE_CURSOR_ZOOM_IN,
   eCSSKeyword_zoom_out, NS_STYLE_CURSOR_ZOOM_OUT,
   // -moz- prefixed vendor specific
@@ -1922,6 +1924,17 @@ const uint32_t nsCSSProps::kFlagsTable[eCSSProperty_COUNT] = {
 #define CSS_PROP_SHORTHAND(name_, id_, method_, flags_, pref_) flags_,
 #include "nsCSSPropList.h"
 #undef CSS_PROP_SHORTHAND
+};
+
+static const nsCSSProperty gAllSubpropTable[] = {
+#define CSS_PROP_LIST_ONLY_COMPONENTS_OF_ALL_SHORTHAND
+#define CSS_PROP(name_, id_, method_, flags_, pref_, parsevariant_, kwtable_, \
+                 stylestruct_, stylestructoffset_, animtype_)                 \
+  eCSSProperty_##id_,
+#include "nsCSSPropList.h"
+#undef CSS_PROP
+#undef CSS_PROP_LIST_ONLY_COMPONENTS_OF_ALL_SHORTHAND
+  eCSSProperty_UNKNOWN
 };
 
 static const nsCSSProperty gAnimationSubpropTable[] = {

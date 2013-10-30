@@ -30,12 +30,7 @@
 
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/Exceptions.h"
-#include "mozilla/dom/IDBIndexBinding.h"
-#include "mozilla/dom/IDBObjectStoreBinding.h"
-#include "mozilla/dom/IDBOpenDBRequestBinding.h"
-#include "mozilla/dom/IDBRequestBinding.h"
-#include "mozilla/dom/IDBTransactionBinding.h"
-#include "mozilla/dom/IDBVersionChangeEventBinding.h"
+#include "mozilla/dom/indexedDB/IndexedDatabaseManager.h"
 #include "mozilla/dom/TextDecoderBinding.h"
 #include "mozilla/dom/TextEncoderBinding.h"
 #include "mozilla/dom/DOMErrorBinding.h"
@@ -51,6 +46,8 @@ using namespace mozilla;
 using namespace mozilla::dom;
 using namespace xpc;
 using namespace JS;
+
+using mozilla::dom::indexedDB::IndexedDatabaseManager;
 
 NS_IMPL_ISUPPORTS5(nsXPConnect,
                    nsIXPConnect,
@@ -260,8 +257,7 @@ xpc::SystemErrorReporter(JSContext *cx, const char *message, JSErrorReport *rep)
     }
 
     if (nsContentUtils::DOMWindowDumpEnabled()) {
-        fprintf(stderr, "System JS : %s %s:%d\n"
-                "                     %s\n",
+        fprintf(stderr, "System JS : %s %s:%d - %s\n",
                 JSREPORT_IS_WARNING(rep->flags) ? "WARNING" : "ERROR",
                 rep->filename, rep->lineno,
                 message ? message : "<no message>");
@@ -336,7 +332,7 @@ xpc_TryUnmarkWrappedGrayObject(nsISupports* aWrappedJS)
 /***************************************************************************/
 // nsIXPConnect interface methods...
 
-inline nsresult UnexpectedFailure(nsresult rv)
+static inline nsresult UnexpectedFailure(nsresult rv)
 {
     NS_ERROR("This is not supposed to fail!");
     return rv;
@@ -431,7 +427,7 @@ CheckTypeInference(JSContext *cx, const JSClass *clasp, nsIPrincipal *principal)
         return;
 
     // Finally, do the damn assert.
-    MOZ_ASSERT(JS_GetOptions(cx) & JSOPTION_TYPE_INFERENCE);
+    MOZ_ASSERT(ContextOptionsRef(cx).typeInference());
 }
 #else
 #define CheckTypeInference(cx, clasp, principal) {}
@@ -530,15 +526,19 @@ nsXPConnect::InitClassesWithNewWrappedGlobal(JSContext * aJSContext,
     MOZ_ASSERT(js::GetObjectClass(global)->flags & JSCLASS_DOM_GLOBAL);
 
     // Init WebIDL binding constructors wanted on all XPConnect globals.
-    if (!IDBIndexBinding::GetConstructorObject(aJSContext, global) ||
-        !IDBObjectStoreBinding::GetConstructorObject(aJSContext, global) ||
-        !IDBOpenDBRequestBinding::GetConstructorObject(aJSContext, global) ||
-        !IDBRequestBinding::GetConstructorObject(aJSContext, global) ||
-        !IDBTransactionBinding::GetConstructorObject(aJSContext, global) ||
-        !IDBVersionChangeEventBinding::GetConstructorObject(aJSContext, global) ||
-        !TextDecoderBinding::GetConstructorObject(aJSContext, global) ||
+    // Additional bindings may be created lazily, see BackstagePass::NewResolve.
+    //
+    // XXX Please do not add any additional classes here without the approval of
+    //     the XPConnect module owner.
+    if (!TextDecoderBinding::GetConstructorObject(aJSContext, global) ||
         !TextEncoderBinding::GetConstructorObject(aJSContext, global) ||
         !DOMErrorBinding::GetConstructorObject(aJSContext, global)) {
+        return UnexpectedFailure(NS_ERROR_FAILURE);
+    }
+
+    if (nsContentUtils::IsSystemPrincipal(aPrincipal) &&
+        !IndexedDatabaseManager::DefineIndexedDBLazyGetter(aJSContext,
+                                                           global)) {
         return UnexpectedFailure(NS_ERROR_FAILURE);
     }
 
@@ -552,7 +552,7 @@ NativeInterface2JSObject(HandleObject aScope,
                          nsWrapperCache *aCache,
                          const nsIID * aIID,
                          bool aAllowWrapping,
-                         jsval *aVal,
+                         MutableHandleValue aVal,
                          nsIXPConnectJSObjectHolder **aHolder)
 {
     AutoJSContext cx;
@@ -564,7 +564,7 @@ NativeInterface2JSObject(HandleObject aScope,
                                               nullptr, aAllowWrapping, &rv))
         return rv;
 
-    MOZ_ASSERT(aAllowWrapping || !xpc::WrapperFactory::IsXrayWrapper(JSVAL_TO_OBJECT(*aVal)),
+    MOZ_ASSERT(aAllowWrapping || !xpc::WrapperFactory::IsXrayWrapper(&aVal.toObject()),
                "Shouldn't be returning a xray wrapper here");
 
     return NS_OK;
@@ -586,7 +586,7 @@ nsXPConnect::WrapNative(JSContext * aJSContext,
     RootedObject aScope(aJSContext, aScopeArg);
     RootedValue v(aJSContext);
     return NativeInterface2JSObject(aScope, aCOMObj, nullptr, &aIID,
-                                    false, v.address(), aHolder);
+                                    false, &v, aHolder);
 }
 
 /* void wrapNativeToJSVal (in JSContextPtr aJSContext, in JSObjectPtr aScope, in nsISupports aCOMObj, in nsIIDPtr aIID, out jsval aVal, out nsIXPConnectJSObjectHolder aHolder); */
@@ -609,8 +609,11 @@ nsXPConnect::WrapNativeToJSVal(JSContext * aJSContext,
 
     RootedObject aScope(aJSContext, aScopeArg);
 
-    return NativeInterface2JSObject(aScope, aCOMObj, aCache, aIID,
-                                    aAllowWrapping, aVal, aHolder);
+    RootedValue rval(aJSContext);
+    nsresult rv = NativeInterface2JSObject(aScope, aCOMObj, aCache, aIID,
+                                           aAllowWrapping, &rval, aHolder);
+    *aVal = rval;
+    return rv;
 }
 
 /* void wrapJS (in JSContextPtr aJSContext, in JSObjectPtr aJSObj, in nsIIDRef aIID, [iid_is (aIID), retval] out nsQIResult result); */
@@ -912,7 +915,7 @@ nsXPConnect::CreateSandbox(JSContext *cx, nsIPrincipal *principal,
 
     RootedValue rval(cx, JSVAL_VOID);
 
-    SandboxOptions options(cx);
+    SandboxOptions options;
     nsresult rv = CreateSandboxObject(cx, rval.address(), principal, options);
     MOZ_ASSERT(NS_FAILED(rv) || !JSVAL_IS_PRIMITIVE(rval),
                "Bad return value from xpc_CreateSandboxObject()!");
@@ -1099,13 +1102,15 @@ nsXPConnect::VariantToJS(JSContext* ctx, JSObject* scopeArg, nsIVariant* value,
     MOZ_ASSERT(js::IsObjectInContextCompartment(scope, ctx));
 
     nsresult rv = NS_OK;
-    if (!XPCVariant::VariantDataToJS(value, &rv, _retval)) {
+    RootedValue rval(ctx);
+    if (!XPCVariant::VariantDataToJS(value, &rv, &rval)) {
         if (NS_FAILED(rv))
             return rv;
 
         return NS_ERROR_FAILURE;
     }
 
+    *_retval = rval;
     return NS_OK;
 }
 
@@ -1368,7 +1373,8 @@ Base64Encode(JSContext *cx, JS::Value val, JS::Value *out)
     MOZ_ASSERT(out);
 
     JS::RootedValue root(cx, val);
-    xpc_qsACString encodedString(cx, root, root.address(), xpc_qsACString::eNull,
+    xpc_qsACString encodedString(cx, root, &root, false,
+                                 xpc_qsACString::eNull,
                                  xpc_qsACString::eStringify);
     if (!encodedString.IsValid())
         return false;
@@ -1394,7 +1400,8 @@ Base64Decode(JSContext *cx, JS::Value val, JS::Value *out)
     MOZ_ASSERT(out);
 
     JS::RootedValue root(cx, val);
-    xpc_qsACString encodedString(cx, root, root.address(), xpc_qsACString::eNull,
+    xpc_qsACString encodedString(cx, root, &root, false,
+                                 xpc_qsACString::eNull,
                                  xpc_qsACString::eNull);
     if (!encodedString.IsValid())
         return false;
@@ -1441,7 +1448,7 @@ nsXPConnect::SetDebugModeWhenPossible(bool mode, bool allowSyncDisable)
 NS_IMETHODIMP
 nsXPConnect::GetTelemetryValue(JSContext *cx, jsval *rval)
 {
-    RootedObject obj(cx, JS_NewObject(cx, NULL, NULL, NULL));
+    RootedObject obj(cx, JS_NewObject(cx, nullptr, nullptr, nullptr));
     if (!obj)
         return NS_ERROR_OUT_OF_MEMORY;
 
@@ -1449,12 +1456,12 @@ nsXPConnect::GetTelemetryValue(JSContext *cx, jsval *rval)
 
     size_t i = JS_SetProtoCalled(cx);
     RootedValue v(cx, DOUBLE_TO_JSVAL(i));
-    if (!JS_DefineProperty(cx, obj, "setProto", v, NULL, NULL, attrs))
+    if (!JS_DefineProperty(cx, obj, "setProto", v, nullptr, nullptr, attrs))
         return NS_ERROR_OUT_OF_MEMORY;
 
     i = JS_GetCustomIteratorCount(cx);
     v = DOUBLE_TO_JSVAL(i);
-    if (!JS_DefineProperty(cx, obj, "customIter", v, NULL, NULL, attrs))
+    if (!JS_DefineProperty(cx, obj, "customIter", v, nullptr, nullptr, attrs))
         return NS_ERROR_OUT_OF_MEMORY;
 
     *rval = OBJECT_TO_JSVAL(obj);
@@ -1468,8 +1475,8 @@ nsXPConnect::NotifyDidPaint()
     return NS_OK;
 }
 
-const uint8_t HAS_PRINCIPALS_FLAG               = 1;
-const uint8_t HAS_ORIGIN_PRINCIPALS_FLAG        = 2;
+static const uint8_t HAS_PRINCIPALS_FLAG               = 1;
+static const uint8_t HAS_ORIGIN_PRINCIPALS_FLAG        = 2;
 
 static nsresult
 WriteScriptOrFunction(nsIObjectOutputStream *stream, JSContext *cx,
@@ -1678,6 +1685,27 @@ JS_EXPORT_API(void) DumpCompleteHeap()
 
 } // extern "C"
 
+namespace xpc {
+
+bool
+Atob(JSContext *cx, unsigned argc, jsval *vp)
+{
+    if (!argc)
+        return true;
+
+    return xpc::Base64Decode(cx, JS_ARGV(cx, vp)[0], &JS_RVAL(cx, vp));
+}
+
+bool
+Btoa(JSContext *cx, unsigned argc, jsval *vp)
+{
+    if (!argc)
+        return true;
+
+    return xpc::Base64Encode(cx, JS_ARGV(cx, vp)[0], &JS_RVAL(cx, vp));
+}
+
+} // namespace xpc
 
 namespace mozilla {
 namespace dom {

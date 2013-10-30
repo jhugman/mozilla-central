@@ -231,21 +231,21 @@ public class LocalBrowserDB implements BrowserDB.BrowserDBIface {
     }
 
     @Override
-    public Cursor getTopBookmarks(ContentResolver cr, int limit) {
-        // Only select bookmarks. Unfortunately, we need to query the combined view,
-        // instead of just the bookmarks table, in order to do the frecency calculation.
-        String selection = Combined.BOOKMARK_ID + " IS NOT NULL";
-
-        // Filter out sites that are pinned.
-        selection = DBUtils.concatenateWhere(selection, Combined.URL + " NOT IN (SELECT " +
+    public Cursor getTopSites(ContentResolver cr, int limit) {
+        // Filter out bookmarks that don't have real parents (e.g. pinned sites or reading list items)
+        String selection = DBUtils.concatenateWhere("", Combined.URL + " NOT IN (SELECT " +
                                              Bookmarks.URL + " FROM bookmarks WHERE " +
-                                             DBUtils.qualifyColumn("bookmarks", Bookmarks.PARENT) + " == ? AND " +
+                                             DBUtils.qualifyColumn("bookmarks", Bookmarks.PARENT) + " < ? AND " +
                                              DBUtils.qualifyColumn("bookmarks", Bookmarks.IS_DELETED) + " == 0)");
-        String[] selectionArgs = DBUtils.appendSelectionArgs(new String[0], new String[] { String.valueOf(Bookmarks.FIXED_PINNED_LIST_ID) });
+        String[] selectionArgs = new String[] { String.valueOf(Bookmarks.FIXED_ROOT_ID) };
+
         return filterAllSites(cr,
                               new String[] { Combined._ID,
                                              Combined.URL,
-                                             Combined.TITLE },
+                                             Combined.TITLE,
+                                             Combined.DISPLAY,
+                                             Combined.BOOKMARK_ID,
+                                             Combined.HISTORY_ID },
                               "",
                               limit,
                               BrowserDB.ABOUT_PAGES_URL_FILTER,
@@ -696,33 +696,30 @@ public class LocalBrowserDB implements BrowserDB.BrowserDBIface {
                   new String[] { String.valueOf(id) });
     }
 
+    /**
+     * Get the favicon from the database, if any, associated with the given favicon URL. (That is,
+     * the URL of the actual favicon image, not the URL of the page with which the favicon is associated.)
+     * @param cr The ContentResolver to use.
+     * @param faviconURL The URL of the favicon to fetch from the database.
+     * @return The decoded Bitmap from the database, if any. null if none is stored.
+     */
     @Override
-    public Bitmap getFaviconForUrl(ContentResolver cr, String uri) {
-        final byte[] b = getFaviconBytesForUrl(cr, uri);
-        if (b == null) {
-            return null;
-        }
-
-        return BitmapUtils.decodeByteArray(b);
-    }
-
-    @Override
-    public byte[] getFaviconBytesForUrl(ContentResolver cr, String uri) {
+    public Bitmap getFaviconForUrl(ContentResolver cr, String faviconURL) {
         Cursor c = null;
         byte[] b = null;
 
         try {
-            c = cr.query(mCombinedUriWithProfile,
-                         new String[] { Combined.FAVICON },
-                         Combined.URL + " = ?",
-                         new String[] { uri },
+            c = cr.query(mFaviconsUriWithProfile,
+                         new String[] { Favicons.DATA },
+                         Favicons.URL + " = ?",
+                         new String[] { faviconURL },
                          null);
 
             if (!c.moveToFirst()) {
                 return null;
             }
 
-            final int faviconIndex = c.getColumnIndexOrThrow(Combined.FAVICON);
+            final int faviconIndex = c.getColumnIndexOrThrow(Favicons.DATA);
             b = c.getBlob(faviconIndex);
         } finally {
             if (c != null) {
@@ -730,7 +727,11 @@ public class LocalBrowserDB implements BrowserDB.BrowserDBIface {
             }
         }
 
-        return b;
+        if (b == null) {
+            return null;
+        }
+
+        return BitmapUtils.decodeByteArray(b);
     }
 
     @Override
@@ -752,28 +753,6 @@ public class LocalBrowserDB implements BrowserDB.BrowserDBIface {
         }
 
         return null;
-    }
-
-    @Override
-    public Cursor getFaviconsForUrls(ContentResolver cr, List<String> urls) {
-        StringBuilder selection = new StringBuilder();
-        selection.append(Favicons.URL + " IN (");
-
-        for (int i = 0; i < urls.size(); i++) {
-            final String url = urls.get(i);
-
-            if (i > 0)
-                selection.append(", ");
-
-            DatabaseUtils.appendEscapedSQLString(selection, url);
-        }
-
-        selection.append(")");
-
-        return cr.query(mCombinedUriWithProfile,
-                        new String[] { Combined.URL, Combined.FAVICON },
-                        selection.toString(),
-                        null, null);
     }
 
     @Override
@@ -854,20 +833,38 @@ public class LocalBrowserDB implements BrowserDB.BrowserDBIface {
         return b;
     }
 
+    /**
+     * Query for non-null thumbnails matching the provided <code>urls</code>.
+     * The returned cursor will have no more than, but possibly fewer than,
+     * the requested number of thumbnails.
+     *
+     * Returns null if the provided list of URLs is empty or null.
+     */
     @Override
     public Cursor getThumbnailsForUrls(ContentResolver cr, List<String> urls) {
-        StringBuilder selection = new StringBuilder();
-        String[] selectionArgs = new String[urls.size()];
-
-        for (int i = 0; i < urls.size(); i++) {
-          final String url = urls.get(i);
-
-          if (i > 0)
-            selection.append(" OR ");
-
-          selection.append(Thumbnails.URL + " = ?");
-          selectionArgs[i] = url;
+        if (urls == null) {
+            return null;
         }
+
+        int urlCount = urls.size();
+        if (urlCount == 0) {
+            return null;
+        }
+
+        // Don't match against null thumbnails.
+        StringBuilder selection = new StringBuilder(
+                Thumbnails.DATA + " IS NOT NULL AND " +
+                Thumbnails.URL + " IN ("
+        );
+
+        // Compute a (?, ?, ?) sequence to match the provided URLs.
+        int i = 1;
+        while (i++ < urlCount) {
+            selection.append("?, ");
+        }
+        selection.append("?)");
+
+        String[] selectionArgs = urls.toArray(new String[urlCount]);
 
         return cr.query(mThumbnailsUriWithProfile,
                         new String[] { Thumbnails.URL, Thumbnails.DATA },

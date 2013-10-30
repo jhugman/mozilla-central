@@ -313,11 +313,24 @@ var gPluginHandler = {
         break;
     }
 
-    // Hide the in-content UI if it's too big. The crashed plugin handler already did this.
+    // Show the in-content UI if it's not too big. The crashed plugin handler already did this.
     if (eventType != "PluginCrashed" && eventType != "PluginRemoved") {
       let overlay = this.getPluginUI(plugin, "main");
-      if (overlay != null && this.isTooSmall(plugin, overlay))
-        overlay.style.visibility = "hidden";
+      if (overlay != null) {
+        if (!this.isTooSmall(plugin, overlay))
+          overlay.style.visibility = "visible";
+
+        plugin.addEventListener("overflow", function(event) {
+          overlay.style.visibility = "hidden";
+        });
+        plugin.addEventListener("underflow", function(event) {
+          // this is triggered if only one dimension underflows,
+          // the other dimension might still overflow
+          if (!gPluginHandler.isTooSmall(plugin, overlay)) {
+            overlay.style.visibility = "visible";
+          }
+        });
+      }
     }
 
     // Only show the notification after we've done the isTooSmall check, so
@@ -411,7 +424,7 @@ var gPluginHandler = {
   // Callback for user clicking on the link in a click-to-play plugin
   // (where the plugin has an update)
   openPluginUpdatePage: function (aEvent) {
-    openURL(Services.urlFormatter.formatURLPref("plugins.update.url"));
+    openUILinkIn(Services.urlFormatter.formatURLPref("plugins.update.url"), "tab");
   },
 
 #ifdef MOZ_CRASHREPORTER
@@ -691,10 +704,22 @@ var gPluginHandler = {
       else if (pluginInfo.blocklistState != Ci.nsIBlocklistService.STATE_NOT_BLOCKED) {
         url = Services.blocklist.getPluginBlocklistURL(pluginInfo.pluginTag);
       }
+      else {
+        url = Services.urlFormatter.formatURLPref("app.support.baseURL") + "clicktoplay";
+      }
       pluginInfo.detailsLink = url;
 
       centerActions.push(pluginInfo);
     }
+
+    if (centerActions.length == 0) {
+      // TODO: this is a temporary band-aid to avoid broken doorhangers
+      // until bug 926605 is landed.
+      notification.options.centerActions = [];
+      setTimeout(() => PopupNotifications.remove(notification), 0);
+      return;
+    }
+
     centerActions.sort(function(a, b) {
       return a.pluginName.localeCompare(b.pluginName);
     });
@@ -779,6 +804,10 @@ var gPluginHandler = {
       // so the pluginHost.getPermissionStringForType call is protected
       if (gPluginHandler.canActivatePlugin(plugin) &&
           aPluginInfo.permissionString == pluginHost.getPermissionStringForType(plugin.actualType)) {
+        let overlay = this.getPluginUI(plugin, "main");
+        if (overlay) {
+          overlay.removeEventListener("click", gPluginHandler._overlayClickListener, true);
+        }
         plugin.playPlugin();
       }
     }
@@ -791,7 +820,9 @@ var gPluginHandler = {
     let contentDoc = aBrowser.contentDocument;
     let cwu = contentWindow.QueryInterface(Ci.nsIInterfaceRequestor)
                            .getInterface(Ci.nsIDOMWindowUtils);
-    let plugins = cwu.plugins;
+    // cwu.plugins may contain non-plugin <object>s, filter them out
+    let plugins = cwu.plugins.filter((plugin) =>
+      plugin.getContentTypeForMIMEType(plugin.actualType) == Ci.nsIObjectLoadingContent.TYPE_PLUGIN);
     if (plugins.length == 0) {
       if (notification) {
         PopupNotifications.remove(notification);
@@ -974,12 +1005,12 @@ var gPluginHandler = {
       if (this.isTooSmall(plugin, overlay)) {
         // Hide the overlay's contents. Use visibility style, so that it doesn't
         // collapse down to 0x0.
-        overlay.style.visibility = "hidden";
         isShowing = false;
       }
     }
 
     if (isShowing) {
+      overlay.style.visibility = "visible";
       // If a previous plugin on the page was too small and resulted in adding a
       // notification bar, then remove it because this plugin instance it big
       // enough to serve as in-content notification.

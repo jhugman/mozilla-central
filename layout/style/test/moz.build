@@ -8,6 +8,9 @@ TEST_TOOL_DIRS += ['chrome']
 
 MODULE = 'layout'
 
-HOST_CPPSRCS += [
+HOST_SOURCES += [
     'ListCSSProperties.cpp',
 ]
+
+BROWSER_CHROME_MANIFESTS += ['browser.ini']
+

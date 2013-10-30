@@ -239,7 +239,7 @@ ConfigureSourceReaderStream(IMFSourceReader *aReader,
 
   // Set the uncompressed format. This can fail if the decoder can't produce
   // that type.
-  return aReader->SetCurrentMediaType(aStreamIndex, NULL, type);
+  return aReader->SetCurrentMediaType(aStreamIndex, nullptr, type);
 }
 
 // Returns the duration of the resource, in microseconds.
@@ -333,7 +333,7 @@ GetPictureRegion(IMFMediaType* aMediaType, nsIntRect& aOutPictureRegion)
     hr = aMediaType->GetBlob(MF_MT_PAN_SCAN_APERTURE,
                              (UINT8*)&videoArea,
                              sizeof(MFVideoArea),
-                             NULL);
+                             nullptr);
   }
 
   // If we're not in pan-and-scan mode, or the pan-and-scan region is not set,
@@ -342,7 +342,7 @@ GetPictureRegion(IMFMediaType* aMediaType, nsIntRect& aOutPictureRegion)
     hr = aMediaType->GetBlob(MF_MT_MINIMUM_DISPLAY_APERTURE,
                              (UINT8*)&videoArea,
                              sizeof(MFVideoArea),
-                             NULL);
+                             nullptr);
   }
 
   if (hr == MF_E_ATTRIBUTENOTFOUND) {
@@ -351,7 +351,7 @@ GetPictureRegion(IMFMediaType* aMediaType, nsIntRect& aOutPictureRegion)
     hr = aMediaType->GetBlob(MF_MT_GEOMETRIC_APERTURE,
                              (UINT8*)&videoArea,
                              sizeof(MFVideoArea),
-                             NULL);
+                             nullptr);
   }
 
   if (SUCCEEDED(hr)) {
@@ -414,7 +414,7 @@ WMFReader::ConfigureVideoFrameGeometry(IMFMediaType* aMediaType)
   }
 
   // Success! Save state.
-  mInfo.mDisplay = displaySize;
+  mInfo.mVideo.mDisplay = displaySize;
   GetDefaultStride(aMediaType, &mVideoStride);
   mVideoWidth = width;
   mVideoHeight = height;
@@ -470,7 +470,7 @@ WMFReader::ConfigureVideoDecoder()
 
   LOG("Successfully configured video stream");
 
-  mHasVideo = mInfo.mHasVideo = true;
+  mHasVideo = mInfo.mVideo.mHasVideo = true;
 
   return S_OK;
 }
@@ -534,9 +534,9 @@ WMFReader::ConfigureAudioDecoder()
   mAudioChannels = MFGetAttributeUINT32(mediaType, MF_MT_AUDIO_NUM_CHANNELS, 0);
   mAudioBytesPerSample = MFGetAttributeUINT32(mediaType, MF_MT_AUDIO_BITS_PER_SAMPLE, 16) / 8;
 
-  mInfo.mAudioChannels = mAudioChannels;
-  mInfo.mAudioRate = mAudioRate;
-  mHasAudio = mInfo.mHasAudio = true;
+  mInfo.mAudio.mChannels = mAudioChannels;
+  mInfo.mAudio.mRate = mAudioRate;
+  mHasAudio = mInfo.mAudio.mHasAudio = true;
 
   LOG("Successfully configured audio stream. rate=%u channels=%u bitsPerSample=%u",
       mAudioRate, mAudioChannels, mAudioBytesPerSample);
@@ -545,7 +545,7 @@ WMFReader::ConfigureAudioDecoder()
 }
 
 nsresult
-WMFReader::ReadMetadata(VideoInfo* aInfo,
+WMFReader::ReadMetadata(MediaInfo* aInfo,
                         MetadataTags** aTags)
 {
   NS_ASSERTION(mDecoder->OnDecodeThread(), "Should be on decode thread.");
@@ -578,7 +578,7 @@ WMFReader::ReadMetadata(VideoInfo* aInfo,
   hr = ConfigureAudioDecoder();
   NS_ENSURE_TRUE(SUCCEEDED(hr), NS_ERROR_FAILURE);
 
-  if (mUseHwAccel && mInfo.mHasVideo) {
+  if (mUseHwAccel && mInfo.mVideo.mHasVideo) {
     RefPtr<IMFTransform> videoDecoder;
     hr = mSourceReader->GetServiceForStream(MF_SOURCE_READER_FIRST_VIDEO_STREAM,
                                             GUID_NULL,
@@ -608,12 +608,12 @@ WMFReader::ReadMetadata(VideoInfo* aInfo,
       hr = ConfigureVideoDecoder();
     }
   }
-  if (mInfo.mHasVideo) {
+  if (mInfo.HasVideo()) {
     LOG("Using DXVA: %s", (mUseHwAccel ? "Yes" : "No"));
   }
 
   // Abort if both video and audio failed to initialize.
-  NS_ENSURE_TRUE(mInfo.mHasAudio || mInfo.mHasVideo, NS_ERROR_FAILURE);
+  NS_ENSURE_TRUE(mInfo.HasValidMedia(), NS_ERROR_FAILURE);
 
   // Get the duration, and report it to the decoder if we have it.
   int64_t duration = 0;
@@ -796,7 +796,7 @@ WMFReader::CreateBasicVideoFrame(IMFSample* aSample,
     hr = twoDBuffer->Lock2D(&data, &stride);
     NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
   } else {
-    hr = buffer->Lock(&data, NULL, NULL);
+    hr = buffer->Lock(&data, nullptr, nullptr);
     NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
     stride = mVideoStride;
   }
@@ -841,11 +841,11 @@ WMFReader::CreateBasicVideoFrame(IMFSample* aSample,
   b.mPlanes[2].mOffset = 0;
   b.mPlanes[2].mSkip = 0;
 
-  VideoData *v = VideoData::Create(mInfo,
+  VideoData *v = VideoData::Create(mInfo.mVideo,
                                    mDecoder->GetImageContainer(),
                                    aOffsetBytes,
                                    aTimestampUsecs,
-                                   aTimestampUsecs + aDurationUsecs,
+                                   aDurationUsecs,
                                    b,
                                    false,
                                    -1,
@@ -884,11 +884,11 @@ WMFReader::CreateD3DVideoFrame(IMFSample* aSample,
   NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
   NS_ENSURE_TRUE(image, E_FAIL);
 
-  VideoData *v = VideoData::CreateFromImage(mInfo,
+  VideoData *v = VideoData::CreateFromImage(mInfo.mVideo,
                                             mDecoder->GetImageContainer(),
                                             aOffsetBytes,
                                             aTimestampUsecs,
-                                            aTimestampUsecs + aDurationUsecs,
+                                            aDurationUsecs,
                                             image.forget(),
                                             false,
                                             -1,
@@ -1026,19 +1026,6 @@ WMFReader::Seek(int64_t aTargetUs,
   NS_ENSURE_TRUE(SUCCEEDED(hr), NS_ERROR_FAILURE);
 
   return DecodeToTarget(aTargetUs);
-}
-
-nsresult
-WMFReader::GetBuffered(mozilla::dom::TimeRanges* aBuffered, int64_t aStartTime)
-{
-  MediaResource* stream = mDecoder->GetResource();
-  int64_t durationUs = 0;
-  {
-    ReentrantMonitorAutoEnter mon(mDecoder->GetReentrantMonitor());
-    durationUs = mDecoder->GetMediaDuration();
-  }
-  GetEstimatedBufferedTimeRanges(stream, durationUs, aBuffered);
-  return NS_OK;
 }
 
 } // namespace mozilla

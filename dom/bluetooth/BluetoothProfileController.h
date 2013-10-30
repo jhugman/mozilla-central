@@ -9,6 +9,7 @@
 
 #include "BluetoothUuid.h"
 #include "nsAutoPtr.h"
+#include "mozilla/RefPtr.h"
 
 BEGIN_BLUETOOTH_NAMESPACE
 
@@ -45,16 +46,11 @@ BEGIN_BLUETOOTH_NAMESPACE
 // Major device class = 0xA, Peripheral
 #define IS_PERIPHERAL(cod)           (GET_MAJOR_DEVICE_CLASS(cod) == 0xa)
 
-// Major device class = 0x4, Audio/Video
-// Minor device class = 0x1, Wearable Headset device
-#define IS_HEADSET(cod)              ((GET_MAJOR_DEVICE_CLASS(cod) == 0x4) && \
-                                     (GET_MINOR_DEVICE_CLASS(cod) == 0x1))
-
 class BluetoothProfileManagerBase;
 class BluetoothReplyRunnable;
 typedef void (*BluetoothProfileControllerCallback)();
 
-class BluetoothProfileController
+class BluetoothProfileController : public RefCounted<BluetoothProfileController>
 {
 public:
   BluetoothProfileController(const nsAString& aDeviceAddress,
@@ -78,7 +74,7 @@ public:
   void OnConnect(const nsAString& aErrorStr);
   void OnDisconnect(const nsAString& aErrorStr);
 
-  uint32_t GetCod()
+  uint32_t GetCod() const
   {
     return mCod;
   }

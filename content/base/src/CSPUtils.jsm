@@ -152,9 +152,13 @@ CSPPolicyURIListener.prototype = {
                              this._reportOnly, this._csp._specCompliant);
     }
     else {
-      // problem fetching policy so fail closed
-      this._csp.refinePolicy("default-src 'none'", this._docURI,
-                             this._csp._specCompliant);
+      // problem fetching policy so fail closed by appending a "block it all"
+      // policy.  Also toss an error into the console so developers can see why
+      // this policy is used.
+      this._csp.log(WARN_FLAG, CSPLocalizer.getFormatStr("errorFetchingPolicy",
+                                                         [status]));
+      this._csp.appendPolicy("default-src 'none'", this._docURI,
+                             this._reportOnly, this._csp._specCompliant);
     }
     // resume the parent document request
     this._docRequest.resume();
@@ -243,6 +247,8 @@ CSPRep.ALLOW_DIRECTIVE   = "allow";
   *        while the policy-uri is asynchronously fetched
   * @param csp (optional)
   *        the CSP object to update once the policy has been fetched
+  * @param reportOnly (optional)
+  *        whether or not this CSP is report-only (defaults to false)
   * @returns
   *        an instance of CSPRep
   */
@@ -480,7 +486,8 @@ CSPRep.fromString = function(aStr, self, docRequest, csp, reportOnly) {
   // directive to be present.
   if (!aCSPR._directives[SD.DEFAULT_SRC]) {
     cspWarn(aCSPR, CSPLocalizer.getStr("allowOrDefaultSrcRequired"));
-    return CSPRep.fromString("default-src 'none'", selfUri);
+    return CSPRep.fromString("default-src 'none'", selfUri, docRequest, csp,
+                             reportOnly);
   }
   return aCSPR;
 };
@@ -498,6 +505,8 @@ CSPRep.fromString = function(aStr, self, docRequest, csp, reportOnly) {
   *        while the policy-uri is asynchronously fetched
   * @param csp (optional)
   *        the CSP object to update once the policy has been fetched
+  * @param reportOnly (optional)
+  *        whether or not this CSP is report-only (defaults to false)
   * @returns
   *        an instance of CSPRep
   */

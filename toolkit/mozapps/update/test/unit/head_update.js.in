@@ -64,7 +64,7 @@ const IS_MAR_CHECKS_ENABLED = true;
 const IS_MAR_CHECKS_ENABLED = false;
 #endif
 
-const URL_HOST = "http://localhost:4444/";
+const URL_HOST = "http://localhost";
 const URL_PATH = "data";
 
 const APPLY_TO_DIR_SUFFIX = "_applyToDir/";
@@ -456,7 +456,7 @@ if (IS_WIN) {
   function lockDirectory(aDir) {
     var file = aDir.clone();
     file.append(kLockFileName);
-    file.create(file.NORMAL_FILE_TYPE, 0444);
+    file.create(file.NORMAL_FILE_TYPE, 4 * 64 + 4 * 8 + 4); // 0444
     file.QueryInterface(AUS_Ci.nsILocalFileWin);
     file.fileAttributesWin |= file.WFA_READONLY;
     file.fileAttributesWin &= ~file.WFA_READWRITE;
@@ -516,7 +516,7 @@ function copyMinimumAppFiles(aSrcDir, aDestDir, aDestLeafName) {
   deplibsFile.append("dependentlibs.list");
   let istream = AUS_Cc["@mozilla.org/network/file-input-stream;1"].
                 createInstance(AUS_Ci.nsIFileInputStream);
-  istream.init(deplibsFile, 0x01, 0444, 0);
+  istream.init(deplibsFile, 0x01, 4 * 64 + 4 * 8 + 4, 0); // 0444
   istream.QueryInterface(AUS_Ci.nsILineInputStream);
 
   let hasMore;
@@ -1163,16 +1163,6 @@ function setupUpdaterTest(aMarFile) {
   let helperBin = do_get_file(HELPER_BIN_FILE);
   let afterApplyBinDir = getApplyDirFile("a/b/", true);
   helperBin.copyTo(afterApplyBinDir, gCallbackBinFile);
-
-  if (!gBackgroundUpdate && !gSwitchApp) {
-    let updaterIniContents = "[Strings]\n" +
-                             "Title=Update XPCShell Test\n" +
-                             "Info=Application Update Test - " + TEST_ID + "\n";
-    let updaterIni = updatesDir.clone();
-    updaterIni.append(FILE_UPDATER_INI);
-    writeFile(updaterIni, updaterIniContents);
-    updaterIni.copyTo(afterApplyBinDir, FILE_UPDATER_INI);
-  }
 
   // Copy the mar that will be applied
   let mar = do_get_file(aMarFile);
@@ -1884,7 +1874,9 @@ function start_httpserver(aRelativeDirName) {
   Components.utils.import("resource://testing-common/httpd.js");
   gTestserver = new HttpServer();
   gTestserver.registerDirectory("/data/", dir);
-  gTestserver.start(4444);
+  gTestserver.start(-1);
+  gTestserverPort = gTestserver.identity.primaryPort;
+  logTestInfo("http server port = " + gTestserverPort);
 }
 
 /* Helper for stopping the http server used by the tests */
@@ -2120,7 +2112,7 @@ function symlinkUpdateFilesIntoBundleDirectory() {
   let dest = getAppDir();
   dest.append("active-update.xml");
   if (!dest.exists()) {
-    dest.create(dest.NORMAL_FILE_TYPE, 0644);
+    dest.create(dest.NORMAL_FILE_TYPE, 6 * 64 + 4 * 8 + 4); // 0644
   }
   do_check_true(dest.exists());
   let source = getUpdatesRootDir();
@@ -2136,7 +2128,7 @@ function symlinkUpdateFilesIntoBundleDirectory() {
   if (dest2.exists()) {
     dest2.remove(true);
   }
-  dest2.create(dest.DIRECTORY_TYPE, 0755);
+  dest2.create(dest.DIRECTORY_TYPE, 7 * 64 + 5 * 8 + 5); // 0755
   do_check_true(dest2.exists());
   let source2 = getUpdatesRootDir();
   source2.append("updates");
@@ -2174,7 +2166,7 @@ function adjustPathsOnWindows() {
   // running doesn't prevent the updater from moving stuff around.
   let tmpDir = do_get_profile();
   tmpDir.append("ExecutableDir.tmp");
-  tmpDir.createUnique(tmpDir.DIRECTORY_TYPE, 0755);
+  tmpDir.createUnique(tmpDir.DIRECTORY_TYPE, 7 * 64 + 5 * 8 + 5); // 0755
   let procDir = getCurrentProcessDir();
   logTestInfo("start - copy the process directory");
   copyMinimumAppFiles(procDir, tmpDir, "bin");
@@ -2240,6 +2232,8 @@ function adjustGeneralPaths() {
   let ds = Services.dirsvc.QueryInterface(AUS_Ci.nsIDirectoryService);
   ds.registerProvider(dirProvider);
   do_register_cleanup(function() {
+    // Call end_test first before the directory provider is unregistered
+    end_test();
     ds.unregisterProvider(dirProvider);
     let testBin = do_get_file(getApplyDirPath() + "test" + APP_BIN_SUFFIX, true);
     // Try to remove the test.bin file if it exists (it shouldn't).

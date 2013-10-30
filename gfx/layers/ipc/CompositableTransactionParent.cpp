@@ -239,7 +239,7 @@ CompositableParentManager::ReceiveCompositableUpdate(const CompositableOperation
                                                     op.textureFlags());
       MOZ_ASSERT(tex.get());
       tex->SetCompositor(compositable->GetCompositor());
-      // set CompositableQuirks
+      // set CompositableBackendSpecificData
       // on gonk, create EGLImage if possible.
       // create EGLImage during buffer swap could reduce the graphic driver's task
       // during rendering.
@@ -260,7 +260,7 @@ CompositableParentManager::ReceiveCompositableUpdate(const CompositableOperation
 
       TextureFlags flags = texture->GetFlags();
 
-      if (flags & TEXTURE_DEALLOCATE_HOST) {
+      if (!(flags & TEXTURE_DEALLOCATE_CLIENT)) {
         texture->DeallocateSharedData();
       }
 
@@ -269,7 +269,7 @@ CompositableParentManager::ReceiveCompositableUpdate(const CompositableOperation
       // if it is not the host that deallocates the shared data, then we need
       // to notfy the client side to tell when it is safe to deallocate or
       // reuse it.
-      if (!(flags & TEXTURE_DEALLOCATE_HOST)) {
+      if (flags & TEXTURE_DEALLOCATE_CLIENT) {
         replyv.push_back(ReplyTextureRemoved(op.compositableParent(), nullptr,
                                              op.textureID()));
       }

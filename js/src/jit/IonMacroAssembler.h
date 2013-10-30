@@ -20,11 +20,9 @@
 #endif
 #include "jit/IonCompartment.h"
 #include "jit/IonInstrumentation.h"
-#include "jit/ParallelFunctions.h"
 #include "jit/VMFunctions.h"
 #include "vm/ProxyObject.h"
 #include "vm/Shape.h"
-#include "vm/TypedArrayObject.h"
 
 namespace js {
 namespace jit {
@@ -68,7 +66,7 @@ class MacroAssembler : public MacroAssemblerSpecific
         Branch()
           : init_(false),
             cond_(Equal),
-            jump_(NULL),
+            jump_(nullptr),
             reg_(Register::FromCode(0))      // Quell compiler warnings.
         { }
 
@@ -154,7 +152,7 @@ class MacroAssembler : public MacroAssemblerSpecific
       public:
         BranchGCPtr()
           : Branch(),
-            ptr_(ImmGCPtr(NULL))
+            ptr_(ImmGCPtr(nullptr))
         { }
 
         BranchGCPtr(Condition cond, Register reg, ImmGCPtr ptr, Label *jump)
@@ -179,7 +177,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     // provided and enabled, then instrumentation will be emitted around call
     // sites. The IonInstrumentation instance is hosted inside of
     // CodeGeneratorShared and is the manager of when instrumentation is
-    // actually emitted or not. If NULL, then no instrumentation is emitted.
+    // actually emitted or not. If nullptr, then no instrumentation is emitted.
     IonInstrumentation *sps_;
 
     // Labels for handling exceptions and failures.
@@ -193,7 +191,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     MacroAssembler()
       : enoughMemory_(true),
         embedsNurseryPointers_(false),
-        sps_(NULL)
+        sps_(nullptr)
     {
         JSContext *cx = GetIonContext()->cx;
         if (cx)
@@ -215,10 +213,10 @@ class MacroAssembler : public MacroAssemblerSpecific
     MacroAssembler(JSContext *cx)
       : enoughMemory_(true),
         embedsNurseryPointers_(false),
-        sps_(NULL)
+        sps_(nullptr)
     {
         constructRoot(cx);
-        ionContext_.construct(cx, (js::jit::TempAllocator *)NULL);
+        ionContext_.construct(cx, (js::jit::TempAllocator *)nullptr);
         alloc_.construct(cx);
 #ifdef JS_CPU_ARM
         initWithAllocator();
@@ -231,12 +229,27 @@ class MacroAssembler : public MacroAssemblerSpecific
     MacroAssembler(AsmJSToken)
       : enoughMemory_(true),
         embedsNurseryPointers_(false),
-        sps_(NULL)
+        sps_(nullptr)
     {
 #ifdef JS_CPU_ARM
         initWithAllocator();
         m_buffer.id = 0;
 #endif
+    }
+
+    MacroAssembler(JSContext *cx, IonScript *ion)
+      : enoughMemory_(true),
+        embedsNurseryPointers_(false),
+        sps_(nullptr)
+    {
+        constructRoot(cx);
+         ionContext_.construct(cx, (js::jit::TempAllocator *)nullptr);
+         alloc_.construct(cx);
+#ifdef JS_CPU_ARM
+         initWithAllocator();
+         m_buffer.id = GetIonContext()->getNextAssemblerId();
+#endif
+        setFramePushed(ion->frameSize());
     }
 
     void setInstrumentation(IonInstrumentation *sps) {
@@ -304,7 +317,7 @@ class MacroAssembler : public MacroAssemblerSpecific
         branchPtr(cond, Address(obj, JSObject::offsetOfShape()), shape, label);
     }
     void branchTestProxyHandlerFamily(Condition cond, Register proxy, Register scratch,
-                                      void *handlerp, Label *label) {
+                                      const void *handlerp, Label *label) {
         Address handlerAddr(proxy, ProxyObject::offsetOfHandler());
         loadPrivate(handlerAddr, scratch);
         Address familyAddr(scratch, BaseProxyHandler::offsetOfFamily());
@@ -360,13 +373,10 @@ class MacroAssembler : public MacroAssemblerSpecific
     }
 
     void loadJSContext(const Register &dest) {
-        movePtr(ImmPtr(GetIonContext()->runtime), dest);
-        loadPtr(Address(dest, offsetof(JSRuntime, mainThread.ionJSContext)), dest);
+        loadPtr(AbsoluteAddress(&GetIonContext()->runtime->mainThread.ionJSContext), dest);
     }
     void loadJitActivation(const Register &dest) {
-        movePtr(ImmPtr(GetIonContext()->runtime), dest);
-        size_t offset = offsetof(JSRuntime, mainThread) + PerThreadData::offsetOfActivation();
-        loadPtr(Address(dest, offset), dest);
+        loadPtr(AbsoluteAddress(GetIonContext()->runtime->mainThread.addressOfActivation()), dest);
     }
 
     template<typename T>
@@ -397,8 +407,10 @@ class MacroAssembler : public MacroAssemblerSpecific
             storeValue(src.valueReg(), dest);
         } else if (IsFloatingPointType(src.type())) {
             FloatRegister reg = src.typedReg().fpu();
-            if (src.type() == MIRType_Float32)
-                convertFloatToDouble(reg, reg);
+            if (src.type() == MIRType_Float32) {
+                convertFloatToDouble(reg, ScratchFloatReg);
+                reg = ScratchFloatReg;
+            }
             storeDouble(reg, dest);
         } else {
             storeValue(ValueTypeFromMIRType(src.type()), src.typedReg().gpr(), dest);
@@ -543,8 +555,10 @@ class MacroAssembler : public MacroAssemblerSpecific
             Push(v.valueReg());
         } else if (IsFloatingPointType(v.type())) {
             FloatRegister reg = v.typedReg().fpu();
-            if (v.type() == MIRType_Float32)
-                convertFloatToDouble(reg, reg);
+            if (v.type() == MIRType_Float32) {
+                convertFloatToDouble(reg, ScratchFloatReg);
+                reg = ScratchFloatReg;
+            }
             Push(reg);
         } else {
             Push(ValueTypeFromMIRType(v.type()), v.typedReg().gpr());
@@ -614,8 +628,8 @@ class MacroAssembler : public MacroAssemblerSpecific
     void branchTestNeedsBarrier(Condition cond, const Register &scratch, Label *label) {
         JS_ASSERT(cond == Zero || cond == NonZero);
         JS::Zone *zone = GetIonContext()->compartment->zone();
-        movePtr(ImmPtr(zone), scratch);
-        Address needsBarrierAddr(scratch, JS::Zone::OffsetOfNeedsBarrier());
+        movePtr(ImmPtr(zone->AddressOfNeedsBarrier()), scratch);
+        Address needsBarrierAddr(scratch, 0);
         branchTest32(cond, needsBarrierAddr, Imm32(0x1), label);
     }
 
@@ -672,14 +686,14 @@ class MacroAssembler : public MacroAssemblerSpecific
     void canonicalizeDouble(FloatRegister reg) {
         Label notNaN;
         branchDouble(DoubleOrdered, reg, reg, &notNaN);
-        loadConstantDouble(js_NaN, reg);
+        loadConstantDouble(JS::GenericNaN(), reg);
         bind(&notNaN);
     }
 
     void canonicalizeFloat(FloatRegister reg) {
         Label notNaN;
         branchFloat(DoubleOrdered, reg, reg, &notNaN);
-        loadConstantFloat32((float)js_NaN, reg);
+        loadConstantFloat32(float(JS::GenericNaN()), reg);
         bind(&notNaN);
     }
 
@@ -723,10 +737,9 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     using MacroAssemblerSpecific::extractTag;
     Register extractTag(const TypedOrValueRegister &reg, Register scratch) {
-        if (reg.hasValue()) {
+        if (reg.hasValue())
             return extractTag(reg.valueReg(), scratch);
-        }
-        mov(ImmWord(ValueTypeFromMIRType(reg.type())), scratch);
+        mov(ImmWord(MIRTypeToTag(reg.type())), scratch);
         return scratch;
     }
 
@@ -765,7 +778,8 @@ class MacroAssembler : public MacroAssemblerSpecific
                                  Label *label);
 
     // Inline allocation.
-    void newGCThing(const Register &result, gc::AllocKind allocKind, Label *fail);
+    void newGCThing(const Register &result, gc::AllocKind allocKind, Label *fail,
+                    gc::InitialHeap initialHeap = gc::DefaultHeap);
     void newGCThing(const Register &result, JSObject *templateObject, Label *fail);
     void newGCString(const Register &result, Label *fail);
     void newGCShortString(const Register &result, Label *fail);
@@ -800,17 +814,17 @@ class MacroAssembler : public MacroAssemblerSpecific
     CodeOffsetLabel exitCodePatch_;
 
   public:
-    void enterExitFrame(const VMFunction *f = NULL) {
+    void enterExitFrame(const VMFunction *f = nullptr) {
         linkExitFrame();
         // Push the ioncode. (Bailout or VM wrapper)
         exitCodePatch_ = PushWithPatch(ImmWord(-1));
         // Push VMFunction pointer, to mark arguments.
         Push(ImmPtr(f));
     }
-    void enterFakeExitFrame(IonCode *codeVal = NULL) {
+    void enterFakeExitFrame(IonCode *codeVal = nullptr) {
         linkExitFrame();
         Push(ImmPtr(codeVal));
-        Push(ImmPtr(NULL));
+        Push(ImmPtr(nullptr));
     }
 
     void loadForkJoinSlice(Register slice, Register scratch);
@@ -823,11 +837,11 @@ class MacroAssembler : public MacroAssemblerSpecific
                                       ExecutionMode executionMode);
 
     void enterFakeParallelExitFrame(Register slice, Register scratch,
-                                    IonCode *codeVal = NULL);
+                                    IonCode *codeVal = nullptr);
 
     void enterFakeExitFrame(Register cxReg, Register scratch,
                             ExecutionMode executionMode,
-                            IonCode *codeVal = NULL);
+                            IonCode *codeVal = nullptr);
 
     void leaveExitFrame() {
         freeStack(IonExitFooterFrame::Size());
@@ -849,13 +863,6 @@ class MacroAssembler : public MacroAssemblerSpecific
         }
 
     }
-
-    // Given a js::StackFrame in OsrFrameReg, performs inline on-stack
-    // replacement. The stack frame must be at a valid OSR entry-point.
-    void performOsr();
-
-    // Checks if an OSR frame is the previous frame, and if so, removes it.
-    void maybeRemoveOsrFrame(Register scratch);
 
     // Generates code used to complete a bailout.
     void generateBailoutTail(Register scratch, Register bailoutInfo);
@@ -908,18 +915,13 @@ class MacroAssembler : public MacroAssemblerSpecific
         // of the JSObject::isWrapper test performed in EmulatesUndefined.  If none
         // of the branches are taken, we can check class flags directly.
         loadObjClass(objReg, scratch);
-        branchPtr(Assembler::Equal, scratch, ImmPtr(&ObjectProxyObject::class_), slowCheck);
+        branchPtr(Assembler::Equal, scratch, ImmPtr(&ProxyObject::callableClass_), slowCheck);
+        branchPtr(Assembler::Equal, scratch, ImmPtr(&ProxyObject::uncallableClass_), slowCheck);
         branchPtr(Assembler::Equal, scratch, ImmPtr(&OuterWindowProxyObject::class_), slowCheck);
-        branchPtr(Assembler::Equal, scratch, ImmPtr(&FunctionProxyObject::class_), slowCheck);
 
         test32(Address(scratch, Class::offsetOfFlags()), Imm32(JSCLASS_EMULATES_UNDEFINED));
         return truthy ? Assembler::Zero : Assembler::NonZero;
     }
-
-    void pushCalleeToken(Register callee, ExecutionMode mode);
-    void PushCalleeToken(Register callee, ExecutionMode mode);
-    void tagCallee(Register callee, ExecutionMode mode);
-    void clearCalleeTag(Register callee, ExecutionMode mode);
 
   private:
     // These two functions are helpers used around call sites throughout the
@@ -976,10 +978,8 @@ class MacroAssembler : public MacroAssemblerSpecific
     void spsProfileEntryAddressSafe(SPSProfiler *p, int offset, Register temp,
                                     Label *full)
     {
-        movePtr(ImmPtr(p->addressOfSizePointer()), temp);
-
         // Load size pointer
-        loadPtr(Address(temp, 0), temp);
+        loadPtr(AbsoluteAddress(p->addressOfSizePointer()), temp);
 
         // Load size
         load32(Address(temp, 0), temp);
@@ -993,8 +993,7 @@ class MacroAssembler : public MacroAssemblerSpecific
         JS_STATIC_ASSERT(sizeof(ProfileEntry) == 4 * sizeof(void*));
         lshiftPtr(Imm32(2 + (sizeof(void*) == 4 ? 2 : 3)), temp);
         push(temp);
-        movePtr(ImmPtr(p->addressOfStack()), temp);
-        loadPtr(Address(temp, 0), temp);
+        loadPtr(AbsoluteAddress(p->addressOfStack()), temp);
         addPtr(Address(StackPointer, 0), temp);
         addPtr(Imm32(sizeof(size_t)), StackPointer);
     }
@@ -1025,7 +1024,7 @@ class MacroAssembler : public MacroAssemblerSpecific
 
         storePtr(ImmPtr(str),  Address(temp, ProfileEntry::offsetOfString()));
         storePtr(ImmGCPtr(s),  Address(temp, ProfileEntry::offsetOfScript()));
-        storePtr(ImmPtr(NULL), Address(temp, ProfileEntry::offsetOfStackAddress()));
+        storePtr(ImmPtr(nullptr), Address(temp, ProfileEntry::offsetOfStackAddress()));
         store32(Imm32(ProfileEntry::NullPCIndex), Address(temp, ProfileEntry::offsetOfPCIdx()));
 
         /* Always increment the stack size, whether or not we actually pushed. */
@@ -1046,10 +1045,10 @@ class MacroAssembler : public MacroAssemblerSpecific
         loadPtr(script, temp2);
         storePtr(temp2, Address(temp, ProfileEntry::offsetOfScript()));
 
-        storePtr(ImmPtr(NULL), Address(temp, ProfileEntry::offsetOfStackAddress()));
+        storePtr(ImmPtr(nullptr), Address(temp, ProfileEntry::offsetOfStackAddress()));
 
         // Store 0 for PCIdx because that's what interpreter does.
-        // (See Probes::enterScript, which calls spsProfiler.enter, which pushes an entry
+        // (See probes::EnterScript, which calls spsProfiler.enter, which pushes an entry
         //  with 0 pcIdx).
         store32(Imm32(0), Address(temp, ProfileEntry::offsetOfPCIdx()));
 
@@ -1067,8 +1066,7 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     // spsPropFrameSafe does not assume |profiler->sizePointer()| will stay constant.
     void spsPopFrameSafe(SPSProfiler *p, Register temp) {
-        movePtr(ImmPtr(p->addressOfSizePointer()), temp);
-        loadPtr(Address(temp, 0), temp);
+        loadPtr(AbsoluteAddress(p->addressOfSizePointer()), temp);
         add32(Imm32(-1), Address(temp, 0));
     }
 
@@ -1198,7 +1196,8 @@ class MacroAssembler : public MacroAssemblerSpecific
     void convertValueToInt(ValueOperand value, FloatRegister temp, Register output, Label *fail,
                            IntConversionBehavior behavior)
     {
-        convertValueToInt(value, NULL, NULL, NULL, NULL, InvalidReg, temp, output, fail, behavior);
+        convertValueToInt(value, nullptr, nullptr, nullptr, nullptr, InvalidReg, temp, output,
+                          fail, behavior);
     }
     bool convertValueToInt(JSContext *cx, const Value &v, Register output, Label *fail,
                            IntConversionBehavior behavior);
@@ -1221,7 +1220,7 @@ class MacroAssembler : public MacroAssemblerSpecific
                              FloatRegister temp, Register output, Label *fail,
                              bool negativeZeroCheck)
     {
-        convertValueToInt(value, input, NULL, NULL, NULL, InvalidReg, temp, output, fail,
+        convertValueToInt(value, input, nullptr, nullptr, nullptr, InvalidReg, temp, output, fail,
                           negativeZeroCheck
                           ? IntConversion_NegativeZeroCheck
                           : IntConversion_Normal);
@@ -1265,7 +1264,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     void truncateValueToInt32(ValueOperand value, MDefinition *input,
                               FloatRegister temp, Register output, Label *fail)
     {
-        convertValueToInt(value, input, NULL, NULL, NULL, InvalidReg, temp, output, fail,
+        convertValueToInt(value, input, nullptr, nullptr, nullptr, InvalidReg, temp, output, fail,
                           IntConversion_Truncate);
     }
     bool truncateValueToInt32(JSContext *cx, const Value &v, Register output, Label *fail) {
@@ -1290,13 +1289,13 @@ class MacroAssembler : public MacroAssemblerSpecific
                            Label *handleStringEntry, Label *handleStringRejoin,
                            Register stringReg, FloatRegister temp, Register output, Label *fail)
     {
-        convertValueToInt(value, input, handleStringEntry, handleStringRejoin, NULL,
+        convertValueToInt(value, input, handleStringEntry, handleStringRejoin, nullptr,
                           stringReg, temp, output, fail, IntConversion_ClampToUint8);
     }
     void clampValueToUint8(ValueOperand value, MDefinition *input,
                            FloatRegister temp, Register output, Label *fail)
     {
-        convertValueToInt(value, input, NULL, NULL, NULL, InvalidReg, temp, output, fail,
+        convertValueToInt(value, input, nullptr, nullptr, nullptr, InvalidReg, temp, output, fail,
                           IntConversion_ClampToUint8);
     }
     bool clampValueToUint8(JSContext *cx, const Value &v, Register output, Label *fail) {
@@ -1312,6 +1311,26 @@ class MacroAssembler : public MacroAssemblerSpecific
                                   Label *fail)
     {
         convertTypedOrValueToInt(src, temp, output, fail, IntConversion_ClampToUint8);
+    }
+
+  public:
+    class AfterICSaveLive {
+        friend class MacroAssembler;
+        AfterICSaveLive()
+        {}
+    };
+
+    AfterICSaveLive icSaveLive(RegisterSet &liveRegs) {
+        PushRegsInMask(liveRegs);
+        return AfterICSaveLive();
+    }
+
+    bool icBuildOOLFakeExitFrame(void *fakeReturnAddr, AfterICSaveLive &aic) {
+        return buildOOLFakeExitFrame(fakeReturnAddr);
+    }
+
+    void icRestoreLive(RegisterSet &liveRegs, AfterICSaveLive &aic) {
+        PopRegsInMask(liveRegs);
     }
 };
 

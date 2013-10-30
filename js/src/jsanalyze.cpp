@@ -15,6 +15,7 @@
 #include "jscompartment.h"
 
 #include "jsinferinlines.h"
+#include "jsobjinlines.h"
 
 using namespace js;
 using namespace js::analyze;
@@ -252,6 +253,7 @@ ScriptAnalysis::analyzeBytecode(JSContext *cx)
 
           case JSOP_EVAL:
           case JSOP_SPREADEVAL:
+          case JSOP_ENTERLET2:
           case JSOP_ENTERWITH:
             canTrackVars = false;
             break;
@@ -439,7 +441,7 @@ ScriptAnalysis::analyzeLifetimes(JSContext *cx)
     }
     unsigned savedCount = 0;
 
-    LoopAnalysis *loop = NULL;
+    LoopAnalysis *loop = nullptr;
 
     uint32_t offset = script_->length - 1;
     while (offset < script_->length) {
@@ -524,7 +526,7 @@ ScriptAnalysis::analyzeLifetimes(JSContext *cx)
                     setOOM(cx);
                     return;
                 }
-                var.saved = NULL;
+                var.saved = nullptr;
                 saved[i--] = saved[--savedCount];
             }
             savedCount = 0;
@@ -616,7 +618,7 @@ ScriptAnalysis::analyzeLifetimes(JSContext *cx)
                             setOOM(cx);
                             return;
                         }
-                        var.saved = NULL;
+                        var.saved = nullptr;
                         saved[i--] = saved[--savedCount];
                     } else if (loop && !var.savedEnd) {
                         /*
@@ -679,7 +681,7 @@ ScriptAnalysis::addVariable(JSContext *cx, LifetimeVariable &var, unsigned offse
             setOOM(cx);
             return;
         }
-        var.saved = NULL;
+        var.saved = nullptr;
     }
 }
 
@@ -729,7 +731,7 @@ ScriptAnalysis::killVariable(JSContext *cx, LifetimeVariable &var, unsigned offs
     } else {
         var.saved = var.lifetime;
         var.savedEnd = 0;
-        var.lifetime = NULL;
+        var.lifetime = nullptr;
 
         saved[savedCount++] = &var;
     }
@@ -1509,7 +1511,7 @@ ScriptAnalysis::freezeNewValues(JSContext *cx, uint32_t offset)
     Bytecode &code = getCode(offset);
 
     Vector<SlotValue> *pending = code.pendingValues;
-    code.pendingValues = NULL;
+    code.pendingValues = nullptr;
 
     unsigned count = pending->length();
     if (count == 0) {
@@ -1573,12 +1575,16 @@ ScriptAnalysis::needsArgsObj(JSContext *cx, SeenVector &seen, SSAUseChain *use)
         return false;
 
     /* We can read the frame's arguments directly for f.apply(x, arguments). */
-    if (op == JSOP_FUNAPPLY && GET_ARGC(pc) == 2 && use->u.which == 0)
+    if (op == JSOP_FUNAPPLY && GET_ARGC(pc) == 2 && use->u.which == 0) {
+        argumentsContentsObserved_ = true;
         return false;
+    }
 
     /* arguments[i] can read fp->canonicalActualArg(i) directly. */
-    if (op == JSOP_GETELEM && use->u.which == 1)
+    if (op == JSOP_GETELEM && use->u.which == 1) {
+        argumentsContentsObserved_ = true;
         return false;
+    }
 
     /* arguments.length length can read fp->numActualArgs() directly. */
     if (op == JSOP_LENGTH)
@@ -1634,19 +1640,22 @@ ScriptAnalysis::needsArgsObj(JSContext *cx)
     if (localsAliasStack())
         return true;
 
-    /*
-     * If a script has explicit mentions of 'arguments' and formals which may
-     * be stored as part of a call object, don't use lazy arguments. The
-     * compiler can then assume that accesses through arguments[i] will be on
-     * unaliased variables.
-     */
-    if (script_->funHasAnyAliasedFormal)
-        return true;
-
     unsigned pcOff = script_->argumentsBytecode() - script_->code;
 
     SeenVector seen(cx);
-    return needsArgsObj(cx, seen, SSAValue::PushedValue(pcOff, 0));
+    if (needsArgsObj(cx, seen, SSAValue::PushedValue(pcOff, 0)))
+        return true;
+
+    /*
+     * If a script explicitly accesses the contents of 'arguments', and has
+     * formals which may be stored as part of a call object, don't use lazy
+     * arguments. The compiler can then assume that accesses through
+     * arguments[i] will be on unaliased variables.
+     */
+    if (script_->funHasAnyAliasedFormal && argumentsContentsObserved_)
+        return true;
+
+    return false;
 }
 
 #ifdef DEBUG

@@ -140,7 +140,13 @@ public class BrowserSearch extends HomeFragment
     }
 
     public static BrowserSearch newInstance() {
-        return new BrowserSearch();
+        BrowserSearch browserSearch = new BrowserSearch();
+
+        final Bundle args = new Bundle();
+        args.putBoolean(HomePager.CAN_LOAD_ARG, true);
+        browserSearch.setArguments(args);
+
+        return browserSearch;
     }
 
     public BrowserSearch() {
@@ -216,8 +222,10 @@ public class BrowserSearch extends HomeFragment
 
         unregisterEventListener("SearchEngines:Data");
 
-        mView = null;
+        mList.setAdapter(null);
         mList = null;
+
+        mView = null;
         mSuggestionsOptInPrompt = null;
         mSuggestClient = null;
     }
@@ -225,6 +233,7 @@ public class BrowserSearch extends HomeFragment
     @Override
     public void onViewCreated(View view, Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
+        mList.setTag(HomePager.LIST_TAG_BROWSER_SEARCH);
 
         mList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override
@@ -279,7 +288,7 @@ public class BrowserSearch extends HomeFragment
         registerForContextMenu(mList);
         registerEventListener("SearchEngines:Data");
 
-        GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("SearchEngines:Get", null));
+        GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("SearchEngines:GetVisible", null));
     }
 
     @Override
@@ -312,7 +321,7 @@ public class BrowserSearch extends HomeFragment
 
     @Override
     protected void load() {
-        getLoaderManager().initLoader(LOADER_ID_SEARCH, null, mCursorLoaderCallbacks);
+        SearchLoader.init(getLoaderManager(), LOADER_ID_SEARCH, mCursorLoaderCallbacks, mSearchTerm);
     }
 
     private void handleAutocomplete(String searchTerm, Cursor c) {
@@ -603,7 +612,7 @@ public class BrowserSearch extends HomeFragment
             mAdapter.notifyDataSetChanged();
 
             // Restart loaders with the new search term
-            SearchLoader.restart(getLoaderManager(), LOADER_ID_SEARCH, mCursorLoaderCallbacks, mSearchTerm, false);
+            SearchLoader.restart(getLoaderManager(), LOADER_ID_SEARCH, mCursorLoaderCallbacks, mSearchTerm);
             filterSuggestions();
         }
     }

@@ -21,6 +21,7 @@ namespace mozilla {
 namespace dom {
 struct ThreeDPoint;
 class AudioParamTimeline;
+class DelayNodeEngine;
 }
 
 class ThreadSharedFloatArrayBufferList;
@@ -54,7 +55,8 @@ public:
       mKind(aKind),
       mNumberOfInputChannels(2),
       mMarkAsFinishedAfterThisBlock(false),
-      mAudioParamStream(false)
+      mAudioParamStream(false),
+      mMuted(false)
   {
     MOZ_ASSERT(NS_IsMainThread());
     mChannelCountMode = dom::ChannelCountMode::Max;
@@ -98,11 +100,18 @@ public:
                                       dom::ChannelInterpretation aChannelInterpretation);
   virtual void ProduceOutput(GraphTime aFrom, GraphTime aTo);
   TrackTicks GetCurrentPosition();
-  bool AllInputsFinished() const;
   bool IsAudioParamStream() const
   {
     return mAudioParamStream;
   }
+  void Mute() {
+    mMuted = true;
+  }
+
+  void Unmute() {
+    mMuted = false;
+  }
+
   const OutputChunks& LastChunks() const
   {
     return mLastChunks;
@@ -153,6 +162,8 @@ protected:
   bool mMarkAsFinishedAfterThisBlock;
   // Whether the stream is an AudioParamHelper stream.
   bool mAudioParamStream;
+  // Whether the stream is muted. Access only on the MediaStreamGraph thread.
+  bool mMuted;
 };
 
 }

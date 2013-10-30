@@ -4,6 +4,16 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+ifndef .PYMAKE
+ifeq (,$(MAKE_VERSION))
+$(error GNU Make is required)
+endif
+make_min_ver := 3.81
+ifneq ($(make_min_ver),$(firstword $(sort $(make_min_ver) $(MAKE_VERSION))))
+$(error GNU Make $(make_min_ver) or higher is required)
+endif
+endif
+
 TOPLEVEL_BUILD := 1
 
 run_for_side_effects := $(shell echo "MAKE: $(MAKE)")
@@ -204,11 +214,11 @@ jsconfig_FILES = $(export_files)
 jsconfig_DEST = $(DIST)/include
 jsconfig_TARGET := export
 
+include $(topsrcdir)/config/rules.mk
+
 .PHONY: buildffi buildicu
 buildffi buildicu:
-compile:: buildffi buildicu
-
-include $(topsrcdir)/config/rules.mk
+$(if $(MOZ_PSEUDO_DERECURSE),compile,export):: buildffi buildicu
 
 ifdef JS_HAS_CTYPES
 ifndef MOZ_NATIVE_FFI
@@ -241,8 +251,6 @@ ifdef ENABLE_INTL_API
 ifndef MOZ_NATIVE_ICU
 
 ifeq ($(OS_ARCH),WINNT)
-  # Parallel gmake is buggy on Windows
-  ICU_GMAKE_OPTIONS="-j1"
   # Library names: On Windows, ICU uses modified library names for static
   # and debug libraries.
   ifdef MOZ_DEBUG
@@ -252,13 +260,20 @@ ifeq ($(OS_ARCH),WINNT)
                      cp -p intl/icu/lib/s$(libname)$(ICU_LIB_SUFFIX).lib intl/icu/lib/$(libname).lib;)
 endif
 
+ifdef .PYMAKE
+ICU_MAKE = $(GMAKE)
+else
+ICU_MAKE = $(MAKE)
+endif
+
 # - ICU requires GNU make according to its readme.html. pymake can't be used
 #   because it doesn't support order only dependencies.
 # - Force ICU to use the standard suffix for object files because expandlibs
 #   will discard all files with a non-standard suffix (bug 857450).
 # - Options for genrb: -k strict parsing; -R omit collation tailoring rules.
 buildicu:
-	$(GMAKE) $(ICU_GMAKE_OPTIONS) -C intl/icu STATIC_O=$(OBJ_SUFFIX) GENRBOPTS='-k -R'
+# ICU's build system is full of races, so force non-parallel build.
+	+$(ICU_MAKE) -j1 -C intl/icu STATIC_O=$(OBJ_SUFFIX) GENRBOPTS='-k -R'
 	$(ICU_LIB_RENAME)
 
 distclean clean::
@@ -298,11 +313,18 @@ JITTEST_VALGRIND_FLAG = --valgrind
 endif
 endif
 
+ifdef MOZ_ASAN
+ifneq ($(LLVM_SYMBOLIZER),)
+# Use the LLVM symbolizer when running jit-tests under ASan, if available
+JITTEST_ASAN_ENV=ASAN_SYMBOLIZER_PATH='$(LLVM_SYMBOLIZER)'
+endif
+endif
+
 check-style::
 	(cd $(srcdir) && $(PYTHON) config/check_spidermonkey_style.py);
 
 check-jit-test::
-	$(wildcard $(RUN_TEST_PROGRAM)) $(PYTHON) -u $(srcdir)/jit-test/jit_test.py \
+	$(JITTEST_ASAN_ENV) $(wildcard $(RUN_TEST_PROGRAM)) $(PYTHON) -u $(srcdir)/jit-test/jit_test.py \
 	        --no-slow --no-progress --tinderbox --tbpl $(JITTEST_VALGRIND_FLAG) \
 	        $(DIST)/bin/$(JS_SHELL_NAME)$(BIN_SUFFIX)
 
@@ -555,11 +577,8 @@ install:: $(LIBRARY_NAME).pc
 #          mfbt headers
 #
 
-install:: $(EXPORTS)
-	$(SYSINSTALL) $^ $(DESTDIR)$(includedir)/$(LIBRARY_NAME)
-
-install:: $(EXPORTS_js)
-	$(SYSINSTALL) $^ $(DESTDIR)$(includedir)/$(LIBRARY_NAME)/js
+install::
+	$(call py_action,process_install_manifest,--no-remove $(DESTDIR)$(includedir)/$(LIBRARY_NAME) _build_manifests/install/dist_include)
 
 install:: $(EXPORTS_mozilla)
 	$(SYSINSTALL) $^ $(DESTDIR)$(includedir)/$(LIBRARY_NAME)/mozilla
@@ -584,15 +603,10 @@ ifneq (,$(IMPORT_LIBRARY))
 endif
 	$(MAKE) -C shell install
 
-# Extra dependencies and rules for auto-generated headers
-host_jskwgen.$(OBJ_SUFFIX): jsversion.h vm/Keywords.h
-
 # Use CURDIR to avoid finding a jsautokw.h in the source tree (from a
 # previous build?) via VPATH when we're building in a separate tree.
 $(CURDIR)/jsautokw.h: host_jskwgen$(HOST_BIN_SUFFIX)
 	./host_jskwgen$(HOST_BIN_SUFFIX) $@
-
-host_jsoplengen.$(OBJ_SUFFIX): jsopcode.tbl
 
 # Use CURDIR to avoid finding a jsautooplen.h in the source tree (from
 # a previous build?) via VPATH when we're building in a separate tree.
@@ -600,7 +614,7 @@ $(CURDIR)/jsautooplen.h: host_jsoplengen$(HOST_BIN_SUFFIX)
 	./host_jsoplengen$(HOST_BIN_SUFFIX) $@
 
 # Force auto-header generation before compiling any source that may use them
-$(patsubst %.cc,%.$(OBJ_SUFFIX),$(CPPSRCS:%.cpp=%.$(OBJ_SUFFIX))): $(CURDIR)/jsautokw.h $(CURDIR)/jsautooplen.h
+$(OBJS): $(CURDIR)/jsautokw.h $(CURDIR)/jsautooplen.h
 
 ifdef MOZ_ETW
 ETWProvider.h ETWProvider.rc ETWProvider.mof: ETWProvider.man
@@ -644,11 +658,13 @@ selfhosting_srcs := \
   $(srcdir)/builtin/Date.js \
   $(srcdir)/builtin/Intl.js \
   $(srcdir)/builtin/IntlData.js \
+  $(srcdir)/builtin/Iterator.js \
+  $(srcdir)/builtin/Map.js \
   $(srcdir)/builtin/Number.js \
   $(srcdir)/builtin/ParallelArray.js \
   $(srcdir)/builtin/String.js \
   $(srcdir)/builtin/Set.js \
-  $(srcdir)/builtin/Map.js \
+  $(srcdir)/builtin/TypedObject.js \
   $(NULL)
 
 selfhosted_out_h_deps := \

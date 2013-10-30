@@ -93,7 +93,7 @@ public class Tab {
         mUserSearch = "";
         mExternal = external;
         mParentId = parentId;
-        mAboutHomePage = HomePager.Page.BOOKMARKS;
+        mAboutHomePage = HomePager.Page.TOP_SITES;
         mTitle = title == null ? "" : title;
         mFavicon = null;
         mFaviconUrl = null;
@@ -464,7 +464,7 @@ public class Tab {
             Tabs.getInstance().loadUrl(ReaderModeUtils.getUrlFromAboutReader(mUrl));
         } else if (mReaderEnabled) {
             mEnteringReaderMode = true;
-            Tabs.getInstance().loadUrl(ReaderModeUtils.getAboutReaderForUrl(mUrl, mId, mReadingListItem));
+            Tabs.getInstance().loadUrl(ReaderModeUtils.getAboutReaderForUrl(mUrl, mId));
         }
     }
 

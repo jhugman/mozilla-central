@@ -6,10 +6,12 @@
 
 Cu.import('resource://gre/modules/ContactService.jsm');
 Cu.import('resource://gre/modules/SettingsChangeNotifier.jsm');
+Cu.import('resource://gre/modules/DataStoreChangeNotifier.jsm');
 Cu.import('resource://gre/modules/AlarmService.jsm');
 Cu.import('resource://gre/modules/ActivitiesService.jsm');
 Cu.import('resource://gre/modules/PermissionPromptHelper.jsm');
 Cu.import('resource://gre/modules/ObjectWrapper.jsm');
+Cu.import('resource://gre/modules/NotificationDB.jsm');
 Cu.import('resource://gre/modules/accessibility/AccessFu.jsm');
 Cu.import('resource://gre/modules/Payment.jsm');
 Cu.import("resource://gre/modules/AppsUtils.jsm");
@@ -528,6 +530,14 @@ var shell = {
     content.dispatchEvent(event);
   },
 
+  sendCustomEvent: function shell_sendCustomEvent(type, details) {
+    let content = getContentWindow();
+    let event = content.document.createEvent('CustomEvent');
+    let payload = details ? ObjectWrapper.wrap(details, content) : {};
+    event.initCustomEvent(type, true, true, payload);
+    content.dispatchEvent(event);
+  },
+
   sendChromeEvent: function shell_sendChromeEvent(details) {
     if (!this.isHomeLoaded) {
       if (!('pendingChromeEvents' in this)) {
@@ -544,8 +554,7 @@ var shell = {
 
   openAppForSystemMessage: function shell_openAppForSystemMessage(msg) {
     let origin = Services.io.newURI(msg.manifest, null, null).prePath;
-    this.sendChromeEvent({
-      type: 'open-app',
+    let payload = {
       url: msg.uri,
       manifestURL: msg.manifest,
       isActivity: (msg.type == 'activity'),
@@ -554,7 +563,8 @@ var shell = {
       target: msg.target,
       expectingSystemMessage: true,
       extra: msg.extra
-    });
+    }
+    this.sendCustomEvent('open-app', payload);
   },
 
   receiveMessage: function shell_receiveMessage(message) {
@@ -886,18 +896,20 @@ var AlertsHelper = {
     }
 
     let data = aMessage.data;
+    let details = data.details;
     let listener = {
       mm: aMessage.target,
       title: data.title,
       text: data.text,
-      manifestURL: data.manifestURL,
+      manifestURL: details.manifestURL,
       imageURL: data.imageURL
-    }
+    };
     this.registerAppListener(data.uid, listener);
 
     this.showNotification(data.imageURL, data.title, data.text,
-                          data.textClickable, null,
-                          data.uid, null, null, data.manifestURL);
+                          details.textClickable, null,
+                          data.uid, details.dir,
+                          details.lang, details.manifestURL);
   },
 }
 
@@ -944,12 +956,17 @@ var WebappsHelper = {
             return;
 
           let manifest = new ManifestHelper(aManifest, json.origin);
-          shell.sendChromeEvent({
-            "type": "webapps-launch",
-            "timestamp": json.timestamp,
-            "url": manifest.fullLaunchPath(json.startPoint),
-            "manifestURL": json.manifestURL
-          });
+          let payload = {
+            __exposedProps__: {
+              timestamp: "r",
+              url: "r",
+              manifestURL: "r"
+            },
+            timestamp: json.timestamp,
+            url: manifest.fullLaunchPath(json.startPoint),
+            manifestURL: json.manifestURL
+          }
+          shell.sendEvent(getContentWindow(), "webapps-launch", payload);
         });
         break;
       case "webapps-ask-install":
@@ -961,10 +978,11 @@ var WebappsHelper = {
         });
         break;
       case "webapps-close":
-        shell.sendChromeEvent({
-          "type": "webapps-close",
-          "manifestURL": json.manifestURL
-        });
+        shell.sendEvent(shell.getContentWindow(), "webapps-close",
+          {
+            __exposedProps__: { "manifestURL": "r" },
+            "manifestURL": json.manifestURL
+          });
         break;
     }
   }
@@ -1242,23 +1260,62 @@ window.addEventListener('ContentStart', function update_onContentStart() {
 
 (function recordingStatusTracker() {
   let gRecordingActiveCount = 0;
+  let gRecordingActiveProcesses = {};
 
-  Services.obs.addObserver(function(aSubject, aTopic, aData) {
+  let recordingHandler = function(aSubject, aTopic, aData) {
     let oldCount = gRecordingActiveCount;
-    if (aData == "starting") {
-      gRecordingActiveCount += 1;
-    } else if (aData == "shutdown") {
-      gRecordingActiveCount -= 1;
+
+    let processId = (!aSubject) ? 'main'
+                                : aSubject.QueryInterface(Ci.nsIPropertyBag2).get('childID');
+    if (processId && !gRecordingActiveProcesses.hasOwnProperty(processId)) {
+      gRecordingActiveProcesses[processId] = 0;
     }
 
-    // We need to track changes from 1 <-> 0
-    if (gRecordingActiveCount + oldCount == 1) {
+    let currentActive = gRecordingActiveProcesses[processId];
+    switch (aData) {
+      case 'starting':
+        gRecordingActiveCount++;
+        currentActive++;
+        break;
+      case 'shutdown':
+        // Bug 928206 will make shutdown be sent even if no starting.
+        if (currentActive > 0) {
+          gRecordingActiveCount--;
+          currentActive--;
+        }
+        break;
+      case 'content-shutdown':
+        gRecordingActiveCount -= currentActive;
+        currentActive = 0;
+        break;
+    }
+
+    if (currentActive > 0) {
+      gRecordingActiveProcesses[processId] = currentActive;
+    } else {
+      delete gRecordingActiveProcesses[processId];
+    }
+
+    // We need to track changes from N <-> 0
+    if ((oldCount === 0 && gRecordingActiveCount > 0) ||
+        (gRecordingActiveCount === 0 && oldCount > 0)) {
       shell.sendChromeEvent({
         type: 'recording-status',
-        active: (gRecordingActiveCount == 1)
+        active: (gRecordingActiveCount > 0)
       });
     }
-}, "recording-device-events", false);
+  };
+  Services.obs.addObserver(recordingHandler, 'recording-device-events', false);
+  Services.obs.addObserver(recordingHandler, 'recording-device-ipc-events', false);
+
+  Services.obs.addObserver(function(aSubject, aTopic, aData) {
+    // send additional recording events if content process is being killed
+    let props = aSubject.QueryInterface(Ci.nsIPropertyBag2);
+    let childId = aSubject.get('childID');
+    if (gRecordingActiveProcesses.hasOwnProperty(childId) >= 0) {
+      Services.obs.notifyObservers(aSubject, 'recording-device-ipc-events', 'content-shutdown');
+    }
+  }, 'ipc:content-shutdown', false);
 })();
 
 (function volumeStateTracker() {
@@ -1269,16 +1326,6 @@ window.addEventListener('ContentStart', function update_onContentStart() {
     });
 }, 'volume-state-changed', false);
 })();
-
-Services.obs.addObserver(function(aSubject, aTopic, aData) {
-  let data = JSON.parse(aData);
-  shell.sendChromeEvent({
-    type: "activity-done",
-    success: data.success,
-    manifestURL: data.manifestURL,
-    pageURL: data.pageURL
-  });
-}, "activity-done", false);
 
 #ifdef MOZ_WIDGET_GONK
 // Devices don't have all the same partition size for /cache where we

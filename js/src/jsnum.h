@@ -13,9 +13,6 @@
 
 #include "vm/NumericConversions.h"
 
-extern double js_PositiveInfinity;
-extern double js_NegativeInfinity;
-
 namespace js {
 
 class StringBuffer;
@@ -104,7 +101,7 @@ struct ToCStringBuf
 /*
  * Convert a number to a C string.  When base==10, this function implements
  * ToString() as specified by ECMA-262-5 section 9.8.1.  It handles integral
- * values cheaply.  Return NULL if we ran out of memory.  See also
+ * values cheaply.  Return nullptr if we ran out of memory.  See also
  * js_NumberToCString().
  */
 extern char *
@@ -163,7 +160,7 @@ ToNumber(JSContext *cx, JS::MutableHandleValue vp)
     if (vp.isNumber())
         return true;
     double d;
-    extern bool ToNumberSlow(JSContext *cx, Value v, double *dp);
+    extern JS_PUBLIC_API(bool) ToNumberSlow(JSContext *cx, Value v, double *dp);
     if (!ToNumberSlow(cx, vp, &d))
         return false;
 
@@ -252,7 +249,7 @@ ToInteger(JSContext *cx, HandleValue v, double *dp)
     if (v.isDouble()) {
         *dp = v.toDouble();
     } else {
-        extern bool ToNumberSlow(JSContext *cx, Value v, double *dp);
+        extern JS_PUBLIC_API(bool) ToNumberSlow(JSContext *cx, Value v, double *dp);
         if (!ToNumberSlow(cx, v, dp))
             return false;
     }

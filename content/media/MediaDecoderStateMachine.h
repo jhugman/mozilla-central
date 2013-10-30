@@ -228,14 +228,14 @@ public:
   // The decoder monitor must be obtained before calling this.
   bool HasAudio() const {
     mDecoder->GetReentrantMonitor().AssertCurrentThreadIn();
-    return mInfo.mHasAudio;
+    return mInfo.HasAudio();
   }
 
   // This is called on the state machine thread and audio thread.
   // The decoder monitor must be obtained before calling this.
   bool HasVideo() const {
     mDecoder->GetReentrantMonitor().AssertCurrentThreadIn();
-    return mInfo.mHasVideo;
+    return mInfo.HasVideo();
   }
 
   // Should be called by main thread.
@@ -320,7 +320,13 @@ public:
   void SetFragmentEndTime(int64_t aEndTime);
 
   // Drop reference to decoder.  Only called during shutdown dance.
-  void ReleaseDecoder() { mDecoder = nullptr; }
+  void ReleaseDecoder() {
+    MOZ_ASSERT(mReader);
+    if (mReader) {
+      mReader->ReleaseDecoder();
+    }
+    mDecoder = nullptr;
+  }
 
    // Called when a "MozAudioAvailable" event listener is added to the media
    // element. Called on the main thread.
@@ -810,7 +816,7 @@ private:
 
   // Stores presentation info required for playback. The decoder monitor
   // must be held when accessing this.
-  VideoInfo mInfo;
+  MediaInfo mInfo;
 
   mozilla::MediaMetadataManager mMetadataManager;
 

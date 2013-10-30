@@ -111,6 +111,18 @@ function getTestPlugin(aName) {
   return null;
 }
 
+// call this to set the test plugin(s) initially expected enabled state.
+// it will automatically be reset to it's previous value after the test
+// ends
+function setTestPluginEnabledState(newEnabledState, pluginName) {
+  var plugin = getTestPlugin(pluginName);
+  var oldEnabledState = plugin.enabledState;
+  plugin.enabledState = newEnabledState;
+  SimpleTest.registerCleanupFunction(function() {
+    getTestPlugin(pluginName).enabledState = oldEnabledState;
+  });
+}
+
 // after a test is done using the plugin doorhanger, we should just clear
 // any permissions that may have crept in
 function clearAllPluginPermissions() {
@@ -293,13 +305,25 @@ function promiseHistoryClearedState(aURIs, aShouldBeCleared) {
 let FullZoomHelper = {
 
   selectTabAndWaitForLocationChange: function selectTabAndWaitForLocationChange(tab) {
+    if (!tab)
+      throw new Error("tab must be given.");
+    if (gBrowser.selectedTab == tab)
+      return Promise.resolve();
+    gBrowser.selectedTab = tab;
+    return this.waitForLocationChange();
+  },
+
+  removeTabAndWaitForLocationChange: function removeTabAndWaitForLocationChange(tab) {
+    tab = tab || gBrowser.selectedTab;
+    let selected = gBrowser.selectedTab == tab;
+    gBrowser.removeTab(tab);
+    if (selected)
+      return this.waitForLocationChange();
+    return Promise.resolve();
+  },
+
+  waitForLocationChange: function waitForLocationChange() {
     let deferred = Promise.defer();
-    if (tab && gBrowser.selectedTab == tab) {
-      deferred.resolve();
-      return deferred.promise;
-    }
-    if (tab)
-      gBrowser.selectedTab = tab;
     Services.obs.addObserver(function obs(subj, topic, data) {
       Services.obs.removeObserver(obs, topic);
       deferred.resolve();
@@ -319,7 +343,7 @@ let FullZoomHelper = {
         deferred.resolve();
     }, true);
 
-    this.selectTabAndWaitForLocationChange(null).then(function () {
+    this.waitForLocationChange().then(function () {
       didZoom = true;
       if (didLoad)
         deferred.resolve();
@@ -371,7 +395,7 @@ let FullZoomHelper = {
     else if (direction == this.FORWARD)
       gBrowser.goForward();
 
-    this.selectTabAndWaitForLocationChange(null).then(function () {
+    this.waitForLocationChange().then(function () {
       didZoom = true;
       if (didPs)
         deferred.resolve();

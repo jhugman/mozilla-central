@@ -246,7 +246,7 @@ InstDTR::asTHIS(const Instruction &i)
 {
     if (isTHIS(i))
         return (InstDTR*)&i;
-    return NULL;
+    return nullptr;
 }
 
 bool
@@ -260,7 +260,7 @@ InstLDR::asTHIS(const Instruction &i)
 {
     if (isTHIS(i))
         return (InstLDR*)&i;
-    return NULL;
+    return nullptr;
 }
 
 InstNOP *
@@ -268,7 +268,7 @@ InstNOP::asTHIS(Instruction &i)
 {
     if (isTHIS(i))
         return (InstNOP*) (&i);
-    return NULL;
+    return nullptr;
 }
 
 bool
@@ -288,7 +288,7 @@ InstBranchReg::asTHIS(const Instruction &i)
 {
     if (isTHIS(i))
         return (InstBranchReg*)&i;
-    return NULL;
+    return nullptr;
 }
 void
 InstBranchReg::extractDest(Register *dest)
@@ -312,7 +312,7 @@ InstBranchImm::asTHIS(const Instruction &i)
 {
     if (isTHIS(i))
         return (InstBranchImm*)&i;
-    return NULL;
+    return nullptr;
 }
 
 void
@@ -332,7 +332,7 @@ InstBXReg::asTHIS(const Instruction &i)
 {
     if (isTHIS(i))
         return (InstBXReg*)&i;
-    return NULL;
+    return nullptr;
 }
 
 bool
@@ -346,7 +346,7 @@ InstBLXReg::asTHIS(const Instruction &i)
 {
     if (isTHIS(i))
         return (InstBLXReg*)&i;
-    return NULL;
+    return nullptr;
 }
 
 bool
@@ -359,7 +359,7 @@ InstBImm::asTHIS(const Instruction &i)
 {
     if (isTHIS(i))
         return (InstBImm*)&i;
-    return NULL;
+    return nullptr;
 }
 
 bool
@@ -373,7 +373,7 @@ InstBLImm::asTHIS(Instruction &i)
 {
     if (isTHIS(i))
         return (InstBLImm*)&i;
-    return NULL;
+    return nullptr;
 }
 
 bool
@@ -386,7 +386,7 @@ InstMovWT::asTHIS(Instruction &i)
 {
     if (isTHIS(i))
         return (InstMovWT*)&i;
-    return NULL;
+    return nullptr;
 }
 
 void
@@ -422,14 +422,14 @@ InstMovW::asTHIS(const Instruction &i)
 {
     if (isTHIS(i))
         return (InstMovW*) (&i);
-    return NULL;
+    return nullptr;
 }
 InstMovT *
 InstMovT::asTHIS(const Instruction &i)
 {
     if (isTHIS(i))
         return (InstMovT*) (&i);
-    return NULL;
+    return nullptr;
 }
 
 bool
@@ -443,7 +443,7 @@ InstALU::asTHIS(const Instruction &i)
 {
     if (isTHIS(i))
         return (InstALU*) (&i);
-    return NULL;
+    return nullptr;
 }
 bool
 InstALU::isTHIS(const Instruction &i)
@@ -493,7 +493,7 @@ InstCMP::asTHIS(const Instruction &i)
 {
     if (isTHIS(i))
         return (InstCMP*) (&i);
-    return NULL;
+    return nullptr;
 }
 
 bool
@@ -507,7 +507,7 @@ InstMOV::asTHIS(const Instruction &i)
 {
     if (isTHIS(i))
         return (InstMOV*) (&i);
-    return NULL;
+    return nullptr;
 }
 
 bool
@@ -742,7 +742,7 @@ uintptr_t
 Assembler::getPointer(uint8_t *instPtr)
 {
     InstructionIterator iter((Instruction*)instPtr);
-    uintptr_t ret = (uintptr_t)getPtr32Target(&iter, NULL, NULL);
+    uintptr_t ret = (uintptr_t)getPtr32Target(&iter, nullptr, nullptr);
     return ret;
 }
 
@@ -1222,28 +1222,31 @@ BOffImm::getDest(Instruction *src)
 
 //VFPRegister implementation
 VFPRegister
-VFPRegister::doubleOverlay()
+VFPRegister::doubleOverlay() const
 {
     JS_ASSERT(!_isInvalid);
-    if (kind != Double)
+    if (kind != Double) {
+        JS_ASSERT(_code % 2 == 0);
         return VFPRegister(_code >> 1, Double);
+    }
     return *this;
 }
 VFPRegister
-VFPRegister::singleOverlay()
+VFPRegister::singleOverlay() const
 {
     JS_ASSERT(!_isInvalid);
     if (kind == Double) {
         // There are no corresponding float registers for d16-d31
-        ASSERT(_code < 16);
+        JS_ASSERT(_code < 16);
         return VFPRegister(_code << 1, Single);
     }
 
+    JS_ASSERT(_code % 2 == 0);
     return VFPRegister(_code, Single);
 }
 
 VFPRegister
-VFPRegister::sintOverlay()
+VFPRegister::sintOverlay() const
 {
     JS_ASSERT(!_isInvalid);
     if (kind == Double) {
@@ -1252,10 +1255,11 @@ VFPRegister::sintOverlay()
         return VFPRegister(_code << 1, Int);
     }
 
+    JS_ASSERT(_code % 2 == 0);
     return VFPRegister(_code, Int);
 }
 VFPRegister
-VFPRegister::uintOverlay()
+VFPRegister::uintOverlay() const
 {
     JS_ASSERT(!_isInvalid);
     if (kind == Double) {
@@ -1264,6 +1268,7 @@ VFPRegister::uintOverlay()
         return VFPRegister(_code << 1, UInt);
     }
 
+    JS_ASSERT(_code % 2 == 0);
     return VFPRegister(_code, UInt);
 }
 
@@ -1337,7 +1342,7 @@ Assembler::bytesNeeded() const
 BufferOffset
 Assembler::writeInst(uint32_t x, uint32_t *dest)
 {
-    if (dest == NULL)
+    if (dest == nullptr)
         return m_buffer.putInt(x);
 
     writeInstStatic(x, dest);
@@ -1346,7 +1351,7 @@ Assembler::writeInst(uint32_t x, uint32_t *dest)
 void
 Assembler::writeInstStatic(uint32_t x, uint32_t *dest)
 {
-    JS_ASSERT(dest != NULL);
+    JS_ASSERT(dest != nullptr);
     *dest = x;
 }
 
@@ -1490,7 +1495,7 @@ Assembler::as_movt(Register dest, Imm16 imm, Condition c, Instruction *pos)
     return writeInst(0x03400000 | c | imm.encode() | RD(dest), (uint32_t*)pos);
 }
 
-const int mull_tag = 0x90;
+static const int mull_tag = 0x90;
 
 BufferOffset
 Assembler::as_genmul(Register dhi, Register dlo, Register rm, Register rn,
@@ -1614,7 +1619,7 @@ class PoolHintData {
         JS_ASSERT(cond == cond_ >> 28);
         loadType = lt;
         ONES = expectedOnes;
-        destReg = destReg_.code();
+        destReg = destReg_.isDouble() ? destReg_.code() : destReg_.doubleOverlay().code();
         destType = destReg_.isDouble();
     }
     Assembler::Condition getCond() {
@@ -1625,8 +1630,8 @@ class PoolHintData {
         return Register::FromCode(destReg);
     }
     VFPRegister getVFPReg() {
-        return VFPRegister(FloatRegister::FromCode(destReg),
-                           destType ? VFPRegister::Double : VFPRegister::Single);
+        VFPRegister r = VFPRegister(FloatRegister::FromCode(destReg));
+        return destType ? r : r.singleOverlay();
     }
 
     int32_t getIndex() {
@@ -1811,7 +1816,7 @@ Assembler::patchConstantPoolLoad(void* loadAddr, void* constPoolAddr)
         // don't matter (except the condition code, since that is always preserved across
         // patchings) but if it does not get bound later,
         // then we want to make sure this is a load from the pool entry (and the pool entry
-        // should be NULL so it will crash).
+        // should be nullptr so it will crash).
         if (data.isValidPoolHint()) {
             dummy->as_dtr(IsLoad, 32, Offset, pc,
                           DTRAddr(pc, DtrOffImm(offset+4*data.getIndex() - 8)),
@@ -2503,7 +2508,7 @@ struct PoolHeader : Instruction {
     }
     static const PoolHeader *asTHIS(const Instruction &i) {
         if (!isTHIS(i))
-            return NULL;
+            return nullptr;
         return static_cast<const PoolHeader*>(&i);
     }
 };
@@ -2557,7 +2562,8 @@ Assembler::patchWrite_NearCall(CodeLocationLabel start, CodeLocationLabel toCall
 
 }
 void
-Assembler::patchDataWithValueCheck(CodeLocationLabel label, ImmPtr newValue, ImmPtr expectedValue)
+Assembler::patchDataWithValueCheck(CodeLocationLabel label, PatchedImmPtr newValue,
+                                   PatchedImmPtr expectedValue)
 {
     Instruction *ptr = (Instruction *) label.raw();
     InstructionIterator iter(ptr);
@@ -2572,6 +2578,12 @@ Assembler::patchDataWithValueCheck(CodeLocationLabel label, ImmPtr newValue, Imm
         AutoFlushCache::updateTop(uintptr_t(ptr), 4);
         AutoFlushCache::updateTop(uintptr_t(ptr->next()), 4);
     }
+}
+
+void
+Assembler::patchDataWithValueCheck(CodeLocationLabel label, ImmPtr newValue, ImmPtr expectedValue)
+{
+    patchDataWithValueCheck(label, PatchedImmPtr(newValue.value), PatchedImmPtr(expectedValue.value));
 }
 
 // This just stomps over memory with 32 bits of raw data. Its purpose is to
@@ -2593,7 +2605,7 @@ uint8_t *
 Assembler::nextInstruction(uint8_t *inst_, uint32_t *count)
 {
     Instruction *inst = reinterpret_cast<Instruction*>(inst_);
-    if (count != NULL)
+    if (count != nullptr)
         *count += sizeof(Instruction);
     return reinterpret_cast<uint8_t*>(inst->next());
 }
@@ -2609,7 +2621,7 @@ InstIsGuard(Instruction *inst, const PoolHeader **ph)
         return false;
     // See if the next instruction is a pool header.
     *ph = (inst+1)->as<const PoolHeader>();
-    return *ph != NULL;
+    return *ph != nullptr;
 }
 
 static bool
@@ -2803,7 +2815,7 @@ AutoFlushCache::~AutoFlushCache()
     IonSpewCont(IonSpew_CacheFlush, ">", name_);
     if (runtime_->flusher() == this) {
         IonSpewFin(IonSpew_CacheFlush);
-        runtime_->setFlusher(NULL);
+        runtime_->setFlusher(nullptr);
     }
 }
 
@@ -2821,7 +2833,7 @@ AutoFlushCache::flushAnyway()
     if (start_) {
         JSC::ExecutableAllocator::cacheFlush((void *)start_, size_t(stop_ - start_ + sizeof(Instruction)));
     } else {
-        JSC::ExecutableAllocator::cacheFlush(NULL, 0xff000000);
+        JSC::ExecutableAllocator::cacheFlush(nullptr, 0xff000000);
     }
     used_ = false;
 }
@@ -2833,4 +2845,4 @@ InstructionIterator::InstructionIterator(Instruction *i_) : i(i_) {
         i = i->next();
     }
 }
-Assembler *Assembler::dummy = NULL;
+Assembler *Assembler::dummy = nullptr;

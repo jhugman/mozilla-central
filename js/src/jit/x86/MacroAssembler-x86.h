@@ -558,6 +558,12 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         j(cond, label);
     }
 
+    // Specialization for AsmJSAbsoluteAddress.
+    void branchPtr(Condition cond, AsmJSAbsoluteAddress lhs, Register ptr, Label *label) {
+        cmpl(lhs, ptr);
+        j(cond, label);
+    }
+
     template <typename T, typename S>
     void branchPtr(Condition cond, T lhs, S ptr, Label *label) {
         cmpl(Operand(lhs), ptr);
@@ -623,6 +629,9 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
     }
     void movePtr(ImmPtr imm, Register dest) {
         movl(imm, dest);
+    }
+    void movePtr(AsmJSImmPtr imm, Register dest) {
+        mov(imm, dest);
     }
     void movePtr(ImmGCPtr imm, Register dest) {
         movl(imm, dest);
@@ -759,7 +768,7 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         movl(payloadOf(src), dest);
     }
     void unboxDouble(const Address &src, const FloatRegister &dest) {
-        movsd(Operand(src), dest);
+        loadDouble(Operand(src), dest);
     }
     void unboxBoolean(const ValueOperand &src, const Register &dest) {
         movl(src.payloadReg(), dest);
@@ -870,16 +879,22 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
     void addConstantFloat32(float f, const FloatRegister &dest);
 
     void branchTruncateDouble(const FloatRegister &src, const Register &dest, Label *fail) {
-        const uint32_t IndefiniteIntegerValue = 0x80000000;
         cvttsd2si(src, dest);
-        cmpl(dest, Imm32(IndefiniteIntegerValue));
-        j(Assembler::Equal, fail);
+
+        // cvttsd2si returns 0x80000000 on failure. Test for it by
+        // subtracting 1 and testing overflow (this permits the use of a
+        // smaller immediate field).
+        cmpl(dest, Imm32(1));
+        j(Assembler::Overflow, fail);
     }
     void branchTruncateFloat32(const FloatRegister &src, const Register &dest, Label *fail) {
-        const uint32_t IndefiniteIntegerValue = 0x80000000;
         cvttss2si(src, dest);
-        cmpl(dest, Imm32(IndefiniteIntegerValue));
-        j(Assembler::Equal, fail);
+
+        // cvttss2si returns 0x80000000 on failure. Test for it by
+        // subtracting 1 and testing overflow (this permits the use of a
+        // smaller immediate field).
+        cmpl(dest, Imm32(1));
+        j(Assembler::Overflow, fail);
     }
 
     Condition testInt32Truthy(bool truthy, const ValueOperand &operand) {
@@ -906,7 +921,7 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         convertInt32ToDouble(ToPayload(operand), dest);
         jump(&end);
         bind(&notInt32);
-        movsd(operand, dest);
+        loadDouble(operand, dest);
         bind(&end);
     }
 
@@ -1028,6 +1043,7 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
   public:
     // Emits a call to a C/C++ function, resolving all argument moves.
     void callWithABI(void *fun, Result result = GENERAL);
+    void callWithABI(AsmJSImmPtr fun, Result result = GENERAL);
     void callWithABI(const Address &fun, Result result = GENERAL);
 
     // Used from within an Exit frame to handle a pending exception.
@@ -1064,16 +1080,6 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         push(Imm32(MakeFrameDescriptor(0, IonFrame_Osr)));
         call(code);
         addl(Imm32(sizeof(uintptr_t) * 2), esp);
-    }
-
-    // See CodeGeneratorX86 calls to noteAsmJSGlobalAccess.
-    void patchAsmJSGlobalAccess(unsigned offset, uint8_t *code, uint8_t *globalData,
-                                unsigned globalDataOffset)
-    {
-        uint8_t *nextInsn = code + offset;
-        JS_ASSERT(nextInsn <= globalData);
-        uint8_t *target = globalData + globalDataOffset;
-        ((int32_t *)nextInsn)[-1] = uintptr_t(target);
     }
 };
 

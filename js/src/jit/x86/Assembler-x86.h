@@ -46,6 +46,7 @@ static MOZ_CONSTEXPR_VAR Register ReturnReg = eax;
 static MOZ_CONSTEXPR_VAR FloatRegister ReturnFloatReg = xmm0;
 static MOZ_CONSTEXPR_VAR FloatRegister ScratchFloatReg = xmm7;
 
+// Avoid ebp, which is the FramePointer, which is unavailable in some modes.
 static MOZ_CONSTEXPR_VAR Register ArgumentsRectifierReg = esi;
 static MOZ_CONSTEXPR_VAR Register CallTempReg0 = edi;
 static MOZ_CONSTEXPR_VAR Register CallTempReg1 = eax;
@@ -53,7 +54,6 @@ static MOZ_CONSTEXPR_VAR Register CallTempReg2 = ebx;
 static MOZ_CONSTEXPR_VAR Register CallTempReg3 = ecx;
 static MOZ_CONSTEXPR_VAR Register CallTempReg4 = esi;
 static MOZ_CONSTEXPR_VAR Register CallTempReg5 = edx;
-static MOZ_CONSTEXPR_VAR Register CallTempReg6 = ebp;
 
 // We have no arg regs, so our NonArgRegs are just our CallTempReg*
 static MOZ_CONSTEXPR_VAR Register CallTempNonArgRegs[] = { edi, eax, ebx, ecx, esi, edx };
@@ -107,105 +107,6 @@ struct ImmType : public ImmTag
 };
 
 static const Scale ScalePointer = TimesFour;
-
-class Operand
-{
-  public:
-    enum Kind {
-        REG,
-        MEM_REG_DISP,
-        FPREG,
-        MEM_SCALE,
-        MEM_ADDRESS32
-    };
-
-  private:
-    Kind kind_ : 4;
-    int32_t base_ : 5;
-    Scale scale_ : 3;
-    int32_t index_ : 5;
-    int32_t disp_;
-
-  public:
-    explicit Operand(Register reg)
-      : kind_(REG),
-        base_(reg.code())
-    { }
-    explicit Operand(FloatRegister reg)
-      : kind_(FPREG),
-        base_(reg.code())
-    { }
-    explicit Operand(const Address &address)
-      : kind_(MEM_REG_DISP),
-        base_(address.base.code()),
-        disp_(address.offset)
-    { }
-    explicit Operand(const BaseIndex &address)
-      : kind_(MEM_SCALE),
-        base_(address.base.code()),
-        scale_(address.scale),
-        index_(address.index.code()),
-        disp_(address.offset)
-    { }
-    Operand(Register base, Register index, Scale scale, int32_t disp = 0)
-      : kind_(MEM_SCALE),
-        base_(base.code()),
-        scale_(scale),
-        index_(index.code()),
-        disp_(disp)
-    { }
-    Operand(Register reg, int32_t disp)
-      : kind_(MEM_REG_DISP),
-        base_(reg.code()),
-        disp_(disp)
-    { }
-    explicit Operand(const AbsoluteAddress &address)
-      : kind_(MEM_ADDRESS32),
-        disp_(reinterpret_cast<int32_t>(address.addr))
-    { }
-
-    Address toAddress() {
-        JS_ASSERT(kind() == MEM_REG_DISP);
-        return Address(Register::FromCode(base()), disp());
-    }
-
-    BaseIndex toBaseIndex() {
-        JS_ASSERT(kind() == MEM_SCALE);
-        return BaseIndex(Register::FromCode(base()), Register::FromCode(index()), scale(), disp());
-    }
-
-    Kind kind() const {
-        return kind_;
-    }
-    Registers::Code reg() const {
-        JS_ASSERT(kind() == REG);
-        return (Registers::Code)base_;
-    }
-    Registers::Code base() const {
-        JS_ASSERT(kind() == MEM_REG_DISP || kind() == MEM_SCALE);
-        return (Registers::Code)base_;
-    }
-    Registers::Code index() const {
-        JS_ASSERT(kind() == MEM_SCALE);
-        return (Registers::Code)index_;
-    }
-    Scale scale() const {
-        JS_ASSERT(kind() == MEM_SCALE);
-        return scale_;
-    }
-    FloatRegisters::Code fpu() const {
-        JS_ASSERT(kind() == FPREG);
-        return (FloatRegisters::Code)base_;
-    }
-    int32_t disp() const {
-        JS_ASSERT(kind() == MEM_REG_DISP || kind() == MEM_SCALE);
-        return disp_;
-    }
-    void *address() const {
-        JS_ASSERT(kind() == MEM_ADDRESS32);
-        return reinterpret_cast<void *>(disp_);
-    }
-};
 
 } // namespace jit
 } // namespace js
@@ -275,7 +176,7 @@ class Assembler : public AssemblerX86Shared
     }
     void push(const FloatRegister &src) {
         subl(Imm32(sizeof(double)), StackPointer);
-        movsd(src, Operand(StackPointer, 0));
+        movsd(src, Address(StackPointer, 0));
     }
 
     CodeOffsetLabel pushWithPatch(const ImmWord &word) {
@@ -284,7 +185,7 @@ class Assembler : public AssemblerX86Shared
     }
 
     void pop(const FloatRegister &src) {
-        movsd(Operand(StackPointer, 0), src);
+        movsd(Address(StackPointer, 0), src);
         addl(Imm32(sizeof(double)), StackPointer);
     }
 
@@ -325,13 +226,21 @@ class Assembler : public AssemblerX86Shared
         movl(ImmWord(uintptr_t(imm.value)), dest);
     }
     void mov(ImmWord imm, Register dest) {
-        movl(imm, dest);
+        // Use xor for setting registers to zero, as it is specially optimized
+        // for this purpose on modern hardware. Note that it does clobber FLAGS
+        // though.
+        if (imm.value == 0)
+            xorl(dest, dest);
+        else
+            movl(imm, dest);
     }
     void mov(ImmPtr imm, Register dest) {
-        movl(imm, dest);
+        mov(ImmWord(uintptr_t(imm.value)), dest);
     }
-    void mov(Imm32 imm, Register dest) {
-        movl(imm, dest);
+    void mov(AsmJSImmPtr imm, Register dest) {
+        masm.movl_i32r(-1, dest.code());
+        AsmJSAbsoluteLink link(masm.currentOffset(), imm.kind());
+        enoughMemory_ &= asmJSAbsoluteLinks_.append(link);
     }
     void mov(const Operand &src, const Register &dest) {
         movl(src, dest);
@@ -357,6 +266,16 @@ class Assembler : public AssemblerX86Shared
     }
     void lea(const Operand &src, const Register &dest) {
         return leal(src, dest);
+    }
+
+    void fld32(const Operand &dest) {
+        switch (dest.kind()) {
+          case Operand::MEM_REG_DISP:
+            masm.fld32_m(dest.disp(), dest.base());
+            break;
+          default:
+            MOZ_ASSUME_UNREACHABLE("unexpected operand kind");
+        }
     }
 
     void cmpl(const Register src, ImmWord ptr) {
@@ -390,6 +309,11 @@ class Assembler : public AssemblerX86Shared
             MOZ_ASSUME_UNREACHABLE("unexpected operand kind");
         }
     }
+    void cmpl(const AsmJSAbsoluteAddress &lhs, const Register &rhs) {
+        masm.cmpl_rm_force32(rhs.code(), (void*)-1);
+        AsmJSAbsoluteLink link(masm.currentOffset(), lhs.kind());
+        enoughMemory_ &= asmJSAbsoluteLinks_.append(link);
+    }
     CodeOffsetLabel cmplWithPatch(const Register &lhs, Imm32 rhs) {
         masm.cmpl_ir_force32(rhs.value, lhs.code());
         return masm.currentOffset();
@@ -421,6 +345,13 @@ class Assembler : public AssemblerX86Shared
     void call(ImmPtr target) {
         JmpSrc src = masm.call();
         addPendingJump(src, target, Relocation::HARDCODED);
+    }
+    void call(AsmJSImmPtr target) {
+        // Moving to a register is suboptimal. To fix (use a single
+        // call-immediate instruction) we'll need to distinguish a new type of
+        // relative patch to an absolute address in AsmJSAbsoluteLink.
+        mov(target, eax);
+        call(eax);
     }
 
     // Emit a CALL or CMP (nop) instruction. ToggleCall can be used to patch

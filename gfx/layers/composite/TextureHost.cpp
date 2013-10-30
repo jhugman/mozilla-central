@@ -57,7 +57,7 @@ DeprecatedTextureHost::CreateDeprecatedTextureHost(SurfaceDescriptorType aDescri
                                         aDeprecatedTextureHostFlags,
                                         aTextureFlags);
       if (aCompositableHost) {
-        result->SetCompositableQuirks(aCompositableHost->GetCompositableQuirks());
+        result->SetCompositableBackendSpecificData(aCompositableHost->GetCompositableBackendSpecificData());
       }
       return result;
       }
@@ -144,9 +144,10 @@ CreateBackendIndependentTextureHost(uint64_t aID,
   return result;
 }
 
-void TextureHost::SetCompositableQuirks(CompositableQuirks* aQuirks)
+void
+TextureHost::SetCompositableBackendSpecificData(CompositableBackendSpecificData* aBackendData)
 {
-    mQuirks = aQuirks;
+    mCompositableBackendData = aBackendData;
 }
 
 
@@ -161,9 +162,24 @@ TextureHost::~TextureHost()
 {
 }
 
-void TextureSource::SetCompositableQuirks(CompositableQuirks* aQuirks)
+#ifdef MOZ_LAYERS_HAVE_LOG
+
+void
+TextureHost::PrintInfo(nsACString& aTo, const char* aPrefix)
 {
-    mQuirks = aQuirks;
+  aTo += aPrefix;
+  aTo += nsPrintfCString("%s (0x%p)", Name(), this);
+  AppendToString(aTo, GetSize(), " [size=", "]");
+  AppendToString(aTo, GetFormat(), " [format=", "]");
+  AppendToString(aTo, mFlags, " [flags=", "]");
+}
+
+#endif
+
+void
+TextureSource::SetCompositableBackendSpecificData(CompositableBackendSpecificData* aBackendData)
+{
+    mCompositableBackendData = aBackendData;
 }
 
 TextureSource::TextureSource()
@@ -230,13 +246,16 @@ DeprecatedTextureHost::SwapTextures(const SurfaceDescriptor& aImage,
   SetBuffer(mBuffer, mDeAllocator);
 }
 
-#ifdef MOZ_LAYERS_HAVE_LOG
 void
-TextureSource::PrintInfo(nsACString& aTo, const char* aPrefix)
+DeprecatedTextureHost::OnActorDestroy()
 {
-  aTo += aPrefix;
-  aTo += nsPrintfCString("UnknownTextureSource (0x%p)", this);
+  if (ISurfaceAllocator::IsShmem(mBuffer)) {
+    *mBuffer = SurfaceDescriptor();
+    mBuffer = nullptr;
+  }
 }
+
+#ifdef MOZ_LAYERS_HAVE_LOG
 
 void
 DeprecatedTextureHost::PrintInfo(nsACString& aTo, const char* aPrefix)
@@ -462,7 +481,7 @@ BufferTextureHost::GetAsSurface()
     result = new gfxImageSurface(yuvDeserializer.GetYData(),
                                  yuvDeserializer.GetYSize(),
                                  yuvDeserializer.GetYStride(),
-                                 gfxASurface::ImageFormatA8);
+                                 gfxImageFormatA8);
   } else {
     ImageDataDeserializer deserializer(GetBuffer());
     if (!deserializer.IsValid()) {
@@ -501,6 +520,13 @@ ShmemTextureHost::DeallocateSharedData()
                "Shared memory would leak without a ISurfaceAllocator");
     mDeallocator->DeallocShmem(*mShmem);
   }
+}
+
+void
+ShmemTextureHost::OnActorDestroy()
+{
+  delete mShmem;
+  mShmem = nullptr;
 }
 
 uint8_t* ShmemTextureHost::GetBuffer()

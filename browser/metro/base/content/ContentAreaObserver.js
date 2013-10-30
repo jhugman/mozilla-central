@@ -77,6 +77,13 @@ var ContentAreaObserver = {
     return this._deckTransitioning;
   },
 
+  get viewstate() {
+    if (this.width < Services.prefs.getIntPref("browser.ui.snapped.maxWidth")) {
+      return "snapped";
+    }
+    return (this.height > this.width) ? "portrait" : "landscape";
+  },
+
   /*
    * Public apis
    */
@@ -121,6 +128,8 @@ var ContentAreaObserver = {
     this.styles["window-width"].maxWidth = newWidth + "px";
     this.styles["window-height"].height = newHeight + "px";
     this.styles["window-height"].maxHeight = newHeight + "px";
+
+    this._updateViewState();
 
     this.updateContentArea(newWidth, this._getContentHeightForWindow(newHeight));
     this._disatchBrowserEvent("SizeChanged");
@@ -223,9 +232,11 @@ var ContentAreaObserver = {
 
     // Request info about the target form element to see if we
     // need to reposition the browser above the keyboard.
-    Browser.selectedBrowser.messageManager.sendAsyncMessage("Browser:RepositionInfoRequest", {
-      viewHeight: this.viewableHeight,
-    });
+    if (SelectionHelperUI.layerMode === 2 /*kContentLayer*/) {
+      Browser.selectedBrowser.messageManager.sendAsyncMessage("Browser:RepositionInfoRequest", {
+        viewHeight: this.viewableHeight,
+      });
+    }
   },
 
   _onRepositionResponse: function _onRepositionResponse(aJsonMsg) {
@@ -279,6 +290,15 @@ var ContentAreaObserver = {
   /*
    * Internal helpers
    */
+
+  _updateViewState: function (aState) {
+    let oldViewstate = Elements.windowState.getAttribute("viewstate");
+    let viewstate = aState || this.viewstate;
+    if (viewstate != oldViewstate) {
+      Elements.windowState.setAttribute("viewstate", viewstate);
+      Services.obs.notifyObservers(null, "metro_viewstate_changed", viewstate);
+    }
+  },
 
   _shiftBrowserDeck: function _shiftBrowserDeck(aAmount) {
     if (aAmount == 0) {

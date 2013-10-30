@@ -163,6 +163,11 @@ MOCHITEST_FILES = \
 		test_browserElement_inproc_BrowserWindowResize.html \
 		$(NULL)
 
+# Disabled until we fix bug 906096.
+#		browserElement_SetInputMethodActive.js \
+#		test_browserElement_inproc_SetInputMethodActive.html \
+#		file_inputmethod.html \
+
 # Disabled due to https://bugzilla.mozilla.org/show_bug.cgi?id=774100
 #		test_browserElement_inproc_Reload.html \
 
@@ -213,7 +218,6 @@ MOCHITEST_FILES += \
 		test_browserElement_oop_PromptConfirm.html \
 		test_browserElement_oop_CookiesNotThirdParty.html \
 		test_browserElement_oop_Close.html \
-		test_browserElement_oop_CloseFromOpener.html \
 		test_browserElement_oop_CloseApp.html \
 		test_browserElement_oop_OpenWindow.html \
 		test_browserElement_oop_OpenWindowInFrame.html \
@@ -238,5 +242,11 @@ MOCHITEST_FILES += \
 		test_browserElement_oop_VisibilityChange.html \
 		test_browserElement_oop_BrowserWindowResize.html \
 	$(NULL)
+
+# Disabled until bug 924771 makes it stop timing out
+# 		test_browserElement_oop_CloseFromOpener.html \
+
+# Disabled until we fix bug 906096.
+#		test_browserElement_oop_SetInputMethodActive.html \
 
 endif #}

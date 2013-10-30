@@ -5,8 +5,8 @@
 'use strict';
 
 function HistoryView(aSet, aLimit, aFilterUnpinned) {
-  this._set = aSet;
-  this._set.controller = this;
+  View.call(this, aSet);
+
   this._inBatch = 0;
 
   this._limit = aLimit;
@@ -16,12 +16,9 @@ function HistoryView(aSet, aLimit, aFilterUnpinned) {
 
   this._pinHelper = new ItemPinHelper("metro.history.unpinned");
   this._historyService.addObserver(this, false);
-  Services.obs.addObserver(this, "metro_viewstate_changed", false);
   StartUI.chromeWin.addEventListener('MozAppbarDismissing', this, false);
   StartUI.chromeWin.addEventListener('HistoryNeedsRefresh', this, false);
   window.addEventListener("TabClose", this, true);
-
-  this._adjustDOMforViewState();
 }
 
 HistoryView.prototype = Util.extend(Object.create(View.prototype), {
@@ -30,11 +27,11 @@ HistoryView.prototype = Util.extend(Object.create(View.prototype), {
 
   destruct: function destruct() {
     this._historyService.removeObserver(this);
-    Services.obs.removeObserver(this, "metro_viewstate_changed");
     if (StartUI.chromeWin) {
       StartUI.chromeWin.removeEventListener('MozAppbarDismissing', this, false);
       StartUI.chromeWin.removeEventListener('HistoryNeedsRefresh', this, false);
     }
+    View.prototype.destruct.call(this);
   },
 
   handleItemClick: function tabview_handleItemClick(aItem) {
@@ -133,6 +130,9 @@ HistoryView.prototype = Util.extend(Object.create(View.prototype), {
     let tileGroup = this._set;
     let selectedTiles = tileGroup.selectedItems;
 
+    // just arrange the grid once at the end of any action handling
+    this._inBatch = true;
+
     switch (aActionName){
       case "delete":
         Array.forEach(selectedTiles, function(aNode) {
@@ -185,9 +185,11 @@ HistoryView.prototype = Util.extend(Object.create(View.prototype), {
         break;
 
       default:
+        this._inBatch = false;
         return;
     }
 
+    this._inBatch = false;
     // Send refresh event so all view are in sync.
     this._sendNeedsRefresh();
   },
@@ -220,15 +222,6 @@ HistoryView.prototype = Util.extend(Object.create(View.prototype), {
         // before this returns with 'MozAppbarDismissing' above.
         StartUI.chromeWin.ContextUI.dismissContextAppbar();
       break;
-    }
-  },
-
-  // nsIObservers
-  observe: function (aSubject, aTopic, aState) {
-    switch(aTopic) {
-      case "metro_viewstate_changed":
-        this.onViewStateChange(aState);
-        break;
     }
   },
 
@@ -266,7 +259,8 @@ HistoryView.prototype = Util.extend(Object.create(View.prototype), {
   },
 
   onClearHistory: function() {
-    this._set.clearAll();
+    if ('clearAll' in this._set)
+      this._set.clearAll();
   },
 
   onPageChanged: function(aURI, aWhat, aValue) {
@@ -276,7 +270,7 @@ HistoryView.prototype = Util.extend(Object.create(View.prototype), {
         let currIcon = item.getAttribute("iconURI");
         if (currIcon != aValue) {
           item.setAttribute("iconURI", aValue);
-          if("refresh" in item)
+          if ("refresh" in item)
             item.refresh();
         }
       }
@@ -305,6 +299,7 @@ let HistoryStartView = {
   init: function init() {
     this._view = new HistoryView(this._grid, StartUI.maxResultsPerSection, true);
     this._view.populateGrid();
+    this._grid.removeAttribute("fade");
   },
 
   uninit: function uninit() {

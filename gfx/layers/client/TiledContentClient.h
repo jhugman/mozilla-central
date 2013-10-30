@@ -13,8 +13,7 @@
 #include "TiledLayerBuffer.h"           // for TiledLayerBuffer
 #include "Units.h"                      // for CSSPoint
 #include "gfx3DMatrix.h"                // for gfx3DMatrix
-#include "gfxASurface.h"                // for gfxASurface, etc
-#include "gfxImageSurface.h"            // for gfxImageSurface
+#include "gfxTypes.h"
 #include "gfxPoint.h"                   // for gfxSize
 #include "mozilla/Attributes.h"         // for MOZ_OVERRIDE
 #include "mozilla/RefPtr.h"             // for RefPtr
@@ -30,6 +29,8 @@
 #include "nsTraceRefcnt.h"              // for MOZ_COUNT_DTOR
 #include "mozilla/layers/ISurfaceAllocator.h"
 #include "gfxReusableSurfaceWrapper.h"
+
+class gfxImageSurface;
 
 namespace mozilla {
 namespace layers {
@@ -200,6 +201,14 @@ public:
   static BasicTiledLayerBuffer OpenDescriptor(ISurfaceAllocator* aAllocator,
                                               const SurfaceDescriptorTiles& aDescriptor);
 
+  void OnActorDestroy()
+  {
+    for (size_t i = 0; i < mRetainedTiles.Length(); i++) {
+      if (mRetainedTiles[i].IsPlaceholderTile()) continue;
+      mRetainedTiles[i].mDeprecatedTextureClient->OnActorDestroy();
+    }
+  }
+
 protected:
   BasicTiledLayerTile ValidateTile(BasicTiledLayerTile aTile,
                                    const nsIntPoint& aTileRect,
@@ -220,7 +229,7 @@ protected:
   BasicTiledLayerTile GetPlaceholderTile() const { return BasicTiledLayerTile(); }
 
 private:
-  gfxASurface::gfxContentType GetContentType() const;
+  gfxContentType GetContentType() const;
   ClientTiledThebesLayer* mThebesLayer;
   ClientLayerManager* mManager;
   LayerManager::DrawThebesLayerCallback mCallback;
@@ -230,6 +239,7 @@ private:
 
   // The buffer we use when UseSinglePaintBuffer() above is true.
   nsRefPtr<gfxImageSurface>     mSinglePaintBuffer;
+  RefPtr<gfx::DrawTarget>       mSinglePaintDrawTarget;
   nsIntPoint                    mSinglePaintBufferOffset;
 
   BasicTiledLayerTile ValidateTileInternal(BasicTiledLayerTile aTile,
@@ -287,6 +297,12 @@ public:
     LOW_PRECISION_TILED_BUFFER
   };
   void LockCopyAndWrite(TiledBufferType aType);
+
+  virtual void OnActorDestroy() MOZ_OVERRIDE
+  {
+    mTiledBuffer.OnActorDestroy();
+    mLowPrecisionTiledBuffer.OnActorDestroy();
+  }
 
 private:
   BasicTiledLayerBuffer mTiledBuffer;

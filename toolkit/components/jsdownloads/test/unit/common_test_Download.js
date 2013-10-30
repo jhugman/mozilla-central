@@ -540,6 +540,28 @@ add_task(function test_cancel_midway()
 });
 
 /**
+ * Cancels a download while keeping partially downloaded data, and verifies that
+ * both the target file and the ".part" file are deleted.
+ */
+add_task(function test_cancel_midway_tryToKeepPartialData()
+{
+  let download = yield promiseStartDownload_tryToKeepPartialData();
+
+  do_check_true(yield OS.File.exists(download.target.path));
+  do_check_true(yield OS.File.exists(download.target.partFilePath));
+
+  yield download.cancel();
+  yield download.removePartialData();
+
+  do_check_true(download.stopped);
+  do_check_true(download.canceled);
+  do_check_true(download.error === null);
+
+  do_check_false(yield OS.File.exists(download.target.path));
+  do_check_false(yield OS.File.exists(download.target.partFilePath));
+});
+
+/**
  * Cancels a download right after starting it.
  */
 add_task(function test_cancel_immediately()
@@ -1032,6 +1054,8 @@ add_task(function test_error_source()
     do_check_true(download.error !== null);
     do_check_true(download.error.becauseSourceFailed);
     do_check_false(download.error.becauseTargetFailed);
+
+    do_check_false(yield OS.File.exists(download.target.path));
   } finally {
     serverSocket.close();
   }
@@ -1355,12 +1379,39 @@ add_task(function test_blocked_parental_controls()
     do_throw("The download should have blocked.");
   } catch (ex if ex instanceof Downloads.Error && ex.becauseBlocked) {
     do_check_true(ex.becauseBlockedByParentalControls);
+    do_check_true(download.error.becauseBlockedByParentalControls);
   }
 
   // Now that the download stopped, the target file should not exist.
   do_check_false(yield OS.File.exists(download.target.path));
 
   cleanup();
+});
+
+/**
+ * Test a download that will be blocked by Windows parental controls by
+ * resulting in an HTTP status code of 450.
+ */
+add_task(function test_blocked_parental_controls_httpstatus450()
+{
+  let download;
+  try {
+    if (!gUseLegacySaver) {
+      download = yield promiseNewDownload(httpUrl("parentalblocked.zip"));
+      yield download.start();
+    }
+    else {
+      download = yield promiseStartLegacyDownload(httpUrl("parentalblocked.zip"));
+      yield promiseDownloadStopped(download);
+    }
+    do_throw("The download should have blocked.");
+  } catch (ex if ex instanceof Downloads.Error && ex.becauseBlocked) {
+    do_check_true(ex.becauseBlockedByParentalControls);
+    do_check_true(download.error.becauseBlockedByParentalControls);
+    do_check_true(download.stopped);
+  }
+
+  do_check_false(yield OS.File.exists(download.target.path));
 });
 
 /**
@@ -1574,9 +1625,10 @@ add_task(function test_platform_integration()
     // temporary directory or in the Downloads directory (such as setting
     // the Windows searchable attribute, and the Mac Downloads icon bouncing),
     // so use the system Downloads directory for the target file.
-    let targetFile = yield DownloadIntegration.getSystemDownloadsDirectory();
-    targetFile = targetFile.clone();
-    targetFile.append("test" + (Math.floor(Math.random() * 1000000)));
+    let targetFilePath = yield DownloadIntegration.getSystemDownloadsDirectory();
+    targetFilePath = OS.Path.join(targetFilePath,
+                                  "test" + (Math.floor(Math.random() * 1000000)));
+    let targetFile = new FileUtils.File(targetFilePath);
     downloadFiles.push(targetFile);
 
     let download;

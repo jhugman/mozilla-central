@@ -61,6 +61,9 @@ let UI = {
 
     this.template = new Template(document.body, this.store, Utils.l10n);
     this.template.start();
+
+    this._onSimulatorConnected = this._onSimulatorConnected.bind(this);
+    this._onSimulatorDisconnected = this._onSimulatorDisconnected.bind(this);
   },
 
   useFloatingScrollbarsIfNeeded: function() {
@@ -117,6 +120,7 @@ let UI = {
   },
 
   startSimulator: function(version) {
+    this._portBeforeSimulatorStarted = this.connection.port;
     let port = ConnectionManager.getFreeTCPPort();
     let simulator = Simulator.getByVersion(version);
     if (!simulator) {
@@ -136,14 +140,29 @@ let UI = {
         this.connection.log("Simulator ready. Connecting.");
         this.connection.port = port;
         this.connection.host = "localhost";
-        this.connection.once("connected", () => {
-          this.connection.log("Connected to simulator.");
-          this.connection.keepConnecting = false;
-        });
+        this.connection.once("connected",
+                             this._onSimulatorConnected);
+        this.connection.once("disconnected",
+                             this._onSimulatorDisconnected);
         this.connection.keepConnecting = true;
         this.connection.connect();
       });
     document.body.classList.remove("show-simulators");
+  },
+
+  _onSimulatorConnected: function() {
+    this.connection.log("Connected to simulator.");
+    this.connection.keepConnecting = false;
+
+    // This doesn't change the current (successful) connection,
+    // but makes sure that when the simulator is disconnected, the
+    // connection doesn't end up with a random port number (from
+    // getFreeTCPPort).
+    this.connection.port = this._portBeforeSimulatorStarted;
+  },
+
+  _onSimulatorDisconnected: function() {
+    this.connection.off("connected", this._onSimulatorConnected);
   },
 
   connectToAdbDevice: function(name) {

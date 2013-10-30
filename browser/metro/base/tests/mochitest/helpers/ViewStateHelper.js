@@ -7,6 +7,7 @@
 
 const snappedSize = 330;
 const portraitSize = 900;
+const maxPortraitHeight = 900;
 
 function setSnappedViewstate() {
   ok(isLandscapeMode(), "setSnappedViewstate expects landscape mode to work.");
@@ -20,7 +21,7 @@ function setSnappedViewstate() {
   browser.style.borderRight = padding + "px solid gray";
 
   // Communicate viewstate change
-  Services.obs.notifyObservers(null, 'metro_viewstate_changed', 'snapped');
+  ContentAreaObserver._updateViewState("snapped");
 
   // Make sure it renders the new mode properly
   yield waitForMs(0);
@@ -32,22 +33,27 @@ function setPortraitViewstate() {
   let browser = Browser.selectedBrowser;
 
   let fullWidth = browser.clientWidth;
+  let fullHeight = browser.clientHeight;
   let padding = fullWidth - portraitSize;
 
   browser.style.borderRight = padding + "px solid gray";
 
-  Services.obs.notifyObservers(null, 'metro_viewstate_changed', 'portrait');
+  // cap the height to create more even surface for testing on
+  if (fullHeight > maxPortraitHeight)
+    browser.style.borderBottom = (fullHeight - maxPortraitHeight) + "px solid gray";
+
+  ContentAreaObserver._updateViewState("portrait");
 
   // Make sure it renders the new mode properly
   yield waitForMs(0);
 }
 
 function restoreViewstate() {
-  ok(isLandscapeMode(), "restoreViewstate expects landscape mode to work.");
-
-  Services.obs.notifyObservers(null, 'metro_viewstate_changed', 'landscape');
+  ContentAreaObserver._updateViewState("landscape");
+  ok(isLandscapeMode(), "restoreViewstate should restore landscape mode.");
 
   Browser.selectedBrowser.style.removeProperty("border-right");
+  Browser.selectedBrowser.style.removeProperty("border-bottom");
 
   yield waitForMs(0);
 }

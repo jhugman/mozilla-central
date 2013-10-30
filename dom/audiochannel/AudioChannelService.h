@@ -46,7 +46,8 @@ public:
    * this service, sharing the AudioChannelType.
    */
   virtual void RegisterAudioChannelAgent(AudioChannelAgent* aAgent,
-                                         AudioChannelType aType);
+                                         AudioChannelType aType,
+                                         bool aWithVideo);
 
   /**
    * Any audio channel agent that stops playing should unregister itself to
@@ -90,11 +91,11 @@ protected:
   void SendAudioChannelChangedNotification(uint64_t aChildID);
 
   /* Register/Unregister IPC types: */
-  void RegisterType(AudioChannelType aType, uint64_t aChildID);
+  void RegisterType(AudioChannelType aType, uint64_t aChildID, bool aWithVideo);
   void UnregisterType(AudioChannelType aType, bool aElementHidden,
-                      uint64_t aChildID);
+                      uint64_t aChildID, bool aWithVideo);
   void UnregisterTypeInternal(AudioChannelType aType, bool aElementHidden,
-                              uint64_t aChildID);
+                              uint64_t aChildID, bool aWithVideo);
 
   AudioChannelState GetStateInternal(AudioChannelType aType, uint64_t aChildID,
                                      bool aElementHidden,
@@ -143,15 +144,18 @@ protected:
   public:
     AudioChannelAgentData(AudioChannelType aType,
                           bool aElementHidden,
-                          AudioChannelState aState)
+                          AudioChannelState aState,
+                          bool aWithVideo)
     : mType(aType)
     , mElementHidden(aElementHidden)
     , mState(aState)
+    , mWithVideo(aWithVideo)
     {}
 
     AudioChannelType mType;
     bool mElementHidden;
     AudioChannelState mState;
+    const bool mWithVideo;
   };
 
   static PLDHashOperator
@@ -165,8 +169,28 @@ protected:
   AudioChannelType mCurrentHigherChannel;
   AudioChannelType mCurrentVisibleHigherChannel;
 
-  nsTArray<uint64_t> mActiveContentChildIDs;
-  bool mActiveContentChildIDsFrozen;
+  nsTArray<uint64_t> mWithVideoChildIDs;
+
+  // mPlayableHiddenContentChildID stores the ChildID of the process which can
+  // play content channel(s) in the background.
+  // A background process contained content channel(s) will become playable:
+  //   1. When this background process registers its content channel(s) in
+  //   AudioChannelService and there is no foreground process with registered
+  //   content channel(s).
+  //   2. When this process goes from foreground into background and there is
+  //   no foreground process with registered content channel(s).
+  // A background process contained content channel(s) will become non-playable:
+  //   1. When there is a foreground process registering its content channel(s)
+  //   in AudioChannelService.
+  //   ps. Currently this condition is never satisfied because the default value
+  //   of visibility status of each channel during registering is hidden = true.
+  //   2. When there is a process with registered content channel(s) goes from
+  //   background into foreground.
+  //   3. When this process unregisters all hidden content channels.
+  //   4. When this process shuts down.
+  uint64_t mPlayableHiddenContentChildID;
+
+  bool mDisabled;
 
   nsCOMPtr<nsITimer> mDeferTelChannelTimer;
   bool mTimerElementHidden;

@@ -112,7 +112,7 @@ JavaScriptChild::fail(JSContext *cx, ReturnStatus *rs)
 {
     // By default, we set |undefined| unless we can get a more meaningful
     // exception.
-    *rs = ReturnStatus(false, JSVariant(void_t()));
+    *rs = ReturnStatus(ReturnException(JSVariant(void_t())));
 
     // Note we always return true from this function, since this propagates
     // to the IPC code, and we don't want a JS failure to cause the death
@@ -127,16 +127,21 @@ JavaScriptChild::fail(JSContext *cx, ReturnStatus *rs)
     // that would crash.
     JS_ClearPendingException(cx);
 
-    if (!toVariant(cx, exn, &rs->exn()))
+    if (JS_IsStopIteration(exn)) {
+        *rs = ReturnStatus(ReturnStopIteration());
         return true;
+    }
 
+    // If this fails, we still don't want to exit. Just return an invalid
+    // exception.
+    (void) toVariant(cx, exn, &rs->get_ReturnException().exn());
     return true;
 }
 
 bool
 JavaScriptChild::ok(ReturnStatus *rs)
 {
-    *rs = ReturnStatus(true, JSVariant(void_t()));
+    *rs = ReturnStatus(ReturnSuccess());
     return true;
 }
 
@@ -372,7 +377,7 @@ JavaScriptChild::AnswerGet(const ObjectId &objId, const ObjectId &receiverId, co
     if (!convertGeckoStringToId(cx, id, &internedId))
         return fail(cx, rs);
 
-    JS::Rooted<JS::Value> val(cx);
+    JS::RootedValue val(cx);
     if (!JS_ForwardGetPropertyTo(cx, obj, internedId, receiver, &val))
         return fail(cx, rs);
 
@@ -532,7 +537,7 @@ JavaScriptChild::AnswerCall(const ObjectId &objId, const nsTArray<JSParam> &argv
     // treat this as the outparam never having been set.
     for (size_t i = 0; i < vals.length(); i++) {
         JSVariant variant;
-        if (!toVariant(cx, vals[i], &variant))
+        if (!toVariant(cx, vals.handleAt(i), &variant))
             return fail(cx, rs);
         outparams->ReplaceElementAt(i, JSParam(variant));
     }
