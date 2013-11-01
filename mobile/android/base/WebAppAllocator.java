@@ -10,6 +10,7 @@ import org.mozilla.gecko.util.ThreadUtils;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.content.SharedPreferences.Editor;
 import android.graphics.Bitmap;
 import android.util.Log;
 
@@ -71,25 +72,32 @@ public class WebAppAllocator {
                                                  final int index,
                                                  final Bitmap aIcon) {
         if (aIcon != null) {
-            ThreadUtils.getBackgroundHandler().post(new Runnable() {
-                @Override
-                public void run() {
-                    int color = 0;
-                    try {
-                        color = BitmapUtils.getDominantColor(aIcon);
-                    } catch (Exception e) {
-                        Log.e(LOGTAG, "Exception during getDominantColor", e);
-                    }
-                    mPrefs.edit()
-                          .putString(appKey(index), app)
-                          .putInt(iconKey(index), color).commit();
-                }
-            });
+            updateColor(app, index, aIcon);
         } else {
             mPrefs.edit()
                   .putString(appKey(index), app)
-                  .putInt(iconKey(index), 0).commit();
+                  .putInt(iconKey(index), -1).commit();
         }
+    }
+
+    public void updateColor(final String app, final int index,
+            final Bitmap aIcon) {
+        ThreadUtils.getBackgroundHandler().post(new Runnable() {
+            @Override
+            public void run() {
+                int color = 0;
+                try {
+                    color = BitmapUtils.getDominantColor(aIcon);
+                } catch (Exception e) {
+                    Log.e(LOGTAG, "Exception during getDominantColor", e);
+                }
+                Editor edit = mPrefs.edit();
+                if (app != null) {
+                    edit.putString(appKey(index), app);
+                }
+                edit.putInt(iconKey(index), color).commit();
+            }
+        });
     }
 
     public synchronized int getIndexForApp(String app) {

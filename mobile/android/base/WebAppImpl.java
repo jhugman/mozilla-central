@@ -6,16 +6,16 @@
 package org.mozilla.gecko;
 
 import android.content.Intent;
+import android.net.Uri;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
-import android.view.MenuItem;
 import android.widget.TextView;
-import android.widget.RelativeLayout;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.Color;
+import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.view.animation.AnimationUtils;
@@ -25,6 +25,9 @@ import android.view.Display;
 
 import java.net.URL;
 import java.io.File;
+
+import org.json.JSONObject;
+import org.mozilla.gecko.webapp.InstallHelper;
 
 public class WebAppImpl extends GeckoApp {
     private static final String LOGTAG = "GeckoWebAppImpl";
@@ -44,27 +47,40 @@ public class WebAppImpl extends GeckoApp {
     public boolean hasTabsSideBar() { return false; }
 
     @Override
-    public void onCreate(Bundle savedInstanceState)
+    public void onCreate(Bundle extras)
     {
-        super.onCreate(savedInstanceState);
-
-        mSplashscreen = (RelativeLayout) findViewById(R.id.splashscreen);
-        if (!GeckoThread.checkLaunchState(GeckoThread.LaunchState.GeckoRunning)) {
-            overridePendingTransition(R.anim.grow_fade_in_center, android.R.anim.fade_out);
-            showSplash();
-        }
+        super.onCreate(extras);
 
         String action = getIntent().getAction();
-        Bundle extras = getIntent().getExtras();
+        if (extras == null) {
+            extras = getIntent().getExtras();
+        }
+
+        boolean isInstalled = extras.getBoolean("isInstalled", false);
+
+        mSplashscreen = findViewById(R.id.splashscreen);
+        if (!GeckoThread.checkLaunchState(GeckoThread.LaunchState.GeckoRunning) || !isInstalled) {
+            // Show the splash screen if we need to start Gecko, or we need to install this.
+            overridePendingTransition(R.anim.grow_fade_in_center, android.R.anim.fade_out);
+            showSplash(isInstalled);
+        }
+
+        if (!isInstalled) {
+            InstallHelper installHelper = new InstallHelper(this.getApplicationContext());
+            JSONObject message = installHelper.createInstallMessage(extras);
+
+            Log.i(LOGTAG, "Installing app: \n" + message.toString());
+            // TODO check that this can't be null.
+            GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Webapps:AutoInstall", message.toString()));
+
+            return;
+        }
+
         String title = extras != null ? extras.getString(Intent.EXTRA_SHORTCUT_NAME) : null;
         setTitle(title != null ? title : "Web App");
 
         mTitlebarText = (TextView)findViewById(R.id.webapp_title);
         mTitlebar = findViewById(R.id.webapp_titlebar);
-        if (!action.startsWith(ACTION_WEBAPP_PREFIX)) {
-            Log.e(LOGTAG, "WebApp launch, but intent action is " + action + "!");
-            return;
-        }
 
         // Try to use the origin stored in the WebAppAllocator first
         String origin = WebAppAllocator.getInstance(this).getAppForIndex(getIndex());
@@ -100,13 +116,54 @@ public class WebAppImpl extends GeckoApp {
         }
     }
 
-    private void showSplash() {
-        SharedPreferences prefs = getSharedPreferences("webapps", Context.MODE_PRIVATE | Context.MODE_MULTI_PROCESS);
+    private void showSplash(boolean isInstalled) {
+
+        SharedPreferences prefs = getPreferences();
 
         // get the favicon dominant color, stored when the app was installed
-        int[] colors = new int[2];
         int dominantColor = prefs.getInt(WebAppAllocator.iconKey(getIndex()), -1);
 
+        setBackgroundGradient(dominantColor);
+
+        ImageView image = (ImageView)findViewById(R.id.splashscreen_icon);
+        Drawable d = null;
+
+        String uri = getIntent().getStringExtra("iconUri");
+
+        if (uri != null) {
+            image.setImageURI(Uri.parse(uri));
+            d = image.getDrawable();
+        } else {
+            // look for a logo.png in the profile dir and show it. If we can't find a logo show nothing
+            File profile = getProfile().getDir();
+            File logoFile = new File(profile, "logo.png");
+            if (logoFile.exists()) {
+                d = Drawable.createFromPath(logoFile.getPath());
+                image.setImageDrawable(d);
+            }
+        }
+
+        if (d != null) {
+            if (dominantColor == -1) {
+                Bitmap bitmap = ((BitmapDrawable) d).getBitmap();
+                WebAppAllocator.getInstance(getApplicationContext()).updateColor(null, getIndex(), bitmap);
+            }
+
+            Animation fadein = AnimationUtils.loadAnimation(this, R.anim.grow_fade_in_center);
+            fadein.setStartOffset(500);
+            fadein.setDuration(1000);
+            image.startAnimation(fadein);
+
+        }
+    }
+
+    protected SharedPreferences getPreferences() {
+        SharedPreferences prefs = getSharedPreferences("webapps", Context.MODE_PRIVATE | Context.MODE_MULTI_PROCESS);
+        return prefs;
+    }
+
+    public void setBackgroundGradient(int dominantColor) {
+        int[] colors = new int[2];
         // now lighten it, to ensure that the icon stands out in the center
         float[] f = new float[3];
         Color.colorToHSV(dominantColor, f);
@@ -123,32 +180,16 @@ public class WebAppImpl extends GeckoApp {
         Display display = getWindowManager().getDefaultDisplay();
         gd.setGradientCenter(0.5f, 0.5f);
         gd.setGradientRadius(Math.max(display.getWidth()/2, display.getHeight()/2));
-        mSplashscreen.setBackgroundDrawable((Drawable)gd);
-
-        // look for a logo.png in the profile dir and show it. If we can't find a logo show nothing
-        File profile = getProfile().getDir();
-        File logoFile = new File(profile, "logo.png");
-        if (logoFile.exists()) {
-            ImageView image = (ImageView)findViewById(R.id.splashscreen_icon);
-            Drawable d = Drawable.createFromPath(logoFile.getPath());
-            image.setImageDrawable(d);
-
-            Animation fadein = AnimationUtils.loadAnimation(this, R.anim.grow_fade_in_center);
-            fadein.setStartOffset(500);
-            fadein.setDuration(1000);
-            image.startAnimation(fadein);
-        }
+        mSplashscreen.setBackgroundDrawable(gd);
     }
 
+    /* (non-Javadoc)
+     * @see org.mozilla.gecko.GeckoApp#getDefaultProfileName()
+     */
     @Override
     protected String getDefaultProfileName() {
-        String action = getIntent().getAction();
-        if (!action.startsWith(ACTION_WEBAPP_PREFIX)) {
-            Log.e(LOGTAG, "WebApp launch, but intent action is " + action + "!");
-            return null;
-        }
-
-        return "webapp" + action.substring(ACTION_WEBAPP_PREFIX.length());
+        Log.i(LOGTAG, "Profile: webapp" + getIndex());
+        return "webapp" + getIndex();
     }
 
     @Override
@@ -218,4 +259,4 @@ public class WebAppImpl extends GeckoApp {
         }
         super.onTabChanged(tab, msg, data);
     }
-};
+}

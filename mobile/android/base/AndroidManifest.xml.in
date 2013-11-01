@@ -155,6 +155,18 @@
             </intent-filter>
         </activity>
 
+#ifdef MOZ_ANDROID_SYNTHAPKS
+        <activity android:name="org.mozilla.gecko.webapp.WebAppDispatcher"
+            android:noHistory="true" >
+            <intent-filter>
+                <!-- catch links from synthetic apks -->
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/webapp" />
+            </intent-filter>
+        </activity>
+#endif
+
         <activity android:name=".WebApp"
                   android:label="@string/webapp_generic_name"
                   android:configChanges="keyboard|keyboardHidden|mcc|mnc|orientation|screenSize"
@@ -301,4 +313,4 @@
     <permission android:name="@ANDROID_PACKAGE_NAME@.permissions.FORMHISTORY_PROVIDER"
                 android:protectionLevel="signature"/>
 
-</manifest> 
+</manifest>
