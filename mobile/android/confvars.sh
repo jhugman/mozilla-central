@@ -66,3 +66,6 @@ fi
 
 # Enable the production cert for verifying signed packaged apps.
 MOZ_B2G_CERTDATA=1
+
+# Enable synthetic APKs
+MOZ_ANDROID_SYNTHAPKS=1

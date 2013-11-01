@@ -658,7 +658,7 @@ case "$target" in
         AC_MSG_RESULT("no")
         AC_MSG_ERROR([You are targeting Windows version 0x$MOZ_WINSDK_TARGETVER, but your SDK only supports up to version $MOZ_WINSDK_MAXVER. Install and use an updated SDK, or target a lower version using --with-windows-version. Alternatively, try running the Windows SDK Configuration Tool and selecting a newer SDK. See https://developer.mozilla.org/En/Windows_SDK_versions for more details on fixing this.])
     fi
-    
+
     AC_DEFINE_UNQUOTED(MOZ_WINSDK_TARGETVER,0x$MOZ_WINSDK_TARGETVER)
     # Definitions matching sdkddkver.h
     AC_DEFINE_UNQUOTED(MOZ_NTDDI_WIN7, 0x06010000)
@@ -3993,6 +3993,7 @@ MOZ_USE_NATIVE_POPUP_WINDOWS=
 MOZ_ANDROID_HISTORY=
 MOZ_WEBSMS_BACKEND=
 MOZ_ANDROID_BEAM=
+MOZ_ANDROID_SYNTHAPKS=
 ACCESSIBILITY=1
 MOZ_TIME_MANAGER=
 MOZ_PAY=
@@ -4973,6 +4974,13 @@ if test -n "$MOZ_ANDROID_BEAM"; then
 fi
 
 dnl ========================================================
+dnl = Synthesized Webapp APKs on Android
+dnl ========================================================
+if test -n "$MOZ_ANDROID_SYNTHAPKS"; then
+    AC_DEFINE(MOZ_ANDROID_SYNTHAPKS)
+fi
+
+dnl ========================================================
 dnl = JS Debugger XPCOM component (js/jsd)
 dnl ========================================================
 MOZ_ARG_DISABLE_BOOL(jsd,
@@ -5051,7 +5059,7 @@ if test "$NS_PRINTING"; then
     AC_DEFINE(NS_PRINT_PREVIEW)
 fi
 
-dnl Turn off webrtc for OS's we don't handle yet, but allow 
+dnl Turn off webrtc for OS's we don't handle yet, but allow
 dnl --enable-webrtc to override.  Can disable for everything in
 dnl the master list above.
 if test -n "$MOZ_WEBRTC"; then
@@ -5362,11 +5370,11 @@ if test -n "$MOZ_VP8"; then
         dnl Check to see if we have a system libvpx package.
         PKG_CHECK_MODULES(MOZ_LIBVPX, vpx >= 1.0.0)
 
-        MOZ_CHECK_HEADER([vpx/vpx_decoder.h], [], 
+        MOZ_CHECK_HEADER([vpx/vpx_decoder.h], [],
          [AC_MSG_ERROR([Couldn't find vpx/vpx_decoder.h which is required for build with system libvpx. Use --without-system-libvpx to build with in-tree libvpx.])])
 
         _SAVE_LIBS=$LIBS
-        AC_CHECK_LIB(vpx, vpx_codec_dec_init_ver, [], 
+        AC_CHECK_LIB(vpx, vpx_codec_dec_init_ver, [],
          [AC_MSG_ERROR([--with-system-libvpx requested but symbol vpx_codec_dec_init_ver not found])])
         LIBS=$_SAVE_LIBS
     fi
@@ -8015,7 +8023,7 @@ MOZ_OTS_LIBS='$(DEPTH)/gfx/ots/src/$(LIB_PREFIX)mozots.$(LIB_SUFFIX)'
 AC_SUBST(MOZ_OTS_LIBS)
 
 dnl ========================================================
-dnl Skia 
+dnl Skia
 dnl ========================================================
 if test "$MOZ_ENABLE_SKIA"; then
   MOZ_SKIA_LIBS='$(DEPTH)/gfx/skia/$(LIB_PREFIX)skia.$(LIB_SUFFIX)'
@@ -8315,6 +8323,7 @@ AC_SUBST(MOZ_METRO)
 AC_SUBST(MOZ_ANDROID_HISTORY)
 AC_SUBST(MOZ_WEBSMS_BACKEND)
 AC_SUBST(MOZ_ANDROID_BEAM)
+AC_SUBST(MOZ_ANDROID_SYNTHAPKS)
 AC_SUBST(MOZ_DISABLE_GECKOVIEW)
 AC_SUBST(ENABLE_STRIP)
 AC_SUBST(PKG_SKIP_STRIP)
