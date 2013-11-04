@@ -13,18 +13,21 @@ GENERATED_WEBIDL_FILES = [
 PREPROCESSED_WEBIDL_FILES = [
     'Crypto.webidl',
     'Navigator.webidl',
+    'Window.webidl',
 ]
 
 WEBIDL_FILES = [
     'AbstractWorker.webidl',
     'AnalyserNode.webidl',
     'AnimationEvent.webidl',
+    'AppInfo.webidl',
     'AppNotificationServiceOptions.webidl',
     'ArchiveReader.webidl',
     'ArchiveRequest.webidl',
     'Attr.webidl',
     'AudioBuffer.webidl',
     'AudioBufferSourceNode.webidl',
+    'AudioChannel.webidl',
     'AudioContext.webidl',
     'AudioDestinationNode.webidl',
     'AudioListener.webidl',
@@ -181,6 +184,7 @@ WEBIDL_FILES = [
     'HTMLVideoElement.webidl',
     'IDBCursor.webidl',
     'IDBDatabase.webidl',
+    'IDBEnvironment.webidl',
     'IDBFactory.webidl',
     'IDBFileHandle.webidl',
     'IDBIndex.webidl',
@@ -411,7 +415,6 @@ WEBIDL_FILES = [
     'WebSocket.webidl',
     'WheelEvent.webidl',
     'WifiOptions.webidl',
-    'Window.webidl',
     'WorkerLocation.webidl',
     'WorkerMessagePort.webidl',
     'WorkerNavigator.webidl',
@@ -467,12 +470,6 @@ if CONFIG['MOZ_GAMEPAD']:
         'Gamepad.webidl',
     ]
 
-if CONFIG['MOZ_B2G_RIL']:
-    WEBIDL_FILES += [
-        'MozStkCommandEvent.webidl',
-        'MozVoicemail.webidl',
-    ]
-
 WEBIDL_FILES += [
     'CloseEvent.webidl',
     'CustomEvent.webidl',
@@ -515,10 +512,16 @@ if CONFIG['MOZ_B2G_RIL']:
         'MozCellBroadcastEvent.webidl',
         'MozEmergencyCbModeEvent.webidl',
         'MozOtaStatusEvent.webidl',
+        'MozStkCommandEvent.webidl',
+        'MozVoicemail.webidl',
         'MozVoicemailEvent.webidl',
+        'USSDReceivedEvent.webidl',
+    ]
+
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
+    WEBIDL_FILES += [
         'MozWifiConnectionInfoEvent.webidl',
         'MozWifiStatusChangeEvent.webidl',
-        'USSDReceivedEvent.webidl',
     ]
 
 if CONFIG['MOZ_WEBSPEECH']:
@@ -546,6 +549,7 @@ if CONFIG['ENABLE_TESTS']:
 
 GENERATED_EVENTS_WEBIDL_FILES = [
     'BlobEvent.webidl',
+    'CallGroupErrorEvent.webidl',
     'DataStoreChangeEvent.webidl',
     'DeviceLightEvent.webidl',
     'DeviceProximityEvent.webidl',

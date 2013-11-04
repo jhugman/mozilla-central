@@ -20,3 +20,7 @@ HOST_SOURCES += [
     'SeekableZStream.cpp',
     'szip.cpp',
 ]
+
+HOST_PROGRAM = 'szip'
+
+FORCE_STATIC_LIB = True

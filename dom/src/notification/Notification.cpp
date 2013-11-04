@@ -23,6 +23,7 @@
 #include "nsGlobalWindow.h"
 #include "nsDOMJSUtils.h"
 #include "nsIScriptSecurityManager.h"
+#include "mozilla/dom/PermissionMessageUtils.h"
 #ifdef MOZ_B2G
 #include "nsIDOMDesktopNotification.h"
 #endif
@@ -60,7 +61,6 @@ public:
                     JSContext* aCx)
   {
     MOZ_ASSERT(!aID.IsEmpty());
-    MOZ_ASSERT(!aTitle.IsEmpty());
 
     NotificationOptions options;
     options.mDir = Notification::StringToDirection(nsString(aDir));
