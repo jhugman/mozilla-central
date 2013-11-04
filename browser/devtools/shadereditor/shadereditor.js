@@ -19,8 +19,13 @@ const Editor = require("devtools/sourceeditor/editor");
 
 // The panel's window global is an EventEmitter firing the following events:
 const EVENTS = {
+  // When new programs are received from the server.
+  NEW_PROGRAM: "ShaderEditor:NewProgram",
+  PROGRAMS_ADDED: "ShaderEditor:ProgramsAdded",
+
   // When the vertex and fragment sources were shown in the editor.
   SOURCES_SHOWN: "ShaderEditor:SourcesShown",
+
   // When a shader's source was edited and compiled via the editor.
   SHADER_COMPILED: "ShaderEditor:ShaderCompiled"
 };
@@ -39,7 +44,7 @@ const DEFAULT_EDITOR_CONFIG = {
 /**
  * The current target and the WebGL Editor front, set by this tool's host.
  */
-let gTarget, gFront;
+let gToolbox, gTarget, gFront;
 
 /**
  * Initializes the shader editor controller and views.
@@ -71,9 +76,13 @@ let EventsHandler = {
    * Listen for events emitted by the current tab target.
    */
   initialize: function() {
-    this._onWillNavigate = this._onWillNavigate.bind(this);
+    this._onHostChanged = this._onHostChanged.bind(this);
+    this._onTabNavigated = this._onTabNavigated.bind(this);
     this._onProgramLinked = this._onProgramLinked.bind(this);
-    gTarget.on("will-navigate", this._onWillNavigate);
+    this._onProgramsAdded = this._onProgramsAdded.bind(this);
+    gToolbox.on("host-changed", this._onHostChanged);
+    gTarget.on("will-navigate", this._onTabNavigated);
+    gTarget.on("navigate", this._onTabNavigated);
     gFront.on("program-linked", this._onProgramLinked);
 
   },
@@ -82,27 +91,69 @@ let EventsHandler = {
    * Remove events emitted by the current tab target.
    */
   destroy: function() {
-    gTarget.off("will-navigate", this._onWillNavigate);
+    gToolbox.off("host-changed", this._onHostChanged);
+    gTarget.off("will-navigate", this._onTabNavigated);
+    gTarget.off("navigate", this._onTabNavigated);
     gFront.off("program-linked", this._onProgramLinked);
+  },
+
+  /**
+   * Handles a host change event on the parent toolbox.
+   */
+  _onHostChanged: function() {
+    if (gToolbox.hostType == "side") {
+      $("#shaders-pane").removeAttribute("height");
+    }
   },
 
   /**
    * Called for each location change in the debugged tab.
    */
-  _onWillNavigate: function() {
-    gFront.setup();
+  _onTabNavigated: function(event) {
+    switch (event) {
+      case "will-navigate": {
+        // Make sure the backend is prepared to handle WebGL contexts.
+        gFront.setup({ reload: false });
 
-    ShadersListView.empty();
-    ShadersEditorsView.setText({ vs: "", fs: "" });
-    $("#reload-notice").hidden = true;
-    $("#waiting-notice").hidden = false;
-    $("#content").hidden = true;
+        // Reset UI.
+        ShadersListView.empty();
+        ShadersEditorsView.setText({ vs: "", fs: "" });
+        $("#reload-notice").hidden = true;
+        $("#waiting-notice").hidden = false;
+        $("#content").hidden = true;
+        break;
+      }
+      case "navigate": {
+        // Manually retrieve the list of program actors known to the server,
+        // because the backend won't emit "program-linked" notifications
+        // in the case of a bfcache navigation (since no new programs are
+        // actually linked).
+        gFront.getPrograms().then(this._onProgramsAdded);
+        break;
+      }
+    }
   },
 
   /**
    * Called every time a program was linked in the debugged tab.
    */
   _onProgramLinked: function(programActor) {
+    this._addProgram(programActor);
+    window.emit(EVENTS.NEW_PROGRAM);
+  },
+
+  /**
+   * Callback for the front's getPrograms() method.
+   */
+  _onProgramsAdded: function(programActors) {
+    programActors.forEach(this._addProgram);
+    window.emit(EVENTS.PROGRAMS_ADDED);
+  },
+
+  /**
+   * Adds a program to the shaders list and unhides any modal notices.
+   */
+  _addProgram: function(programActor) {
     $("#waiting-notice").hidden = true;
     $("#reload-notice").hidden = true;
     $("#content").hidden = false;
@@ -151,6 +202,10 @@ let ShadersListView = Heritage.extend(WidgetMethods, {
    *        The program actor coming from the active thread.
    */
   addProgram: function(programActor) {
+    if (this.hasProgram(programActor)) {
+      return;
+    }
+
     // Currently, there's no good way of differentiating between programs
     // in a way that helps humans. It will be a good idea to implement a
     // standard of allowing debuggees to add some identifiable metadata to their
@@ -172,6 +227,24 @@ let ShadersListView = Heritage.extend(WidgetMethods, {
     if (!this.selectedItem) {
       this.selectedIndex = 0;
     }
+
+    // Prevent this container from growing indefinitely in height when the
+    // toolbox is docked to the side.
+    if (gToolbox.hostType == "side" && this.itemCount == SHADERS_AUTOGROW_ITEMS) {
+      this._pane.setAttribute("height", this._pane.getBoundingClientRect().height);
+    }
+  },
+
+  /**
+   * Returns whether a program was already added to this programs container.
+   *
+   * @param object programActor
+   *        The program actor coming from the active thread.
+   * @param boolean
+   *        True if the program was added, false otherwise.
+   */
+  hasProgram: function(programActor) {
+    return !!this.attachments.filter(e => e.programActor == programActor).length;
   },
 
   /**

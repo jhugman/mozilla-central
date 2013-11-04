@@ -13,7 +13,6 @@
  *
  */
 
-interface Window;
 interface nsISupports;
 
 /* Must be created first. Observer events will be dispatched on the thread provided */
@@ -36,7 +35,7 @@ interface PeerConnectionImpl  {
 
   /* Stats call */
   [Throws]
-  void getStats(MediaStreamTrack? selector);
+  void getStats(MediaStreamTrack? selector, boolean internalStats);
 
   /* Adds the stream created by GetUserMedia */
   [Throws]

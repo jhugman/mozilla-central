@@ -292,6 +292,12 @@ public:
     }
   };
 
+  enum WorkerType
+  {
+    WorkerTypeDedicated,
+    WorkerTypeShared
+  };
+
 protected:
   typedef mozilla::ErrorResult ErrorResult;
 
@@ -328,12 +334,12 @@ private:
   bool mParentSuspended;
   bool mIsChromeWorker;
   bool mMainThreadObjectsForgotten;
-  bool mIsSharedWorker;
+  WorkerType mWorkerType;
 
 protected:
   WorkerPrivateParent(JSContext* aCx, JS::HandleObject aObject,
                       WorkerPrivate* aParent, const nsAString& aScriptURL,
-                      bool aIsChromeWorker, bool aIsSharedWorker,
+                      bool aIsChromeWorker, WorkerType aWorkerType,
                       const nsAString& aSharedWorkerName, LoadInfo& aLoadInfo);
 
   ~WorkerPrivateParent();
@@ -452,8 +458,8 @@ public:
   GetInnerWindowId();
 
   void
-  UpdateJSContextOptions(JSContext* aCx, uint32_t aChromeOptions,
-                         uint32_t aContentOptions);
+  UpdateJSContextOptions(JSContext* aCx, const JS::ContextOptions& aChromeOptions,
+                         const JS::ContextOptions& aContentOptions);
 
   void
   UpdateJSWorkerMemoryParameter(JSContext* aCx, JSGCParamKey key,
@@ -666,6 +672,8 @@ public:
     aSettings = mJSSettings;
   }
 
+  // The ability to be a chrome worker is orthogonal to the type of
+  // worker [Dedicated|Shared].
   bool
   IsChromeWorker() const
   {
@@ -673,9 +681,15 @@ public:
   }
 
   bool
+  IsDedicatedWorker() const
+  {
+    return mWorkerType == WorkerTypeDedicated;
+  }
+
+  bool
   IsSharedWorker() const
   {
-    return mIsSharedWorker;
+    return mWorkerType == WorkerTypeShared;
   }
 
   const nsString&
@@ -797,7 +811,7 @@ public:
   static already_AddRefed<WorkerPrivate>
   Create(JSContext* aCx, JS::HandleObject aObject, WorkerPrivate* aParent,
          const nsAString& aScriptURL, bool aIsChromeWorker,
-         bool aIsSharedWorker, const nsAString& aSharedWorkerName,
+         WorkerType aWorkerType, const nsAString& aSharedWorkerName,
          LoadInfo* aLoadInfo = nullptr);
 
   static nsresult
@@ -935,8 +949,8 @@ public:
   }
 
   void
-  UpdateJSContextOptionsInternal(JSContext* aCx, uint32_t aContentOptions,
-                                 uint32_t aChromeOptions);
+  UpdateJSContextOptionsInternal(JSContext* aCx, const JS::ContextOptions& aContentOptions,
+                                 const JS::ContextOptions& aChromeOptions);
 
   void
   UpdateJSWorkerMemoryParameterInternal(JSContext* aCx, JSGCParamKey key, uint32_t aValue);
@@ -1020,7 +1034,7 @@ public:
 private:
   WorkerPrivate(JSContext* aCx, JS::HandleObject aObject,
                 WorkerPrivate* aParent, const nsAString& aScriptURL,
-                bool aIsChromeWorker, bool aIsSharedWorker,
+                bool aIsChromeWorker, WorkerType aWorkerType,
                 const nsAString& aSharedWorkerName, LoadInfo& aLoadInfo);
 
   bool

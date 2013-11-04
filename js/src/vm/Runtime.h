@@ -87,7 +87,7 @@ class MathCache;
 class WorkerThreadState;
 
 namespace jit {
-class IonRuntime;
+class JitRuntime;
 class JitActivation;
 struct PcScriptCache;
 }
@@ -860,7 +860,7 @@ struct JSRuntime : public JS::shadow::Runtime,
      */
     JSC::ExecutableAllocator *execAlloc_;
     WTF::BumpPointerAllocator *bumpAlloc_;
-    js::jit::IonRuntime *ionRuntime_;
+    js::jit::JitRuntime *jitRuntime_;
 
     JSObject *selfHostingGlobal_;
 
@@ -869,7 +869,7 @@ struct JSRuntime : public JS::shadow::Runtime,
 
     JSC::ExecutableAllocator *createExecutableAllocator(JSContext *cx);
     WTF::BumpPointerAllocator *createBumpPointerAllocator(JSContext *cx);
-    js::jit::IonRuntime *createIonRuntime(JSContext *cx);
+    js::jit::JitRuntime *createJitRuntime(JSContext *cx);
 
   public:
     JSC::ExecutableAllocator *getExecAlloc(JSContext *cx) {
@@ -885,14 +885,14 @@ struct JSRuntime : public JS::shadow::Runtime,
     WTF::BumpPointerAllocator *getBumpPointerAllocator(JSContext *cx) {
         return bumpAlloc_ ? bumpAlloc_ : createBumpPointerAllocator(cx);
     }
-    js::jit::IonRuntime *getIonRuntime(JSContext *cx) {
-        return ionRuntime_ ? ionRuntime_ : createIonRuntime(cx);
+    js::jit::JitRuntime *getJitRuntime(JSContext *cx) {
+        return jitRuntime_ ? jitRuntime_ : createJitRuntime(cx);
     }
-    js::jit::IonRuntime *ionRuntime() {
-        return ionRuntime_;
+    js::jit::JitRuntime *jitRuntime() const {
+        return jitRuntime_;
     }
-    bool hasIonRuntime() const {
-        return !!ionRuntime_;
+    bool hasJitRuntime() const {
+        return !!jitRuntime_;
     }
     js::InterpreterStack &interpreterStack() {
         return interpreterStack_;
@@ -986,7 +986,10 @@ struct JSRuntime : public JS::shadow::Runtime,
     js::gc::ChunkPool   gcChunkPool;
 
     js::RootedValueMap  gcRootsHash;
-    volatile size_t     gcBytes;
+
+    /* This is updated by both the main and GC helper threads. */
+    mozilla::Atomic<size_t, mozilla::ReleaseAcquire> gcBytes;
+
     size_t              gcMaxBytes;
     size_t              gcMaxMallocBytes;
 

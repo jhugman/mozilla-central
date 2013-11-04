@@ -78,6 +78,31 @@ VARIABLES = {
         Accepts assembler, C, C++, Objective C/C++.
         """, 'compile'),
 
+    'GENERATED_SOURCES': (StrictOrderingOnAppendList, list, [],
+        """Generated source code files.
+
+        This variable contains a list of generated source code files to
+        compile. Accepts assembler, C, C++, Objective C/C++.
+        """, 'compile'),
+
+    'UNIFIED_SOURCES': (StrictOrderingOnAppendList, list, [],
+        """Source code files that can be compiled together.
+
+        This variable contains a list of source code files to compile,
+        that can be concatenated all together and built as a single source
+        file. This can help make the build faster and reduce the debug info
+        size.
+        """, 'compile'),
+
+    'GENERATED_UNIFIED_SOURCES': (StrictOrderingOnAppendList, list, [],
+        """Generated source code files that can be compiled together.
+
+        This variable contains a list of generated source code files to
+        compile, that can be concatenated all together, with UNIFIED_SOURCES,
+        and built as a single source file. This can help make the build faster
+        and reduce the debug info size.
+        """, 'compile'),
+
     'DEFINES': (OrderedDict, dict, OrderedDict(),
         """Dictionary of compiler defines to declare.
 
@@ -209,6 +234,13 @@ VARIABLES = {
         """Name of target library generated when cross compiling.
         """, 'binaries'),
 
+    'JAVA_JAR_TARGETS': (dict, dict, {},
+        """Defines Java JAR targets to be built.
+
+        This variable should not be populated directly. Instead, it should
+        populated by calling add_java_jar().
+        """, 'binaries'),
+
     'JS_MODULES_PATH': (unicode, unicode, "",
         """Sub-directory of ``$(FINAL_TARGET)`` to install
         ``EXTRA_JS_MODULES``.
@@ -250,6 +282,10 @@ VARIABLES = {
         """Whether profile-guided optimization is enabled in this directory.
         """, None),
 
+    'NO_VISIBILITY_FLAGS': (bool, bool, False,
+        """Build sources listed in this file without VISIBILITY_FLAGS.
+        """, None),
+
     'OS_LIBS': (list, list, [],
         """System link libraries.
 
@@ -271,10 +307,25 @@ VARIABLES = {
         """, None),
 
     'SIMPLE_PROGRAMS': (StrictOrderingOnAppendList, list, [],
-        """Generate a list of binaries from source.
+        """Compile a list of executable names.
 
-        A list of sources, one per program, to compile & link with libs
-        into standalone programs.
+        Each name in this variable corresponds to an executable built from the
+        corresponding source file with the same base name.
+
+        If the configuration token ``BIN_SUFFIX`` is set, its value will be
+        automatically appended to each name. If a name already ends with
+        ``BIN_SUFFIX``, the name will remain unchanged.
+        """, 'binaries'),
+
+    'HOST_SIMPLE_PROGRAMS': (StrictOrderingOnAppendList, list, [],
+        """Compile a list of host executable names.
+
+        Each name in this variable corresponds to a hosst executable built
+        from the corresponding source file with the same base name.
+
+        If the configuration token ``HOST_BIN_SUFFIX`` is set, its value will
+        be automatically appended to each name. If a name already ends with
+        ``HOST_BIN_SUFFIX``, the name will remain unchanged.
         """, 'binaries'),
 
     'TOOL_DIRS': (list, list, [],
@@ -339,6 +390,14 @@ VARIABLES = {
         ``AC_SUBST`` variables declared during configure.
         """, None),
 
+    'CONFIGURE_DEFINE_FILES': (StrictOrderingOnAppendList, list, [],
+        """Output files generated from configure/config.status.
+
+        This is a substitute for ``AC_CONFIG_HEADER`` in autoconf. This is very
+        similar to ``CONFIGURE_SUBST_FILES`` except the generation logic takes
+        into account the values of ``AC_DEFINE`` instead of ``AC_SUBST``.
+        """, None),
+
     'MODULE': (unicode, unicode, "",
         """Module name.
 
@@ -368,6 +427,14 @@ VARIABLES = {
         If the configuration token ``BIN_SUFFIX`` is set, its value will be
         automatically appended to ``PROGRAM``. If ``PROGRAM`` already ends with
         ``BIN_SUFFIX``, ``PROGRAM`` will remain unchanged.
+        """, 'binaries'),
+
+    'HOST_PROGRAM' : (unicode, unicode, "",
+        """Compiled host executable name.
+
+        If the configuration token ``HOST_BIN_SUFFIX`` is set, its value will be
+        automatically appended to ``HOST_PROGRAM``. If ``HOST_PROGRAM`` already
+        ends with ``HOST_BIN_SUFFIX``, ``HOST_PROGRAM`` will remain unchanged.
         """, 'binaries'),
 
     'NO_DIST_INSTALL': (bool, bool, False,
@@ -533,6 +600,19 @@ FUNCTIONS = {
         Include ``foo.build`` from a path within the top source directory::
 
            include('/elsewhere/foo.build')
+        """),
+
+    'add_java_jar': ('_add_java_jar', (str,),
+        """Declare a Java JAR target to be built.
+
+        This is the supported way to populate the JAVA_JAR_TARGETS
+        variable.
+
+        The parameters are:
+        * dest - target name, without the trailing .jar. (required)
+
+        This returns a rich Java JAR type, described at
+        :py:class:`mozbuild.frontend.data.JavaJarData`.
         """),
 
     'add_tier_dir': ('_add_tier_directory', (str, [str, list], bool, bool),

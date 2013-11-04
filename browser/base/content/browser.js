@@ -765,7 +765,6 @@ var gBrowserInit = {
     window.addEventListener("AppCommand", HandleAppCommandEvent, true);
 
     messageManager.loadFrameScript("chrome://browser/content/content.js", true);
-    messageManager.loadFrameScript("chrome://browser/content/content-sessionStore.js", true);
 
     // initialize observers and listeners
     // and give C++ access to gBrowser
@@ -3016,11 +3015,11 @@ const BrowserSearch = {
    *        allows the search service to provide a different nsISearchSubmission
    *        depending on e.g. where the search is triggered in the UI.
    *
-   * @return string Name of the search engine used to perform a search or null
-   *         if a search was not performed.
+   * @return engine The search engine used to perform a search, or null if no
+   *                search was performed.
    */
-  loadSearch: function BrowserSearch_search(searchText, useNewTab, purpose) {
-    var engine;
+  _loadSearch: function (searchText, useNewTab, purpose) {
+    let engine;
 
     // If the search bar is visible, use the current engine, otherwise, fall
     // back to the default engine.
@@ -3029,7 +3028,7 @@ const BrowserSearch = {
     else
       engine = Services.search.defaultEngine;
 
-    var submission = engine.getSubmission(searchText, null, purpose); // HTML response
+    let submission = engine.getSubmission(searchText, null, purpose); // HTML response
 
     // getSubmission can return null if the engine doesn't have a URL
     // with a text/html response type.  This is unlikely (since
@@ -3046,6 +3045,20 @@ const BrowserSearch = {
                  inBackground: inBackground,
                  relatedToCurrent: true });
 
+    return engine;
+  },
+
+  /**
+   * Just like _loadSearch, but preserving an old API.
+   *
+   * @return string Name of the search engine used to perform a search or null
+   *         if a search was not performed.
+   */
+  loadSearch: function BrowserSearch_search(searchText, useNewTab, purpose) {
+    let engine = BrowserSearch._loadSearch(searchText, useNewTab, purpose);
+    if (!engine) {
+      return null;
+    }
     return engine.name;
   },
 
@@ -3056,7 +3069,7 @@ const BrowserSearch = {
    * BrowserSearch.loadSearch for the preferred API.
    */
   loadSearchFromContext: function (terms) {
-    let engine = BrowserSearch.loadSearch(terms, true, "contextmenu");
+    let engine = BrowserSearch._loadSearch(terms, true, "contextmenu");
     if (engine) {
       BrowserSearch.recordSearchInHealthReport(engine, "contextmenu");
     }
@@ -3082,8 +3095,7 @@ const BrowserSearch = {
    * FHR records only search counts and nothing pertaining to the search itself.
    *
    * @param engine
-   *        (string) The name of the engine used to perform the search. This
-   *        is typically nsISearchEngine.name.
+   *        (nsISearchEngine) The engine handling the search.
    * @param source
    *        (string) Where the search originated from. See the FHR
    *        SearchesProvider for allowed values.
@@ -4195,6 +4207,10 @@ var TabsProgressListener = {
     if (aFlags & Ci.nsIWebProgressListener.LOCATION_CHANGE_SAME_DOCUMENT)
       return;
 
+    // Filter out location changes in sub documents.
+    if (!aWebProgress.isTopLevel)
+      return;
+
     // Only need to call locationChange if the PopupNotifications object
     // for this window has already been initialized (i.e. its getter no
     // longer exists)
@@ -4203,10 +4219,7 @@ var TabsProgressListener = {
 
     gBrowser.getNotificationBox(aBrowser).removeTransientNotifications();
 
-    // Filter out location changes in sub documents.
-    if (aWebProgress.isTopLevel) {
-      FullZoom.onLocationChange(aLocationURI, false, aBrowser);
-    }
+    FullZoom.onLocationChange(aLocationURI, false, aBrowser);
   },
 
   onRefreshAttempted: function (aBrowser, aWebProgress, aURI, aDelay, aSameURI) {

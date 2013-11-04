@@ -16,7 +16,7 @@ const PC_SESSION_CONTRACT = "@mozilla.org/dom/rtcsessiondescription;1";
 const PC_MANAGER_CONTRACT = "@mozilla.org/dom/peerconnectionmanager;1";
 const PC_STATS_CONTRACT = "@mozilla.org/dom/rtcstatsreport;1";
 
-const PC_CID = Components.ID("{fc684a5c-c729-42c7-aa82-3c10dc4398f3}");
+const PC_CID = Components.ID("{00e0e20d-1494-4776-8e0e-0f0acbea3c79}");
 const PC_OBS_CID = Components.ID("{1d44a18e-4545-4ff3-863d-6dbd6234a583}");
 const PC_ICE_CID = Components.ID("{02b9970c-433d-4cc2-923d-f7028ac66073}");
 const PC_SESSION_CID = Components.ID("{1775081b-b62d-4954-8ffe-a067bbf508a7}");
@@ -225,10 +225,6 @@ function RTCPeerConnection() {
 
   // States
   this._iceGatheringState = this._iceConnectionState = "new";
-
-  // Deprecated callbacks
-  this._ongatheringchange = null;
-  this._onicechange = null;
 }
 RTCPeerConnection.prototype = {
   classDescription: "mozRTCPeerConnection",
@@ -487,28 +483,9 @@ RTCPeerConnection.prototype = {
                           });
   },
 
-  get onicechange()       { return this._onicechange; },
-  get ongatheringchange() { return this._ongatheringchange; },
-
-  set onicechange(cb) {
-    this.deprecated("onicechange");
-    this._onicechange = cb;
-  },
-  set ongatheringchange(cb) {
-    this.deprecated("ongatheringchange");
-    this._ongatheringchange = cb;
-  },
-
-  deprecated: function(name) {
-    this.reportWarning(name + " is deprecated!", null, 0);
-  },
-
   createOffer: function(onSuccess, onError, constraints) {
     if (!constraints) {
       constraints = {};
-    }
-    if (!onError) {
-      this.deprecated("calling createOffer without failureCallback");
     }
     this._mustValidateConstraints(constraints, "createOffer passed invalid constraints");
     this._onCreateOfferSuccess = onSuccess;
@@ -522,9 +499,6 @@ RTCPeerConnection.prototype = {
   },
 
   _createAnswer: function(onSuccess, onError, constraints, provisional) {
-    if (!onError) {
-      this.deprecated("calling createAnswer without failureCallback");
-    }
     this._onCreateAnswerSuccess = onSuccess;
     this._onCreateAnswerFailure = onError;
 
@@ -695,16 +669,6 @@ RTCPeerConnection.prototype = {
     return this._getPC().getRemoteStreams();
   },
 
-  // Backwards-compatible attributes
-  get localStreams() {
-    this.deprecated("localStreams");
-    return this.getLocalStreams();
-  },
-  get remoteStreams() {
-    this.deprecated("remoteStreams");
-    return this.getRemoteStreams();
-  },
-
   get localDescription() {
     this._checkClosed();
     let sdp = this._getPC().localDescription;
@@ -754,48 +718,27 @@ RTCPeerConnection.prototype = {
     this.dispatchEvent(new this._win.Event("iceconnectionstatechange"));
   },
 
-  get readyState() {
-    this.deprecated("readyState");
-    // checking for our local pc closed indication
-    // before invoking the pc methods.
-    if(this._closed) {
-      return "closed";
-    }
-
-    var state="undefined";
-    switch (this._getPC().readyState) {
-      case Ci.IPeerConnection.kNew:
-        state = "new";
-        break;
-      case Ci.IPeerConnection.kNegotiating:
-        state = "negotiating";
-        break;
-      case Ci.IPeerConnection.kActive:
-        state = "active";
-        break;
-      case Ci.IPeerConnection.kClosing:
-        state = "closing";
-        break;
-      case Ci.IPeerConnection.kClosed:
-        state = "closed";
-        break;
-    }
-    return state;
-  },
-
   getStats: function(selector, onSuccess, onError) {
-    this._onGetStatsSuccess = onSuccess;
-    this._onGetStatsFailure = onError;
-
     this._queueOrRun({
       func: this._getStats,
-      args: [selector],
+      args: [selector, onSuccess, onError, false],
       wait: true
     });
   },
 
-  _getStats: function(selector) {
-    this._getPC().getStats(selector);
+  getStatsInternal: function(selector, onSuccess, onError) {
+    this._queueOrRun({
+      func: this._getStats,
+      args: [selector, onSuccess, onError, true],
+      wait: true
+    });
+  },
+
+  _getStats: function(selector, onSuccess, onError, internal) {
+    this._onGetStatsSuccess = onSuccess;
+    this._onGetStatsFailure = onError;
+
+    this._getPC().getStats(selector, internal);
   },
 
   createDataChannel: function(label, dict) {
@@ -1059,13 +1002,13 @@ PeerConnectionObserver.prototype = {
       IceGathering:
         { gathering: "gathering" },
       IceWaiting:
-        { connection: "new",  gathering: "complete", legacy: "starting" },
+        { connection: "new",  gathering: "complete" },
       IceChecking:
-        { connection: "checking", legacy: "checking" },
+        { connection: "checking" },
       IceConnected:
-        { connection: "connected", legacy: "connected", success: true },
+        { connection: "connected", success: true },
       IceFailed:
-        { connection: "failed", legacy: "failed", success: false }
+        { connection: "failed", success: false }
     };
     // These are all the allowed inputs.
 
@@ -1076,12 +1019,6 @@ PeerConnectionObserver.prototype = {
     }
     if ("gathering" in transitions) {
       this._dompc.changeIceGatheringState(transitions.gathering);
-      // Handle (old, deprecated) "ongatheringchange" callback
-      this.callCB(this._dompc.ongatheringchange, transitions.gathering);
-    }
-    // Handle deprecated "onicechange" callback
-    if ("legacy" in transitions) {
-      this.callCB(this._onicechange, transitions.legacy);
     }
     if ("success" in transitions) {
       histogram.add(transitions.success);
@@ -1093,7 +1030,7 @@ PeerConnectionObserver.prototype = {
         // waiting for ICE gathering and executeNext frees it
         this._dompc._executeNext();
       }
-      else if (this.localDescription) {
+      else if (this._dompc.localDescription) {
         // If we are trickling but we have already done setLocal,
         // then we need to send a final foundIceCandidate(null) to indicate
         // that we are done gathering.
@@ -1148,6 +1085,7 @@ PeerConnectionObserver.prototype = {
     appendStats(dict.mediaStreamStats, report);
     appendStats(dict.transportStats, report);
     appendStats(dict.iceComponentStats, report);
+    appendStats(dict.iceCandidatePairStats, report);
     appendStats(dict.iceCandidateStats, report);
     appendStats(dict.codecStats, report);
 

@@ -2018,6 +2018,10 @@ class LNotD : public LInstructionHelper<1, 1, 0>
     LNotD(const LAllocation &input) {
         setOperand(0, input);
     }
+
+    MNot *mir() {
+        return mir_->toNot();
+    }
 };
 
 // Not operation on a float32.
@@ -2028,6 +2032,10 @@ class LNotF : public LInstructionHelper<1, 1, 0>
 
     LNotF(const LAllocation &input) {
         setOperand(0, input);
+    }
+
+    MNot *mir() {
+        return mir_->toNot();
     }
 };
 
@@ -4366,7 +4374,7 @@ class LStringLength : public LInstructionHelper<1, 1, 0>
     }
 };
 
-// Take the floor of a number. Implements Math.floor().
+// Take the floor of a double precision number. Implements Math.floor().
 class LFloor : public LInstructionHelper<1, 1, 0>
 {
   public:
@@ -4375,9 +4383,16 @@ class LFloor : public LInstructionHelper<1, 1, 0>
     LFloor(const LAllocation &num) {
         setOperand(0, num);
     }
+};
 
-    MRound *mir() const {
-        return mir_->toRound();
+// Take the floor of a single precision number. Implements Math.floor().
+class LFloorF : public LInstructionHelper<1, 1, 0>
+{
+  public:
+    LIR_HEADER(FloorF)
+
+    LFloorF(const LAllocation &num) {
+        setOperand(0, num);
     }
 };
 

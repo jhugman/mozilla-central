@@ -30,6 +30,23 @@ using mozilla::DoublesAreIdentical;
 using mozilla::IsFloat32Representable;
 using mozilla::Maybe;
 
+template<size_t Op> static void
+ConvertDefinitionToDouble(MDefinition *def, MInstruction *consumer)
+{
+    MInstruction *replace = MToDouble::New(def);
+    consumer->replaceOperand(Op, replace);
+    consumer->block()->insertBefore(consumer, replace);
+}
+
+static bool
+CheckUsesAreFloat32Consumers(MInstruction *ins)
+{
+    bool allConsumerUses = true;
+    for (MUseDefIterator use(ins); allConsumerUses && use; use++)
+        allConsumerUses &= use.def()->canConsumeFloat32();
+    return allConsumerUses;
+}
+
 void
 MDefinition::PrintOpcodeName(FILE *fp, MDefinition::Opcode op)
 {
@@ -650,6 +667,22 @@ MStringLength::foldsTo(bool useValueNumbers)
     return this;
 }
 
+void
+MFloor::trySpecializeFloat32()
+{
+    // No need to look at the output, as it's an integer (see IonBuilder::inlineMathFloor)
+    if (!input()->canProduceFloat32()) {
+        if (input()->type() == MIRType_Float32)
+            ConvertDefinitionToDouble<0>(input(), this);
+        return;
+    }
+
+    if (type() == MIRType_Double)
+        setResultType(MIRType_Float32);
+
+    setPolicyType(MIRType_Float32);
+}
+
 MTest *
 MTest::New(MDefinition *ins, MBasicBlock *ifTrue, MBasicBlock *ifFalse)
 {
@@ -1234,23 +1267,6 @@ MBinaryArithInstruction::foldsTo(bool useValueNumbers)
         return rhs; // x op id => x
 
     return this;
-}
-
-template<size_t Op> static void
-ConvertDefinitionToDouble(MDefinition *def, MInstruction *consumer)
-{
-    MInstruction *replace = MToDouble::New(def);
-    consumer->replaceOperand(Op, replace);
-    consumer->block()->insertBefore(consumer, replace);
-}
-
-static bool
-CheckUsesAreFloat32Consumers(MInstruction *ins)
-{
-    bool allConsumerUses = true;
-    for (MUseDefIterator use(ins); allConsumerUses && use; use++)
-        allConsumerUses &= use.def()->canConsumeFloat32();
-    return allConsumerUses;
 }
 
 void
@@ -2862,7 +2878,7 @@ jit::DenseNativeElementType(types::CompilerConstraintList *constraints, MDefinit
 }
 
 static bool
-PropertyReadNeedsTypeBarrier(JSContext *cx, types::CompilerConstraintList *constraints,
+PropertyReadNeedsTypeBarrier(types::CompilerConstraintList *constraints,
                              types::TypeObjectKey *object, PropertyName *name,
                              types::TypeSet *observed)
 {
@@ -2880,16 +2896,13 @@ PropertyReadNeedsTypeBarrier(JSContext *cx, types::CompilerConstraintList *const
     if (property.maybeTypes() && !TypeSetIncludes(observed, MIRType_Value, property.maybeTypes()))
         return true;
 
-    // Type information for singleton objects is not required to reflect the
-    // initial 'undefined' value for native properties, in particular global
+    // Type information for global objects is not required to reflect the
+    // initial 'undefined' value for properties, in particular global
     // variables declared with 'var'. Until the property is assigned a value
     // other than undefined, a barrier is required.
-    if (name && object->singleton() && object->singleton()->isNative()) {
-        Shape *shape = object->singleton()->nativeLookup(cx, name);
-        if (shape &&
-            shape->hasSlot() &&
-            shape->hasDefaultGetter() &&
-            object->singleton()->nativeGetSlot(shape->slot()).isUndefined())
+    if (JSObject *obj = object->singleton()) {
+        if (name && types::CanHaveEmptyPropertyTypesForOwnProperty(obj) &&
+            (!property.maybeTypes() || property.maybeTypes()->empty()))
         {
             return true;
         }
@@ -2900,7 +2913,7 @@ PropertyReadNeedsTypeBarrier(JSContext *cx, types::CompilerConstraintList *const
 }
 
 bool
-jit::PropertyReadNeedsTypeBarrier(JSContext *cx, JSContext *propertycx,
+jit::PropertyReadNeedsTypeBarrier(JSContext *propertycx,
                                   types::CompilerConstraintList *constraints,
                                   types::TypeObjectKey *object, PropertyName *name,
                                   types::TemporaryTypeSet *observed, bool updateObserved)
@@ -2933,11 +2946,11 @@ jit::PropertyReadNeedsTypeBarrier(JSContext *cx, JSContext *propertycx,
         }
     }
 
-    return PropertyReadNeedsTypeBarrier(cx, constraints, object, name, observed);
+    return PropertyReadNeedsTypeBarrier(constraints, object, name, observed);
 }
 
 bool
-jit::PropertyReadNeedsTypeBarrier(JSContext *cx, JSContext *propertycx,
+jit::PropertyReadNeedsTypeBarrier(JSContext *propertycx,
                                   types::CompilerConstraintList *constraints,
                                   MDefinition *obj, PropertyName *name,
                                   types::TemporaryTypeSet *observed)
@@ -2953,7 +2966,7 @@ jit::PropertyReadNeedsTypeBarrier(JSContext *cx, JSContext *propertycx,
     for (size_t i = 0; i < types->getObjectCount(); i++) {
         types::TypeObjectKey *object = types->getObject(i);
         if (object) {
-            if (PropertyReadNeedsTypeBarrier(cx, propertycx, constraints, object, name,
+            if (PropertyReadNeedsTypeBarrier(propertycx, constraints, object, name,
                                              observed, updateObserved))
             {
                 return true;
@@ -2965,7 +2978,7 @@ jit::PropertyReadNeedsTypeBarrier(JSContext *cx, JSContext *propertycx,
 }
 
 bool
-jit::PropertyReadOnPrototypeNeedsTypeBarrier(JSContext *cx, types::CompilerConstraintList *constraints,
+jit::PropertyReadOnPrototypeNeedsTypeBarrier(types::CompilerConstraintList *constraints,
                                              MDefinition *obj, PropertyName *name,
                                              types::TemporaryTypeSet *observed)
 {
@@ -2982,7 +2995,7 @@ jit::PropertyReadOnPrototypeNeedsTypeBarrier(JSContext *cx, types::CompilerConst
             continue;
         while (object->proto().isObject()) {
             object = types::TypeObjectKey::get(object->proto().toObject());
-            if (PropertyReadNeedsTypeBarrier(cx, constraints, object, name, observed))
+            if (PropertyReadNeedsTypeBarrier(constraints, object, name, observed))
                 return true;
         }
     }

@@ -795,9 +795,9 @@ public:
                                                                   SurfaceFormat aFormat) const = 0;
 
   /*
-   * Create a SourceSurface optimized for use with this DrawTarget from
-   * an arbitrary other SourceSurface. This may return aSourceSurface or some
-   * other existing surface.
+   * Create a SourceSurface optimized for use with this DrawTarget from an
+   * arbitrary SourceSurface type supported by this backend. This may return
+   * aSourceSurface or some other existing surface.
    */
   virtual TemporaryRef<SourceSurface> OptimizeSourceSurface(SourceSurface *aSurface) const = 0;
 
@@ -937,6 +937,10 @@ public:
 
   static TemporaryRef<DrawTarget> CreateDrawTargetForCairoSurface(cairo_surface_t* aSurface, const IntSize& aSize);
 
+  static TemporaryRef<SourceSurface>
+    CreateSourceSurfaceForCairoSurface(cairo_surface_t* aSurface,
+                                       SurfaceFormat aFormat);
+
   static TemporaryRef<DrawTarget>
     CreateDrawTarget(BackendType aBackend, const IntSize &aSize, SurfaceFormat aFormat);
 
@@ -1002,6 +1006,8 @@ public:
   static void
     SetGlobalSkiaCacheLimits(int aCount, int aSizeInBytes);
 #endif
+
+  static void PurgeTextureCaches();
 
 #if defined(USE_SKIA) && defined(MOZ_ENABLE_FREETYPE)
   static TemporaryRef<GlyphRenderingOptions>

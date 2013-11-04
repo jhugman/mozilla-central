@@ -91,6 +91,7 @@
 #include "URIUtils.h"
 #include "nsIWebBrowserChrome.h"
 #include "nsIDocShell.h"
+#include "mozilla/net/NeckoMessageUtils.h"
 
 #if defined(ANDROID) || defined(LINUX)
 #include "nsSystemInfo.h"
@@ -1057,14 +1058,14 @@ ContentParent::MarkAsDead()
             sAppContentParents->Remove(mAppManifestURL);
             if (!sAppContentParents->Count()) {
                 delete sAppContentParents;
-                sAppContentParents = NULL;
+                sAppContentParents = nullptr;
             }
         }
     } else if (sNonAppContentParents) {
         sNonAppContentParents->RemoveElement(this);
         if (!sNonAppContentParents->Length()) {
             delete sNonAppContentParents;
-            sNonAppContentParents = NULL;
+            sNonAppContentParents = nullptr;
         }
     }
 
@@ -1072,7 +1073,7 @@ ContentParent::MarkAsDead()
         sPrivateContent->RemoveElement(this);
         if (!sPrivateContent->Length()) {
             delete sPrivateContent;
-            sPrivateContent = NULL;
+            sPrivateContent = nullptr;
         }
     }
 
@@ -1261,7 +1262,7 @@ ContentParent::ActorDestroy(ActorDestroyReason why)
                                                        NS_ConvertUTF16toUTF8(mAppManifestURL));
                 }
 
-                crashReporter->GenerateCrashReport(this, NULL);
+                crashReporter->GenerateCrashReport(this, nullptr);
 
                 nsAutoString dumpID(crashReporter->ChildDumpID());
                 props->SetPropertyAsAString(NS_LITERAL_STRING("dumpID"), dumpID);
@@ -1279,7 +1280,7 @@ ContentParent::ActorDestroy(ActorDestroyReason why)
     MessageLoop::current()->
         PostTask(FROM_HERE,
                  NewRunnableFunction(DelayedDeleteSubprocess, mSubprocess));
-    mSubprocess = NULL;
+    mSubprocess = nullptr;
 
     // IPDL rules require actors to live on past ActorDestroy, but it
     // may be that the kungFuDeathGrip above is the last reference to
@@ -1421,6 +1422,7 @@ ContentParent::ContentParent(mozIApplication* aApp,
     NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
     mSubprocess = new GeckoChildProcessHost(GeckoProcessType_Content,
                                             aOSPrivileges);
+    mSubprocess->SetSandboxEnabled(ShouldSandboxContentProcesses());
 
     IToplevelProtocol::SetTransport(mSubprocess->GetChannel());
 
@@ -1605,9 +1607,9 @@ ContentParent::~ContentParent()
                    !sNonAppContentParents->Contains(this));
     } else {
         // In general, we expect sAppContentParents->Get(mAppManifestURL) to be
-        // NULL.  But it could be that we created another ContentParent for this
-        // app after we did this->ActorDestroy(), so the right check is that
-        // sAppContentParents->Get(mAppManifestURL) != this.
+        // nullptr.  But it could be that we created another ContentParent for
+        // this app after we did this->ActorDestroy(), so the right check is
+        // that sAppContentParents->Get(mAppManifestURL) != this.
         MOZ_ASSERT(!sAppContentParents ||
                    sAppContentParents->Get(mAppManifestURL) != this);
     }
@@ -1733,7 +1735,7 @@ ContentParent::RecvSetClipboardText(const nsString& text,
                                 text.Length() * sizeof(PRUnichar));
     NS_ENSURE_SUCCESS(rv, true);
     
-    clipboard->SetData(trans, NULL, whichClipboard);
+    clipboard->SetData(trans, nullptr, whichClipboard);
     return true;
 }
 
@@ -1933,23 +1935,6 @@ ContentParent::RecvBroadcastVolume(const nsString& aVolumeName)
     NS_WARNING("ContentParent::RecvBroadcastVolume shouldn't be called when MOZ_WIDGET_GONK is not defined");
     return false;
 #endif
-}
-
-bool
-ContentParent::RecvRecordingDeviceEvents(const nsString& aRecordingStatus)
-{
-    nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
-    if (obs) {
-        // recording-device-ipc-events needs to gather more information from content process
-        nsRefPtr<nsHashPropertyBag> props = new nsHashPropertyBag();
-        props->SetPropertyAsUint64(NS_LITERAL_STRING("childID"), mChildID);
-        obs->NotifyObservers((nsIPropertyBag2*) props,
-                             "recording-device-ipc-events",
-                             aRecordingStatus.get());
-    } else {
-        NS_WARNING("Could not get the Observer service for ContentParent::RecvRecordingDeviceEvents.");
-    }
-    return true;
 }
 
 bool
@@ -2153,7 +2138,7 @@ ContentParent::AllocPJavaScriptParent()
     mozilla::jsipc::JavaScriptParent *parent = new mozilla::jsipc::JavaScriptParent();
     if (!parent->init()) {
         delete parent;
-        return NULL;
+        return nullptr;
     }
     return parent;
 }
@@ -3183,7 +3168,7 @@ ContentParent::RecvPrivateDocShellsExist(const bool& aExist)
       nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
       obs->NotifyObservers(nullptr, "last-pb-context-exited", nullptr);
       delete sPrivateContent;
-      sPrivateContent = NULL;
+      sPrivateContent = nullptr;
     }
   }
   return true;
@@ -3297,6 +3282,16 @@ ContentParent::ShouldContinueFromReplyTimeout()
   // timeouts should only ever occur in electrolysis-enabled sessions.
   MOZ_ASSERT(Preferences::GetBool("browser.tabs.remote", false));
   return false;
+}
+
+bool
+ContentParent::ShouldSandboxContentProcesses()
+{
+#ifdef MOZ_CONTENT_SANDBOX
+  return !PR_GetEnv("MOZ_DISABLE_CONTENT_SANDBOX");
+#else
+  return true;
+#endif
 }
 
 } // namespace dom
