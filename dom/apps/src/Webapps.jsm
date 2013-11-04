@@ -125,7 +125,9 @@ this.DOMApplicationRegistry = {
     cpmm.addMessageListener("Activities:Register:OK", this);
 
     Services.obs.addObserver(this, "xpcom-shutdown", false);
-
+#ifdef MOZ_ANDROID_SYNTHAPKS
+    Services.obs.addObserver(this, "Webapps:AutoInstall", false);
+#endif
     AppDownloadManager.registerCancelFunction(this.cancelDownload.bind(this));
 
     this.appsFile = FileUtils.getFile(DIRECTORY_NAME,
@@ -891,15 +893,30 @@ this.DOMApplicationRegistry = {
   },
 
   observe: function(aSubject, aTopic, aData) {
-    if (aTopic == "xpcom-shutdown") {
+    switch (aTopic) {
+      case "xpcom-shutdown":
       this.messages.forEach((function(msgName) {
         ppmm.removeMessageListener(msgName, this);
       }).bind(this));
       Services.obs.removeObserver(this, "xpcom-shutdown");
       cpmm = null;
       ppmm = null;
+        break;
+#ifdef MOZ_ANDROID_SYNTHAPKS
+      case "Webapps:AutoInstall": // note the capitalization.
+        this.doAutoInstall(aData);
+        break;
+#endif
     }
+
+
   },
+
+#ifdef MOZ_ANDROID_SYNTHAPKS
+  doAutoInstall: function (aData) {
+    debug("AutoInstalling from Webapps.jsm: " + aData);
+  },
+#endif
 
   _loadJSONAsync: function(aFile, aCallback) {
     try {
