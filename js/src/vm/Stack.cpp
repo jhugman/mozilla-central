@@ -14,7 +14,7 @@
 #include "gc/Marking.h"
 #ifdef JS_ION
 #include "jit/BaselineFrame.h"
-#include "jit/IonCompartment.h"
+#include "jit/JitCompartment.h"
 #endif
 
 #include "jit/IonFrameIterator-inl.h"
@@ -471,8 +471,7 @@ FrameRegs::setToEndOfScript()
 /*****************************************************************************/
 
 StackFrame *
-InterpreterStack::pushInvokeFrame(JSContext *cx, const CallArgs &args, InitialFrameFlags initial,
-                                  FrameGuard *fg)
+InterpreterStack::pushInvokeFrame(JSContext *cx, const CallArgs &args, InitialFrameFlags initial)
 {
     LifoAlloc::Mark mark = allocator_.mark();
 
@@ -487,14 +486,13 @@ InterpreterStack::pushInvokeFrame(JSContext *cx, const CallArgs &args, InitialFr
 
     fp->mark_ = mark;
     fp->initCallFrame(cx, nullptr, nullptr, nullptr, *fun, script, argv, args.length(), flags);
-    fg->setPushed(*this, fp);
     return fp;
 }
 
 StackFrame *
 InterpreterStack::pushExecuteFrame(JSContext *cx, HandleScript script, const Value &thisv,
                                    HandleObject scopeChain, ExecuteType type,
-                                   AbstractFramePtr evalInFrame, FrameGuard *fg)
+                                   AbstractFramePtr evalInFrame)
 {
     LifoAlloc::Mark mark = allocator_.mark();
 
@@ -508,7 +506,6 @@ InterpreterStack::pushExecuteFrame(JSContext *cx, HandleScript script, const Val
     fp->initExecuteFrame(cx, script, evalInFrame, thisv, *scopeChain, type);
     fp->initVarsToUndefined();
 
-    fg->setPushed(*this, fp);
     return fp;
 }
 
@@ -771,6 +768,15 @@ ScriptFrameIter::copyData() const
     JS_ASSERT(data_.ionFrames_.type() != jit::IonFrame_OptimizedJS);
 #endif
     return data_.cx_->new_<Data>(data_);
+}
+
+AbstractFramePtr
+ScriptFrameIter::copyDataAsAbstractFramePtr() const
+{
+    AbstractFramePtr frame;
+    if (Data *data = copyData())
+        frame.ptr_ = uintptr_t(data);
+    return frame;
 }
 
 JSCompartment *
@@ -1344,7 +1350,7 @@ InterpreterFrameIterator &
 InterpreterFrameIterator::operator++()
 {
     JS_ASSERT(!done());
-    if (fp_ != activation_->entry_) {
+    if (fp_ != activation_->entryFrame_) {
         pc_ = fp_->prevpc();
         sp_ = fp_->prevsp();
         fp_ = fp_->prev();

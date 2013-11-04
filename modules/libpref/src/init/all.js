@@ -232,6 +232,7 @@ pref("media.navigator.video.default_fps",30);
 pref("media.navigator.video.default_minfps",10);
 pref("media.navigator.video.max_fs", 0); // unrestricted
 pref("media.navigator.video.max_fr", 0); // unrestricted
+pref("media.navigator.load_adapt", false);
 pref("media.peerconnection.enabled", true);
 pref("media.navigator.permission.disabled", false);
 pref("media.peerconnection.default_iceservers", "[{\"url\": \"stun:stun.services.mozilla.com\"}]");
@@ -550,7 +551,13 @@ pref("nglayout.debug.paint_flashing_chrome", false);
 // BasicLayers (other layer managers always update the entire widget area)
 pref("nglayout.debug.widget_update_flashing", false);
 
+// Whether image visibility is enabled globally (ie we will try to unlock images
+// that are not visible).
 pref("layout.imagevisibility.enabled", true);
+// Whether image visibility is enabled in documents that are within a browser
+// element as defined by nsDocShell::FrameType and GetInheritedFrameType. This
+// pref only has an effect if layout.imagevisibility.enabled is false.
+pref("layout.imagevisibility.enabled_for_browser_elements_only", false);
 pref("layout.imagevisibility.numscrollportwidths", 0);
 pref("layout.imagevisibility.numscrollportheights", 1);
 
@@ -847,8 +854,9 @@ pref("dom.min_background_timeout_value", 1000);
 pref("dom.experimental_forms", false);
 pref("dom.forms.number", false);
 
-// Don't enable <input type=color> yet:
-pref("dom.forms.color", false);
+// Enable <input type=color> by default. It will be turned off for remaining
+// platforms which don't have a color picker implemented yet.
+pref("dom.forms.color", true);
 
 // Enables system messages and activities
 pref("dom.sysmsg.enabled", false);
@@ -1374,6 +1382,24 @@ pref("network.dir.format", 2);
 // enables the prefetch service (i.e., prefetching of <link rel="next"> URLs).
 pref("network.prefetch-next", true);
 
+// enables the predictive service
+pref("network.seer.enabled", true);
+pref("network.seer.enable-hover-on-ssl", false);
+pref("network.seer.page-degradation.day", 0);
+pref("network.seer.page-degradation.week", 5);
+pref("network.seer.page-degradation.month", 10);
+pref("network.seer.page-degradation.year", 25);
+pref("network.seer.page-degradation.max", 50);
+pref("network.seer.subresource-degradation.day", 1);
+pref("network.seer.subresource-degradation.week", 10);
+pref("network.seer.subresource-degradation.month", 25);
+pref("network.seer.subresource-degradation.year", 50);
+pref("network.seer.subresource-degradation.max", 100);
+pref("network.seer.preconnect-min-confidence", 90);
+pref("network.seer.preresolve-min-confidence", 60);
+pref("network.seer.redirect-likely-confidence", 75);
+pref("network.seer.max-queue-size", 50);
+
 
 // The following prefs pertain to the negotiate-auth extension (see bug 17578),
 // which provides transparent Kerberos or NTLM authentication using the SPNEGO
@@ -1861,6 +1887,9 @@ pref("layout.css.sticky.enabled", false);
 #else
 pref("layout.css.sticky.enabled", true);
 #endif
+
+// Is support for CSS "text-align: true X" enabled?
+pref("layout.css.text-align-true-value.enabled", false);
 
 // Is support for the CSS4 image-orientation property enabled?
 pref("layout.css.image-orientation.enabled", true);
@@ -4448,6 +4477,9 @@ pref("dom.mms.defaultServiceId", 0);
 // Debug enabler for MMS.
 pref("mms.debugging.enabled", false);
 
+// Request read report while sending MMS.
+pref("dom.mms.requestReadReport", true);
+
 // Number of RadioInterface instances to create.
 pref("ril.numRadioInterfaces", 0);
 
@@ -4485,22 +4517,42 @@ pref("dom.mozInputMethod.enabled", false);
 pref("dom.datastore.enabled", false);
 
 // Telephony API
+#ifdef MOZ_B2G_RIL
+pref("dom.telephony.enabled", true);
+#else
 pref("dom.telephony.enabled", false);
+#endif
 // Numeric default service id for WebTelephony API calls with |serviceId|
 // parameter omitted.
 pref("dom.telephony.defaultServiceId", 0);
 
 // Cell Broadcast API
+#ifdef MOZ_B2G_RIL
+pref("dom.cellbroadcast.enabled", true);
+#else
 pref("dom.cellbroadcast.enabled", false);
+#endif
 
 // ICC API
+#ifdef MOZ_B2G_RIL
+pref("dom.icc.enabled", true);
+#else
 pref("dom.icc.enabled", false);
+#endif
 
 // Mobile Connection API
+#ifdef MOZ_B2G_RIL
+pref("dom.mobileconnection.enabled", true);
+#else
 pref("dom.mobileconnection.enabled", false);
+#endif
 
 // Voice Mail API
+#ifdef MOZ_B2G_RIL
+pref("dom.voicemail.enabled", true);
+#else
 pref("dom.voicemail.enabled", false);
+#endif
 // Numeric default service id for Voice Mail API calls with |serviceId|
 // parameter omitted.
 pref("dom.voicemail.defaultServiceId", 0);

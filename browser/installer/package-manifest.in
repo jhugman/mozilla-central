@@ -521,9 +521,6 @@
 @BINPATH@/components/TCPSocketParentIntermediary.js
 @BINPATH@/components/TCPSocket.manifest
 
-@BINPATH@/components/AppProtocolHandler.js
-@BINPATH@/components/AppProtocolHandler.manifest
-
 @BINPATH@/components/Payment.js
 @BINPATH@/components/PaymentFlowInfo.js
 @BINPATH@/components/PaymentRequestInfo.js
@@ -700,6 +697,11 @@
 @BINPATH@/components/pipboot.xpt
 @BINPATH@/components/pipnss.xpt
 @BINPATH@/components/pippki.xpt
+
+; For content sandboxing
+#if defined(XP_WIN) && defined(MOZ_CONTENT_SANDBOX)
+@BINPATH@/@DLL_PREFIX@sandboxbroker@DLL_SUFFIX@
+#endif
 
 ; for Solaris SPARC
 #ifdef SOLARIS

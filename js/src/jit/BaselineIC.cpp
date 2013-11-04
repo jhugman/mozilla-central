@@ -6,6 +6,7 @@
 
 #include "jit/BaselineIC.h"
 
+#include "mozilla/DebugOnly.h"
 #include "mozilla/TemplateLib.h"
 
 #include "jsautooplen.h"
@@ -30,6 +31,8 @@
 #include "vm/Interpreter-inl.h"
 #include "vm/ScopeObject-inl.h"
 #include "vm/StringObject-inl.h"
+
+using mozilla::DebugOnly;
 
 namespace js {
 namespace jit {
@@ -561,11 +564,11 @@ ICUpdatedStub::initUpdatingChain(JSContext *cx, ICStubSpace *space)
 IonCode *
 ICStubCompiler::getStubCode()
 {
-    IonCompartment *ion = cx->compartment()->ionCompartment();
+    JitCompartment *comp = cx->compartment()->jitCompartment();
 
     // Check for existing cached stubcode.
     uint32_t stubKey = getKey();
-    IonCode *stubCode = ion->getStubCode(stubKey);
+    IonCode *stubCode = comp->getStubCode(stubKey);
     if (stubCode)
         return stubCode;
 
@@ -575,7 +578,7 @@ ICStubCompiler::getStubCode()
     masm.setSecondScratchReg(BaselineSecondScratchReg);
 #endif
 
-    AutoFlushCache afc("ICStubCompiler::getStubCode", cx->runtime()->ionRuntime());
+    AutoFlushCache afc("ICStubCompiler::getStubCode", cx->runtime()->jitRuntime());
     if (!generateStubCode(masm))
         return nullptr;
     Linker linker(masm);
@@ -592,7 +595,7 @@ ICStubCompiler::getStubCode()
         newStubCode->togglePreBarriers(true);
 
     // Cache newly compiled stubcode.
-    if (!ion->putStubCode(stubKey, newStubCode))
+    if (!comp->putStubCode(stubKey, newStubCode))
         return nullptr;
 
     JS_ASSERT(entersStubFrame_ == ICStub::CanMakeCalls(kind));
@@ -607,7 +610,7 @@ ICStubCompiler::getStubCode()
 bool
 ICStubCompiler::tailCallVM(const VMFunction &fun, MacroAssembler &masm)
 {
-    IonCode *code = cx->runtime()->ionRuntime()->getVMWrapper(fun);
+    IonCode *code = cx->runtime()->jitRuntime()->getVMWrapper(fun);
     if (!code)
         return false;
 
@@ -619,7 +622,7 @@ ICStubCompiler::tailCallVM(const VMFunction &fun, MacroAssembler &masm)
 bool
 ICStubCompiler::callVM(const VMFunction &fun, MacroAssembler &masm)
 {
-    IonCode *code = cx->runtime()->ionRuntime()->getVMWrapper(fun);
+    IonCode *code = cx->runtime()->jitRuntime()->getVMWrapper(fun);
     if (!code)
         return false;
 
@@ -630,7 +633,7 @@ ICStubCompiler::callVM(const VMFunction &fun, MacroAssembler &masm)
 bool
 ICStubCompiler::callTypeUpdateIC(MacroAssembler &masm, uint32_t objectOffset)
 {
-    IonCode *code = cx->runtime()->ionRuntime()->getVMWrapper(DoTypeUpdateFallbackInfo);
+    IonCode *code = cx->runtime()->jitRuntime()->getVMWrapper(DoTypeUpdateFallbackInfo);
     if (!code)
         return false;
 
@@ -808,7 +811,7 @@ EnsureCanEnterIon(JSContext *cx, ICUseCount_Fallback *stub, BaselineFrame *frame
 
 //
 // The following data is kept in a temporary heap-allocated buffer, stored in
-// IonRuntime (high memory addresses at top, low at bottom):
+// JitRuntime (high memory addresses at top, low at bottom):
 //
 //     +----->+=================================+  --      <---- High Address
 //     |      |                                 |   |
@@ -853,7 +856,7 @@ PrepareOsrTempData(JSContext *cx, ICUseCount_Fallback *stub, BaselineFrame *fram
     size_t totalSpace = AlignBytes(frameSpace, sizeof(Value)) +
                         AlignBytes(ionOsrTempDataSpace, sizeof(Value));
 
-    IonOsrTempData *info = (IonOsrTempData *)cx->runtime()->getIonRuntime(cx)->allocateOsrTempData(totalSpace);
+    IonOsrTempData *info = (IonOsrTempData *)cx->runtime()->getJitRuntime(cx)->allocateOsrTempData(totalSpace);
     if (!info)
         return nullptr;
 
@@ -3318,7 +3321,7 @@ IsCacheableGetPropReadSlot(JSObject *obj, JSObject *holder, Shape *shape, bool i
 }
 
 static bool
-IsCacheableGetPropCall(JSObject *obj, JSObject *holder, Shape *shape, bool *isScripted,
+IsCacheableGetPropCall(JSContext *cx, JSObject *obj, JSObject *holder, Shape *shape, bool *isScripted,
                        bool isDOMProxy=false)
 {
     JS_ASSERT(isScripted);
@@ -3340,6 +3343,14 @@ IsCacheableGetPropCall(JSObject *obj, JSObject *holder, Shape *shape, bool *isSc
         return false;
 
     JSFunction *func = &shape->getterObject()->as<JSFunction>();
+
+#ifdef JSGC_GENERATIONAL
+    // Information from get prop call ICs may be used directly from Ion code,
+    // and should not be nursery allocated.
+    if (cx->runtime()->gcNursery.isInside(holder) || cx->runtime()->gcNursery.isInside(func))
+        return false;
+#endif
+
     if (func->isNative()) {
         *isScripted = false;
         return true;
@@ -3430,7 +3441,7 @@ IsCacheableSetPropAddSlot(JSContext *cx, HandleObject obj, HandleShape oldShape,
 }
 
 static bool
-IsCacheableSetPropCall(JSObject *obj, JSObject *holder, Shape *shape, bool *isScripted)
+IsCacheableSetPropCall(JSContext *cx, JSObject *obj, JSObject *holder, Shape *shape, bool *isScripted)
 {
     JS_ASSERT(isScripted);
 
@@ -3451,6 +3462,14 @@ IsCacheableSetPropCall(JSObject *obj, JSObject *holder, Shape *shape, bool *isSc
         return false;
 
     JSFunction *func = &shape->setterObject()->as<JSFunction>();
+
+#ifdef JSGC_GENERATIONAL
+    // Information from set prop call ICs may be used directly from Ion code,
+    // and should not be nursery allocated.
+    if (cx->runtime()->gcNursery.isInside(holder) || cx->runtime()->gcNursery.isInside(func))
+        return false;
+#endif
+
     if (func->isNative()) {
         *isScripted = false;
         return true;
@@ -3685,7 +3704,7 @@ static bool TryAttachNativeGetElemStub(JSContext *cx, HandleScript script, jsbyt
     }
 
     bool getterIsScripted = false;
-    if (IsCacheableGetPropCall(obj, holder, shape, &getterIsScripted, /*isDOMProxy=*/false)) {
+    if (IsCacheableGetPropCall(cx, obj, holder, shape, &getterIsScripted, /*isDOMProxy=*/false)) {
         RootedFunction getter(cx, &shape->getterObject()->as<JSFunction>());
 
         // If a suitable stub already exists, nothing else to do.
@@ -4043,7 +4062,7 @@ ICGetElemNativeCompiler::emitCallScripted(MacroAssembler &masm, Register objReg)
         JS_ASSERT(ArgumentsRectifierReg != code);
 
         IonCode *argumentsRectifier =
-            cx->runtime()->ionRuntime()->getArgumentsRectifier(SequentialExecution);
+            cx->runtime()->jitRuntime()->getArgumentsRectifier(SequentialExecution);
 
         masm.movePtr(ImmGCPtr(argumentsRectifier), code);
         masm.loadPtr(Address(code, IonCode::offsetOfCode()), code);
@@ -4138,8 +4157,8 @@ ICGetElemNativeCompiler::generateStubCode(MacroAssembler &masm)
         EmitUnstowICValues(masm, 1);
 
         // Extract string from R1 again.
-        Register strExtract2 = masm.extractString(R1, ExtractTemp1);
-        JS_ASSERT(strExtract2 == strExtract);
+        DebugOnly<Register> strExtract2 = masm.extractString(R1, ExtractTemp1);
+        JS_ASSERT(Register(strExtract2) == strExtract);
 
         masm.bind(&skipAtomize);
     }
@@ -5371,10 +5390,6 @@ TryAttachScopeNameStub(JSContext *cx, HandleScript script, ICGetName_Fallback *s
     if (!IsCacheableGetPropReadSlot(scopeChain, scopeChain, shape))
         return true;
 
-    // Instantiate properties on singleton scope chain objects, for use during Ion compilation.
-    if (scopeChain->hasSingletonType() && IsIonEnabled(cx))
-        types::EnsureTrackPropertyTypes(cx, scopeChain, NameToId(name));
-
     bool isFixedSlot;
     uint32_t offset;
     GetFixedOrDynamicSlotOffset(scopeChain, shape->slot(), &isFixedSlot, &offset);
@@ -5823,7 +5838,7 @@ TryAttachNativeGetPropStub(JSContext *cx, HandleScript script, jsbytecode *pc,
     }
 
     bool isScripted = false;
-    bool cacheableCall = IsCacheableGetPropCall(obj, holder, shape, &isScripted, isDOMProxy);
+    bool cacheableCall = IsCacheableGetPropCall(cx, obj, holder, shape, &isScripted, isDOMProxy);
 
     // Try handling scripted getters.
     if (cacheableCall && isScripted && !isDOMProxy) {
@@ -6076,7 +6091,7 @@ ICGetProp_Fallback::Compiler::postGenerateStubCode(MacroAssembler &masm, Handle<
 {
     CodeOffsetLabel offset(returnOffset_);
     offset.fixup(&masm);
-    cx->compartment()->ionCompartment()->initBaselineGetPropReturnAddr(code->raw() + offset.offset());
+    cx->compartment()->jitCompartment()->initBaselineGetPropReturnAddr(code->raw() + offset.offset());
     return true;
 }
 
@@ -6289,7 +6304,7 @@ ICGetProp_CallScripted::Compiler::generateStubCode(MacroAssembler &masm)
         JS_ASSERT(ArgumentsRectifierReg != code);
 
         IonCode *argumentsRectifier =
-            cx->runtime()->ionRuntime()->getArgumentsRectifier(SequentialExecution);
+            cx->runtime()->jitRuntime()->getArgumentsRectifier(SequentialExecution);
 
         masm.movePtr(ImmGCPtr(argumentsRectifier), code);
         masm.loadPtr(Address(code, IonCode::offsetOfCode()), code);
@@ -6766,7 +6781,7 @@ TryAttachSetPropStub(JSContext *cx, HandleScript script, jsbytecode *pc, ICSetPr
     }
 
     bool isScripted = false;
-    bool cacheableCall = IsCacheableSetPropCall(obj, holder, shape, &isScripted);
+    bool cacheableCall = IsCacheableSetPropCall(cx, obj, holder, shape, &isScripted);
 
     // Try handling scripted setters.
     if (cacheableCall && isScripted) {
@@ -6924,7 +6939,7 @@ ICSetProp_Fallback::Compiler::postGenerateStubCode(MacroAssembler &masm, Handle<
 {
     CodeOffsetLabel offset(returnOffset_);
     offset.fixup(&masm);
-    cx->compartment()->ionCompartment()->initBaselineSetPropReturnAddr(code->raw() + offset.offset());
+    cx->compartment()->jitCompartment()->initBaselineSetPropReturnAddr(code->raw() + offset.offset());
     return true;
 }
 
@@ -7196,7 +7211,7 @@ ICSetProp_CallScripted::Compiler::generateStubCode(MacroAssembler &masm)
         JS_ASSERT(ArgumentsRectifierReg != code);
 
         IonCode *argumentsRectifier =
-            cx->runtime()->ionRuntime()->getArgumentsRectifier(SequentialExecution);
+            cx->runtime()->jitRuntime()->getArgumentsRectifier(SequentialExecution);
 
         masm.movePtr(ImmGCPtr(argumentsRectifier), code);
         masm.loadPtr(Address(code, IonCode::offsetOfCode()), code);
@@ -7951,7 +7966,7 @@ ICCall_Fallback::Compiler::postGenerateStubCode(MacroAssembler &masm, Handle<Ion
 {
     CodeOffsetLabel offset(returnOffset_);
     offset.fixup(&masm);
-    cx->compartment()->ionCompartment()->initBaselineCallReturnAddr(code->raw() + offset.offset());
+    cx->compartment()->jitCompartment()->initBaselineCallReturnAddr(code->raw() + offset.offset());
     return true;
 }
 
@@ -8120,7 +8135,7 @@ ICCallScriptedCompiler::generateStubCode(MacroAssembler &masm)
         JS_ASSERT(ArgumentsRectifierReg != argcReg);
 
         IonCode *argumentsRectifier =
-            cx->runtime()->ionRuntime()->getArgumentsRectifier(SequentialExecution);
+            cx->runtime()->jitRuntime()->getArgumentsRectifier(SequentialExecution);
 
         masm.movePtr(ImmGCPtr(argumentsRectifier), code);
         masm.loadPtr(Address(code, IonCode::offsetOfCode()), code);
@@ -8381,7 +8396,7 @@ ICCall_ScriptedApplyArray::Compiler::generateStubCode(MacroAssembler &masm)
         JS_ASSERT(ArgumentsRectifierReg != argcReg);
 
         IonCode *argumentsRectifier =
-            cx->runtime()->ionRuntime()->getArgumentsRectifier(SequentialExecution);
+            cx->runtime()->jitRuntime()->getArgumentsRectifier(SequentialExecution);
 
         masm.movePtr(ImmGCPtr(argumentsRectifier), target);
         masm.loadPtr(Address(target, IonCode::offsetOfCode()), target);
@@ -8492,7 +8507,7 @@ ICCall_ScriptedApplyArguments::Compiler::generateStubCode(MacroAssembler &masm)
         JS_ASSERT(ArgumentsRectifierReg != argcReg);
 
         IonCode *argumentsRectifier =
-            cx->runtime()->ionRuntime()->getArgumentsRectifier(SequentialExecution);
+            cx->runtime()->jitRuntime()->getArgumentsRectifier(SequentialExecution);
 
         masm.movePtr(ImmGCPtr(argumentsRectifier), target);
         masm.loadPtr(Address(target, IonCode::offsetOfCode()), target);
@@ -9221,6 +9236,8 @@ ICUpdatedStub *
 ICSetElemDenseAddCompiler::getStubSpecific(ICStubSpace *space, const AutoShapeVector *shapes)
 {
     RootedTypeObject objType(cx, obj_->getType(cx));
+    if (!objType)
+        return nullptr;
     Rooted<IonCode *> stubCode(cx, getStubCode());
     return ICSetElem_DenseAddImpl<ProtoChainDepth>::New(space, stubCode, objType, shapes);
 }

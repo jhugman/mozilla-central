@@ -1633,6 +1633,12 @@ public:
                                          nsCSSProperty aProperty);
 
   /**
+   * Returns true if the content node has animations or transitions for the
+   * property.
+   */
+  static bool HasAnimations(nsIContent* aContent, nsCSSProperty aProperty);
+
+  /**
    * Checks if off-main-thread animations are enabled.
    */
   static bool AreAsyncAnimationsEnabled();
@@ -1675,6 +1681,12 @@ public:
    * Checks whether support for the CSS-wide "unset" value is enabled.
    */
   static bool UnsetValueEnabled();
+
+  /**
+   * Checks whether support for the CSS text-align (and -moz-text-align-last)
+   * 'true' value is enabled.
+   */
+  static bool IsTextAlignTrueValueEnabled();
 
   /**
    * Unions the overflow areas of all non-popup children of aFrame with

@@ -14,7 +14,7 @@ const {AppProjects} = require("devtools/app-manager/app-projects");
 const {AppValidator} = require("devtools/app-manager/app-validator");
 const {Services} = Cu.import("resource://gre/modules/Services.jsm");
 const {FileUtils} = Cu.import("resource://gre/modules/FileUtils.jsm");
-const {installHosted, installPackaged, getTargetForApp} = require("devtools/app-actor-front");
+const {installHosted, installPackaged, getTargetForApp, reloadApp} = require("devtools/app-actor-front");
 const {EventEmitter} = Cu.import("resource:///modules/devtools/shared/event-emitter.js");
 
 const promise = require("sdk/core/promise");
@@ -35,7 +35,12 @@ window.addEventListener("message", function(event) {
       }
     }
   } catch(e) {}
-}, false);
+});
+
+window.addEventListener("unload", function onUnload() {
+  window.removeEventListener("unload", onUnload);
+  UI.destroy();
+});
 
 let UI = {
   isReady: false,
@@ -55,8 +60,15 @@ let UI = {
     });
   },
 
+  destroy: function() {
+    if (this.connection) {
+      this.connection.off(Connection.Events.STATUS_CHANGED, this._onConnectionStatusChange);
+    }
+    this.template.destroy();
+  },
+
   onNewConnection: function() {
-    this.connection.on(Connection.Events.STATUS_CHANGED, () => this._onConnectionStatusChange());
+    this.connection.on(Connection.Events.STATUS_CHANGED, this._onConnectionStatusChange);
     this._onConnectionStatusChange();
   },
 
@@ -71,6 +83,8 @@ let UI = {
       );
     }
   },
+
+  get connected() { return !!this.listTabsResponse; },
 
   _selectFolder: function() {
     let fp = Cc["@mozilla.org/filepicker;1"].createInstance(Ci.nsIFilePicker);
@@ -172,20 +186,32 @@ let UI = {
         .then(() => {
            // Install the app to the device if we are connected,
            // and there is no error
-           if (project.errorsCount == 0 && this.listTabsResponse) {
+           if (project.errorsCount == 0 && this.connected) {
              return this.install(project);
            }
          })
-        .then(
-         () => {
+        .then(() => {
            button.disabled = false;
-         },
-         (res) => {
-           button.disabled = false;
-           let message = res.error + ": " + res.message;
-           alert(message);
-           this.connection.log(message);
-         });
+           // Finally try to reload the app if it is already opened
+           if (this.connected) {
+             this.reload(project);
+           }
+        },
+        (res) => {
+          button.disabled = false;
+          let message = res.error + ": " + res.message;
+          alert(message);
+          this.connection.log(message);
+        });
+  },
+
+  reload: function (project) {
+    return reloadApp(this.connection.client,
+              this.listTabsResponse.webappsActor,
+              this._getProjectManifestURL(project)).
+      then(() => {
+        this.connection.log("App reloaded");
+      });
   },
 
   remove: function(location, event) {
@@ -412,5 +438,9 @@ let UI = {
     return this.manifestEditor.show(editorContainer);
   }
 };
+
+// This must be bound immediately, as it might be used via the message listener
+// before UI.onload() has been called.
+UI._onConnectionStatusChange = UI._onConnectionStatusChange.bind(UI);
 
 EventEmitter.decorate(UI);

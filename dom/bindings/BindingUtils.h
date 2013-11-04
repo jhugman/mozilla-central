@@ -64,6 +64,27 @@ UnwrapArg(JSContext* cx, JS::Handle<JS::Value> v, Interface** ppArg,
   return rv;
 }
 
+inline const ErrNum
+GetInvalidThisErrorForMethod(bool aSecurityError)
+{
+  return aSecurityError ? MSG_METHOD_THIS_UNWRAPPING_DENIED :
+                          MSG_METHOD_THIS_DOES_NOT_IMPLEMENT_INTERFACE;
+}
+
+inline const ErrNum
+GetInvalidThisErrorForGetter(bool aSecurityError)
+{
+  return aSecurityError ? MSG_GETTER_THIS_UNWRAPPING_DENIED :
+                          MSG_GETTER_THIS_DOES_NOT_IMPLEMENT_INTERFACE;
+}
+
+inline const ErrNum
+GetInvalidThisErrorForSetter(bool aSecurityError)
+{
+  return aSecurityError ? MSG_SETTER_THIS_UNWRAPPING_DENIED :
+                          MSG_SETTER_THIS_DOES_NOT_IMPLEMENT_INTERFACE;
+}
+
 bool
 ThrowInvalidThis(JSContext* aCx, const JS::CallArgs& aArgs,
                  const ErrNum aErrorNumber,
@@ -511,7 +532,7 @@ MaybeWrapStringValue(JSContext* cx, JS::MutableHandle<JS::Value> rval)
   MOZ_ASSERT(rval.isString());
   JSString* str = rval.toString();
   if (JS::GetGCThingZone(str) != js::GetContextZone(cx)) {
-    return JS_WrapValue(cx, rval.address());
+    return JS_WrapValue(cx, rval);
   }
   return true;
 }
@@ -526,7 +547,7 @@ MaybeWrapObjectValue(JSContext* cx, JS::MutableHandle<JS::Value> rval)
 
   JSObject* obj = &rval.toObject();
   if (js::GetObjectCompartment(obj) != js::GetContextCompartment(cx)) {
-    return JS_WrapValue(cx, rval.address());
+    return JS_WrapValue(cx, rval);
   }
 
   // We're same-compartment, but even then we might need to wrap
@@ -539,7 +560,7 @@ MaybeWrapObjectValue(JSContext* cx, JS::MutableHandle<JS::Value> rval)
 
   // It's not a WebIDL object.  But it might be an XPConnect one, in which case
   // we may need to outerize here, so make sure to call JS_WrapValue.
-  return JS_WrapValue(cx, rval.address());
+  return JS_WrapValue(cx, rval);
 }
 
 // Like MaybeWrapObjectValue, but also allows null
@@ -568,7 +589,7 @@ MaybeWrapNonDOMObjectValue(JSContext* cx, JS::MutableHandle<JS::Value> rval)
   if (js::GetObjectCompartment(obj) == js::GetContextCompartment(cx)) {
     return true;
   }
-  return JS_WrapValue(cx, rval.address());
+  return JS_WrapValue(cx, rval);
 }
 
 // Like MaybeWrapNonDOMObjectValue but allows null
@@ -682,7 +703,7 @@ WrapNewBindingObject(JSContext* cx, JS::Handle<JSObject*> scope, T* value,
   }
 
   rval.set(JS::ObjectValue(*obj));
-  return JS_WrapValue(cx, rval.address());
+  return JS_WrapValue(cx, rval);
 }
 
 // Create a JSObject wrapping "value", for cases when "value" is a
@@ -723,7 +744,7 @@ WrapNewBindingNonWrapperCachedObject(JSContext* cx,
   // We can end up here in all sorts of compartments, per above.  Make
   // sure to JS_WrapValue!
   rval.set(JS::ObjectValue(*obj));
-  return JS_WrapValue(cx, rval.address());
+  return JS_WrapValue(cx, rval);
 }
 
 // Create a JSObject wrapping "value", for cases when "value" is a
@@ -774,7 +795,7 @@ WrapNewBindingNonWrapperCachedOwnedObject(JSContext* cx,
   // We can end up here in all sorts of compartments, per above.  Make
   // sure to JS_WrapValue!
   rval.set(JS::ObjectValue(*obj));
-  return JS_WrapValue(cx, rval.address());
+  return JS_WrapValue(cx, rval);
 }
 
 // Helper for smart pointers (nsAutoPtr/nsRefPtr/nsCOMPtr).
@@ -969,7 +990,7 @@ TryPreserveWrapper(JSObject* obj);
 // Can only be called with the immediate prototype of the instance object. Can
 // only be called on the prototype of an object known to be a DOM instance.
 bool
-InstanceClassHasProtoAtDepth(JS::Handle<JSObject*> protoObject, uint32_t protoID,
+InstanceClassHasProtoAtDepth(JSObject* protoObject, uint32_t protoID,
                              uint32_t depth);
 
 // Only set allowNativeWrapper to false if you really know you need it, if in
@@ -1032,7 +1053,7 @@ inline bool
 WrapObject(JSContext* cx, JS::Handle<JSObject*> scope, T* p,
            JS::MutableHandle<JS::Value> rval)
 {
-  return WrapObject(cx, scope, p, NULL, rval);
+  return WrapObject(cx, scope, p, nullptr, rval);
 }
 
 // Helper to make it possible to wrap directly out of an nsCOMPtr
@@ -1050,7 +1071,7 @@ inline bool
 WrapObject(JSContext* cx, JS::Handle<JSObject*> scope, const nsCOMPtr<T>& p,
            JS::MutableHandle<JS::Value> rval)
 {
-  return WrapObject(cx, scope, p, NULL, rval);
+  return WrapObject(cx, scope, p, nullptr, rval);
 }
 
 // Helper to make it possible to wrap directly out of an nsRefPtr
@@ -1068,7 +1089,7 @@ inline bool
 WrapObject(JSContext* cx, JS::Handle<JSObject*> scope, const nsRefPtr<T>& p,
            JS::MutableHandle<JS::Value> rval)
 {
-  return WrapObject(cx, scope, p, NULL, rval);
+  return WrapObject(cx, scope, p, nullptr, rval);
 }
 
 // Specialization to make it easy to use WrapObject in codegen.
@@ -1943,7 +1964,8 @@ void SetXrayExpandoChain(JSObject *obj, JSObject *chain);
 bool
 NativeToString(JSContext* cx, JS::Handle<JSObject*> wrapper,
                JS::Handle<JSObject*> obj, const char* pre,
-               const char* post, JS::Value* v);
+               const char* post,
+               JS::MutableHandle<JS::Value> v);
 
 HAS_MEMBER(JSBindingFinalized)
 

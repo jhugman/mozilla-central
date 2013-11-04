@@ -7,7 +7,6 @@
 #include "MobileMessageThread.h"
 #include "MobileMessageService.h"
 #include "SmsSegmentInfo.h"
-#include "jsapi.h"
 
 namespace mozilla {
 namespace dom {
@@ -32,6 +31,7 @@ MobileMessageService::GetInstance()
 NS_IMETHODIMP
 MobileMessageService::CreateSmsMessage(int32_t aId,
                                        uint64_t aThreadId,
+                                       const nsAString& aIccId,
                                        const nsAString& aDelivery,
                                        const nsAString& aDeliveryStatus,
                                        const nsAString& aSender,
@@ -39,12 +39,14 @@ MobileMessageService::CreateSmsMessage(int32_t aId,
                                        const nsAString& aBody,
                                        const nsAString& aMessageClass,
                                        const JS::Value& aTimestamp,
+                                       const JS::Value& aDeliveryTimestamp,
                                        const bool aRead,
                                        JSContext* aCx,
                                        nsIDOMMozSmsMessage** aMessage)
 {
   return SmsMessage::Create(aId,
                             aThreadId,
+                            aIccId,
                             aDelivery,
                             aDeliveryStatus,
                             aSender,
@@ -52,6 +54,7 @@ MobileMessageService::CreateSmsMessage(int32_t aId,
                             aBody,
                             aMessageClass,
                             aTimestamp,
+                            aDeliveryTimestamp,
                             aRead,
                             aCx,
                             aMessage);
@@ -60,8 +63,9 @@ MobileMessageService::CreateSmsMessage(int32_t aId,
 NS_IMETHODIMP
 MobileMessageService::CreateMmsMessage(int32_t               aId,
                                        uint64_t              aThreadId,
+                                       const nsAString&      aIccId,
                                        const nsAString&      aDelivery,
-                                       const JS::Value&      aDeliveryStatus,
+                                       const JS::Value&      aDeliveryInfo,
                                        const nsAString&      aSender,
                                        const JS::Value&      aReceivers,
                                        const JS::Value&      aTimestamp,
@@ -75,8 +79,9 @@ MobileMessageService::CreateMmsMessage(int32_t               aId,
 {
   return MmsMessage::Create(aId,
                             aThreadId,
+                            aIccId,
                             aDelivery,
-                            aDeliveryStatus,
+                            aDeliveryInfo,
                             aSender,
                             aReceivers,
                             aTimestamp,

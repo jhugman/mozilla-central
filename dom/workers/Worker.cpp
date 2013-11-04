@@ -67,9 +67,9 @@ public:
     JS::Rooted<JSObject*> proto(aCx,
       js::InitClassWithReserved(aCx, aObj, aParentProto, ProtoClass(),
                                 Construct, 0, sProperties, sFunctions,
-                                NULL, NULL));
+                                nullptr, nullptr));
     if (!proto) {
-      return NULL;
+      return nullptr;
     }
 
     js::SetReservedSlot(proto, DOM_PROTO_INSTANCE_CLASS_SLOT,
@@ -81,7 +81,7 @@ public:
 
       JSObject* constructor = JS_GetConstructor(aCx, proto);
       if (!constructor)
-        return NULL;
+        return nullptr;
       js::SetFunctionNativeReserved(constructor, CONSTRUCTOR_SLOT_PARENT,
                                     PRIVATE_TO_JSVAL(parent));
     }
@@ -94,7 +94,7 @@ public:
 
   static JSObject*
   Create(JSContext* aCx, WorkerPrivate* aParentObj, const nsAString& aScriptURL,
-         bool aIsChromeWorker, bool aIsSharedWorker,
+         bool aIsChromeWorker, WorkerPrivate::WorkerType aWorkerType,
          const nsAString& aSharedWorkerName);
 
 protected:
@@ -121,14 +121,15 @@ protected:
 
     WorkerPrivate* parent;
     if (priv.isUndefined()) {
-      parent = NULL;
+      parent = nullptr;
     } else {
       parent = static_cast<WorkerPrivate*>(priv.get().toPrivate());
       parent->AssertIsOnWorkerThread();
     }
 
     JS::Rooted<JSObject*> obj(aCx,
-      Create(aCx, parent, scriptURL, aIsChromeWorker, false, EmptyString()));
+      Create(aCx, parent, scriptURL, aIsChromeWorker,
+             WorkerPrivate::WorkerTypeDedicated, EmptyString()));
     if (!obj) {
       return false;
     }
@@ -346,7 +347,7 @@ const DOMJSClass Worker::sClass = {
     JSCLASS_IMPLEMENTS_BARRIERS,
     JS_PropertyStub, JS_DeletePropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
     JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub, Finalize,
-    NULL, NULL, NULL, NULL, Trace
+    nullptr, nullptr, nullptr, nullptr, Trace
   },
   {
     INTERFACE_CHAIN_1(prototypes::id::EventTarget_workers),
@@ -427,9 +428,10 @@ public:
   {
     JS::Rooted<JSObject*> proto(aCx,
       js::InitClassWithReserved(aCx, aObj, aParentProto, ProtoClass(),
-                                Construct, 0, NULL, NULL, NULL, NULL));
+                                Construct, 0, nullptr, nullptr, nullptr,
+                                nullptr));
     if (!proto) {
-      return NULL;
+      return nullptr;
     }
 
     js::SetReservedSlot(proto, DOM_PROTO_INSTANCE_CLASS_SLOT,
@@ -441,7 +443,7 @@ public:
 
       JSObject* constructor = JS_GetConstructor(aCx, proto);
       if (!constructor)
-        return NULL;
+        return nullptr;
       js::SetFunctionNativeReserved(constructor, CONSTRUCTOR_SLOT_PARENT,
                                     PRIVATE_TO_JSVAL(parent));
     }
@@ -503,7 +505,7 @@ const DOMJSClass ChromeWorker::sClass = {
     JSCLASS_IMPLEMENTS_BARRIERS,
     JS_PropertyStub, JS_DeletePropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
     JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub, Finalize,
-    NULL, NULL, NULL, NULL, Trace,
+    nullptr, nullptr, nullptr, nullptr, Trace,
   },
   {
     INTERFACE_CHAIN_1(prototypes::id::EventTarget_workers),
@@ -551,18 +553,22 @@ Worker::GetInstancePrivate(JSContext* aCx, JSObject* aObj,
     return UnwrapDOMObject<WorkerPrivate>(aObj);
   }
 
-  JS_ReportErrorNumber(aCx, js_GetErrorMessage, NULL, JSMSG_INCOMPATIBLE_PROTO,
-                       Class()->name, aFunctionName, classPtr->name);
-  return NULL;
+  JS_ReportErrorNumber(aCx, js_GetErrorMessage, nullptr,
+                       JSMSG_INCOMPATIBLE_PROTO, Class()->name,
+                       aFunctionName, classPtr->name);
+  return nullptr;
 }
 
 JSObject*
 Worker::Create(JSContext* aCx, WorkerPrivate* aParent,
                const nsAString& aScriptURL, bool aIsChromeWorker,
-               bool aIsSharedWorker, const nsAString& aSharedWorkerName)
+               WorkerPrivate::WorkerType aWorkerType,
+               const nsAString& aSharedWorkerName)
 {
-  MOZ_ASSERT_IF(aIsSharedWorker, !aSharedWorkerName.IsVoid());
-  MOZ_ASSERT_IF(!aIsSharedWorker, aSharedWorkerName.IsEmpty());
+  MOZ_ASSERT_IF(aWorkerType == WorkerPrivate::WorkerTypeShared,
+                !aSharedWorkerName.IsVoid());
+  MOZ_ASSERT_IF(aWorkerType != WorkerPrivate::WorkerTypeShared,
+                aSharedWorkerName.IsEmpty());
 
   RuntimeService* runtimeService;
   if (aParent) {
@@ -591,7 +597,7 @@ Worker::Create(JSContext* aCx, WorkerPrivate* aParent,
 
   nsRefPtr<WorkerPrivate> worker =
     WorkerPrivate::Create(aCx, obj, aParent, aScriptURL, aIsChromeWorker,
-                          aIsSharedWorker, aSharedWorkerName);
+                          aWorkerType, aSharedWorkerName);
   if (!worker) {
     // It'd be better if we could avoid allocating the JSObject until after we
     // make sure we have a WorkerPrivate, but failing that we should at least
@@ -632,14 +638,14 @@ WorkerCrossThreadDispatcher*
 GetWorkerCrossThreadDispatcher(JSContext* aCx, jsval aWorker)
 {
   if (JSVAL_IS_PRIMITIVE(aWorker)) {
-    return NULL;
+    return nullptr;
   }
 
   WorkerPrivate* w =
       Worker::GetInstancePrivate(aCx, JSVAL_TO_OBJECT(aWorker),
                                  "GetWorkerCrossThreadDispatcher");
   if (!w) {
-    return NULL;
+    return nullptr;
   }
   return w->GetCrossThreadDispatcher();
 }

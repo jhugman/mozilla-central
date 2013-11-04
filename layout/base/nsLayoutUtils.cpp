@@ -96,6 +96,7 @@ using mozilla::image::Orientation;
 
 #define FLEXBOX_ENABLED_PREF_NAME "layout.css.flexbox.enabled"
 #define STICKY_ENABLED_PREF_NAME "layout.css.sticky.enabled"
+#define TEXT_ALIGN_TRUE_ENABLED_PREF_NAME "layout.css.text-align-true-value.enabled"
 
 #ifdef DEBUG
 // TODO: remove, see bug 598468.
@@ -209,11 +210,50 @@ StickyEnabledPrefChangeCallback(const char* aPrefName, void* aClosure)
   return 0;
 }
 
+// When the pref "layout.css.text-align-true-value.enabled" changes, this
+// function is called to let us update kTextAlignKTable & kTextAlignLastKTable,
+// to selectively disable or restore the entries for "true" in those tables.
+static int
+TextAlignTrueEnabledPrefChangeCallback(const char* aPrefName, void* aClosure)
+{
+  NS_ASSERTION(strcmp(aPrefName, TEXT_ALIGN_TRUE_ENABLED_PREF_NAME) == 0,
+               "Did you misspell " TEXT_ALIGN_TRUE_ENABLED_PREF_NAME " ?");
+
+  static bool sIsInitialized;
+  static int32_t sIndexOfTrueInTextAlignTable;
+  static int32_t sIndexOfTrueInTextAlignLastTable;
+  bool isTextAlignTrueEnabled =
+    Preferences::GetBool(TEXT_ALIGN_TRUE_ENABLED_PREF_NAME, false);
+
+  if (!sIsInitialized) {
+    // First run: find the position of "true" in kTextAlignKTable.
+    sIndexOfTrueInTextAlignTable =
+      nsCSSProps::FindIndexOfKeyword(eCSSKeyword_true,
+                                     nsCSSProps::kTextAlignKTable);
+    // First run: find the position of "true" in kTextAlignLastKTable.
+    sIndexOfTrueInTextAlignLastTable =
+      nsCSSProps::FindIndexOfKeyword(eCSSKeyword_true,
+                                     nsCSSProps::kTextAlignLastKTable);
+    sIsInitialized = true;
+  }
+
+  // OK -- now, stomp on or restore the "true" entry in the keyword tables,
+  // depending on whether the pref is enabled vs. disabled.
+  MOZ_ASSERT(sIndexOfTrueInTextAlignTable >= 0);
+  nsCSSProps::kTextAlignKTable[sIndexOfTrueInTextAlignTable] =
+    isTextAlignTrueEnabled ? eCSSKeyword_true : eCSSKeyword_UNKNOWN;
+  MOZ_ASSERT(sIndexOfTrueInTextAlignLastTable >= 0);
+  nsCSSProps::kTextAlignLastKTable[sIndexOfTrueInTextAlignLastTable] =
+    isTextAlignTrueEnabled ? eCSSKeyword_true : eCSSKeyword_UNKNOWN;
+
+  return 0;
+}
+
 template <class AnimationsOrTransitions>
 static AnimationsOrTransitions*
-HasAnimationOrTransition(nsIContent* aContent,
-                         nsIAtom* aAnimationProperty,
-                         nsCSSProperty aProperty)
+HasAnimationOrTransitionForCompositor(nsIContent* aContent,
+                                      nsIAtom* aAnimationProperty,
+                                      nsCSSProperty aProperty)
 {
   AnimationsOrTransitions* animations =
     static_cast<AnimationsOrTransitions*>(aContent->GetProperty(aAnimationProperty));
@@ -235,12 +275,40 @@ nsLayoutUtils::HasAnimationsForCompositor(nsIContent* aContent,
 {
   if (!aContent->MayHaveAnimations())
     return false;
-  if (HasAnimationOrTransition<ElementAnimations>
-        (aContent, nsGkAtoms::animationsProperty, aProperty)) {
-    return true;
+  return HasAnimationOrTransitionForCompositor<ElementAnimations>
+            (aContent, nsGkAtoms::animationsProperty, aProperty) ||
+         HasAnimationOrTransitionForCompositor<ElementTransitions>
+            (aContent, nsGkAtoms::transitionsProperty, aProperty);
+}
+
+template <class AnimationsOrTransitions>
+static AnimationsOrTransitions*
+HasAnimationOrTransition(nsIContent* aContent,
+                         nsIAtom* aAnimationProperty,
+                         nsCSSProperty aProperty)
+{
+  AnimationsOrTransitions* animations =
+    static_cast<AnimationsOrTransitions*>(aContent->GetProperty(aAnimationProperty));
+  if (animations) {
+    bool propertyMatches = animations->HasAnimationOfProperty(aProperty);
+    if (propertyMatches) {
+      return animations;
+    }
   }
-  return HasAnimationOrTransition<ElementTransitions>
-    (aContent, nsGkAtoms::transitionsProperty, aProperty);
+
+  return nullptr;
+}
+
+bool
+nsLayoutUtils::HasAnimations(nsIContent* aContent,
+                             nsCSSProperty aProperty)
+{
+  if (!aContent->MayHaveAnimations())
+    return false;
+  return HasAnimationOrTransition<ElementAnimations>
+            (aContent, nsGkAtoms::animationsProperty, aProperty) ||
+         HasAnimationOrTransition<ElementTransitions>
+            (aContent, nsGkAtoms::transitionsProperty, aProperty);
 }
 
 static gfxSize
@@ -283,7 +351,7 @@ gfxSize
 nsLayoutUtils::GetMaximumAnimatedScale(nsIContent* aContent)
 {
   gfxSize result;
-  ElementAnimations* animations = HasAnimationOrTransition<ElementAnimations>
+  ElementAnimations* animations = HasAnimationOrTransitionForCompositor<ElementAnimations>
     (aContent, nsGkAtoms::animationsProperty, eCSSProperty_transform);
   if (animations) {
     for (uint32_t animIdx = animations->mAnimations.Length(); animIdx-- != 0; ) {
@@ -306,7 +374,7 @@ nsLayoutUtils::GetMaximumAnimatedScale(nsIContent* aContent)
       }
     }
   }
-  ElementTransitions* transitions = HasAnimationOrTransition<ElementTransitions>
+  ElementTransitions* transitions = HasAnimationOrTransitionForCompositor<ElementTransitions>
     (aContent, nsGkAtoms::transitionsProperty, eCSSProperty_transform);
   if (transitions) {
     for (uint32_t i = 0, i_end = transitions->mPropertyTransitions.Length();
@@ -445,6 +513,22 @@ nsLayoutUtils::UnsetValueEnabled()
   }
 
   return sUnsetValueEnabled;
+}
+
+bool
+nsLayoutUtils::IsTextAlignTrueValueEnabled()
+{
+  static bool sTextAlignTrueValueEnabled;
+  static bool sTextAlignTrueValueEnabledPrefCached = false;
+
+  if (!sTextAlignTrueValueEnabledPrefCached) {
+    sTextAlignTrueValueEnabledPrefCached = true;
+    Preferences::AddBoolVarCache(&sTextAlignTrueValueEnabled,
+                                 TEXT_ALIGN_TRUE_ENABLED_PREF_NAME,
+                                 false);
+  }
+
+  return sTextAlignTrueValueEnabled;
 }
 
 void
@@ -5124,6 +5208,10 @@ nsLayoutUtils::Initialize()
   Preferences::RegisterCallback(StickyEnabledPrefChangeCallback,
                                 STICKY_ENABLED_PREF_NAME);
   StickyEnabledPrefChangeCallback(STICKY_ENABLED_PREF_NAME, nullptr);
+  Preferences::RegisterCallback(TextAlignTrueEnabledPrefChangeCallback,
+                                TEXT_ALIGN_TRUE_ENABLED_PREF_NAME);
+  TextAlignTrueEnabledPrefChangeCallback(TEXT_ALIGN_TRUE_ENABLED_PREF_NAME,
+                                         nullptr);
 
   nsComputedDOMStyle::RegisterPrefChangeCallbacks();
 }

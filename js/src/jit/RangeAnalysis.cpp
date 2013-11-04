@@ -23,7 +23,7 @@ using namespace js::jit;
 
 using mozilla::Abs;
 using mozilla::CountLeadingZeroes32;
-using mozilla::DoubleIsInt32;
+using mozilla::DoubleEqualsInt32;
 using mozilla::ExponentComponent;
 using mozilla::IsInfinite;
 using mozilla::IsFinite;
@@ -206,7 +206,7 @@ RangeAnalysis::addBetaNodes()
             // For integers, if x < c, the upper bound of x is c-1.
             if (val->type() == MIRType_Int32) {
                 int32_t intbound;
-                if (DoubleIsInt32(bound, &intbound) && SafeSub(intbound, 1, &intbound))
+                if (DoubleEqualsInt32(bound, &intbound) && SafeSub(intbound, 1, &intbound))
                     bound = intbound;
             }
             comp.setDouble(conservativeLower, bound);
@@ -218,7 +218,7 @@ RangeAnalysis::addBetaNodes()
             // For integers, if x > c, the lower bound of x is c+1.
             if (val->type() == MIRType_Int32) {
                 int32_t intbound;
-                if (DoubleIsInt32(bound, &intbound) && SafeAdd(intbound, 1, &intbound))
+                if (DoubleEqualsInt32(bound, &intbound) && SafeAdd(intbound, 1, &intbound))
                     bound = intbound;
             }
             comp.setDouble(bound, conservativeUpper);
@@ -1365,6 +1365,55 @@ MArgumentsLength::computeRange()
     setRange(Range::NewUInt32Range(0, SNAPSHOT_MAX_NARGS));
 }
 
+void
+MBoundsCheck::computeRange()
+{
+    // Just transfer the incoming index range to the output. The length() is
+    // also interesting, but it is handled as a bailout check, and we're
+    // computing a pre-bailout range here.
+    setRange(new Range(index()));
+}
+
+void
+MArrayPush::computeRange()
+{
+    // MArrayPush returns the new array length.
+    setRange(Range::NewUInt32Range(0, UINT32_MAX));
+}
+
+void
+MMathFunction::computeRange()
+{
+    Range opRange(getOperand(0));
+    switch (function()) {
+      case Sin:
+      case Cos:
+        if (!opRange.canBeInfiniteOrNaN())
+            setRange(Range::NewDoubleRange(-1.0, 1.0));
+        break;
+      case Sign:
+        if (!opRange.canBeNaN()) {
+            // Note that Math.sign(-0) is -0, and we treat -0 as equal to 0.
+            int32_t lower = -1;
+            int32_t upper = 1;
+            if (opRange.hasInt32LowerBound() && opRange.lower() >= 0)
+                lower = 0;
+            if (opRange.hasInt32UpperBound() && opRange.upper() <= 0)
+                upper = 0;
+            setRange(Range::NewInt32Range(lower, upper));
+        }
+        break;
+    default:
+        break;
+    }
+}
+
+void
+MRandom::computeRange()
+{
+    setRange(Range::NewDoubleRange(0.0, 1.0));
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // Range Analysis
 ///////////////////////////////////////////////////////////////////////////////
@@ -2096,20 +2145,6 @@ MToDouble::truncate()
 }
 
 bool
-MToFloat32::truncate()
-{
-    JS_ASSERT(type() == MIRType_Float32);
-
-    // We use the return type to flag that this MToFloat32 sould be replaced by a
-    // MTruncateToInt32 when modifying the graph.
-    setResultType(MIRType_Int32);
-    if (range())
-        range()->wrapAroundToInt32();
-
-    return true;
-}
-
-bool
 MLoadTypedArrayElementStatic::truncate()
 {
     setInfallible();
@@ -2156,14 +2191,6 @@ bool
 MToDouble::isOperandTruncated(size_t index) const
 {
     // The return type is used to flag that we are replacing this Double by a
-    // Truncate of its operand if needed.
-    return type() == MIRType_Int32;
-}
-
-bool
-MToFloat32::isOperandTruncated(size_t index) const
-{
-    // The return type is used to flag that we are replacing this Float32 by a
     // Truncate of its operand if needed.
     return type() == MIRType_Int32;
 }
@@ -2379,4 +2406,16 @@ MBoundsCheckLower::collectRangeInfo()
 {
     Range indexRange(index());
     fallible_ = !indexRange.hasInt32LowerBound() || indexRange.lower() < minimum_;
+}
+
+void
+MCompare::collectRangeInfo()
+{
+    operandsAreNeverNaN_ = !Range(lhs()).canBeNaN() && !Range(rhs()).canBeNaN();
+}
+
+void
+MNot::collectRangeInfo()
+{
+    operandIsNeverNaN_ = !Range(operand()).canBeNaN();
 }
