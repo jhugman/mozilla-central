@@ -782,3 +782,7 @@ pref("browser.ui.linkify.phone", false);
 
 // Enables/disables Spatial Navigation
 pref("snav.enabled", true);
+
+pref("dom.mozApps.installSynthesizedApk", true);
+pref("dom.mozApps.apkGeneratorEndpoint", "http://10.246.38.116:8080/application.apk");
+//pref("dom.mozApps.apkGeneratorEndpoint", "http://107.22.148.17:8080/application.apk");

@@ -54,6 +54,7 @@ import android.location.LocationListener;
 import android.net.wifi.ScanResult;
 import android.net.Uri;
 import android.net.wifi.WifiManager;
+import android.os.Environment;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -529,6 +530,7 @@ abstract public class GeckoApp
 
     @Override
     public void handleMessage(String event, JSONObject message) {
+        Log.d(LOGTAG, "handleMessage " + event);
         try {
             if (event.equals("Toast:Show")) {
                 final String msg = message.getString("message");
@@ -655,6 +657,12 @@ abstract public class GeckoApp
             } else if (event.equals("WebApps:Uninstall")) {
                 String origin = message.getString("origin");
                 GeckoAppShell.uninstallWebApp(origin);
+            } else if (event.equals("WebApps:DownloadApk")) {
+                GeckoAppShell.downloadApk(this, new URL(message.getString("generatorUrl")));
+            } else if (event.equals("WebApps:GetTempFilePath")) {
+                Log.d(LOGTAG, "WebApps:GetTempFilePath - getting file name");
+                mCurrentResponse = GeckoAppShell.getTempFilePath(this);
+                Log.d(LOGTAG, "WebApps:GetTempFilePath - file name:" + mCurrentResponse);
             } else if (event.equals("Share:Text")) {
                 String text = message.getString("text");
                 GeckoAppShell.openUriExternal(text, "text/plain", "", "", Intent.ACTION_SEND, "");
@@ -1498,6 +1506,8 @@ abstract public class GeckoApp
         registerEventListener("WebApps:PostInstall");
         registerEventListener("WebApps:Install");
         registerEventListener("WebApps:Uninstall");
+        registerEventListener("WebApps:DownloadApk");
+        registerEventListener("WebApps:GetTempFilePath");
         registerEventListener("Share:Text");
         registerEventListener("Share:Image");
         registerEventListener("Image:SetAs");
@@ -2041,6 +2051,8 @@ abstract public class GeckoApp
         unregisterEventListener("WebApps:PostInstall");
         unregisterEventListener("WebApps:Install");
         unregisterEventListener("WebApps:Uninstall");
+        unregisterEventListener("WebApps:DownloadApk");
+        unregisterEventListener("WebApps:GetTempFilePath");
         unregisterEventListener("Share:Text");
         unregisterEventListener("Share:Image");
         unregisterEventListener("Image:SetAs");

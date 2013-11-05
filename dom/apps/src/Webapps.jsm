@@ -31,7 +31,7 @@ XPCOMUtils.defineLazyGetter(this, "libcutils", function() {
 #endif
 
 function debug(aMsg) {
-  //dump("-*-*- Webapps.jsm : " + aMsg + "\n");
+  dump("-*-*- Webapps.jsm : " + aMsg + "\n");
 }
 
 function supportUseCurrentProfile() {
@@ -125,6 +125,9 @@ this.DOMApplicationRegistry = {
     cpmm.addMessageListener("Activities:Register:OK", this);
 
     Services.obs.addObserver(this, "xpcom-shutdown", false);
+
+    Services.obs.addObserver(this, "Webapps:AutoInstall", false);
+    Services.obs.addObserver(this, "Webapps:AutoInstallPackage", false);
 
     AppDownloadManager.registerCancelFunction(this.cancelDownload.bind(this));
 
@@ -898,7 +901,90 @@ this.DOMApplicationRegistry = {
       Services.obs.removeObserver(this, "xpcom-shutdown");
       cpmm = null;
       ppmm = null;
+    } else if (aTopic === "Webapps:AutoInstall") {
+      debug("Webapps:AutoInstall: aSubject=" + JSON.stringify(aSubject) + "; aData=" + aData);
+      this._autoInstall(aData);
+    } else if (aTopic === "Webapps:AutoInstallPackage") {
+      debug("Webapps:AutoInstallPackage: aSubject=" + JSON.stringify(aSubject) + "; aData=" + aData);
+      this._autoInstallPackage(aData);      
     }
+  },
+
+  _autoInstall: function (aData) {
+    debug("AutoInstalling from Webapps.jsm");
+
+    let mm = {
+      sendAsyncMessage: function (messageName, data) {
+        debug("sendAsyncMessage " + messageName + ": " + JSON.stringify(data));
+      }
+    };
+
+    let data = JSON.parse(aData);
+    let type = data.type; // can be hosted or packaged.
+
+    this.doInstall({
+      app: {
+        origin: data.origin,
+        manifestURL: data.manifestUrl
+      },
+      silentInstall: true,
+      mm: mm
+    }, mm);
+    debug("Tried usual doInstall()");
+  },
+
+  _autoInstallPackage: function (aData) {
+    debug("AutoInstalling package from Webapps.jsm");
+
+    let data = JSON.parse(aData);
+    let type = data.type; // can be hosted or packaged.
+
+    let mm = {
+      sendAsyncMessage: function (messageName, data) {
+        debug("sendAsyncMessage " + messageName + ": " + JSON.stringify(data));
+      }
+    };
+    this.doInstallPackage({
+      isPackage: true,
+      app: {
+        origin: data.origin,
+        installOrigin: data.origin,
+        manifestURL: data.manifestUrl
+      },
+      silentInstall: true,
+      mm: mm
+    }, mm);
+    debug("Tried usual doInstallPackage()");
+  },
+
+  _downloadApk: function (aData, aMm) {
+
+    function getStringPref(pref, def) {
+      try {
+        return Services.prefs.getComplexValue(pref, Ci.nsISupportsString).data;
+      } catch (ex) {
+        return def;
+      }
+    }
+
+    // Get the endpoint URL and convert it to an nsIURI/nsIURL object.
+    let prefName = "dom.mozApps.apkGeneratorEndpoint";
+    let generatorUrl =
+      Services.io.newURI(getStringPref(prefName, null), null, null)
+              .QueryInterface(Ci.nsIURL);
+
+    // Populate the query part of the URL with the manifest URL parameter.
+    let params = {
+      manifestUrl: aData.app.manifestURL,
+    };
+    generatorUrl.query =
+      [p + "=" + encodeURIComponent(params[p]) for (p in params)].join("&");
+
+    // Trigger the download.
+    debug("_downloadApk from " + generatorUrl.spec);
+    aData.generatorUrl = generatorUrl.spec;
+    Services.obs.notifyObservers(aMm, "webapps-download-apk",
+                                 JSON.stringify(aData));
   },
 
   _loadJSONAsync: function(aFile, aCallback) {
@@ -1052,9 +1138,15 @@ this.DOMApplicationRegistry = {
     msg.mm = mm;
 
     switch (aMessage.name) {
-      case "Webapps:Install":
-        this.doInstall(msg, mm);
+      case "Webapps:Install": {
+        let prefName = "dom.mozApps.installSynthesizedApk";
+        if (!Services.prefs.prefHasUserValue(prefName) || Services.prefs.getBoolPref(prefName, true)) {
+          this._downloadApk(msg, mm);
+        } else {
+          this.doInstall(msg, mm);
+        }
         break;
+      }
       case "Webapps:GetSelf":
         this.getSelf(msg, mm);
         break;
@@ -1076,9 +1168,16 @@ this.DOMApplicationRegistry = {
       case "Webapps:GetAll":
         this.doGetAll(msg, mm);
         break;
-      case "Webapps:InstallPackage":
-        this.doInstallPackage(msg, mm);
+      case "Webapps:InstallPackage": {
+        let prefName = "dom.mozApps.installSynthesizedApk";
+        if (!Services.prefs.prefHasUserValue(prefName) || Services.prefs.getBoolPref(prefName, true)) {
+          msg.isPackage = true;
+          this._downloadApk(msg, mm);
+        } else {
+          this.doInstallPackage(msg, mm);
+        }
         break;
+      }
       case "Webapps:RegisterForMessages":
         this.addMessageListener(msg.messages, msg.app, mm);
         break;
@@ -2357,9 +2456,18 @@ this.DOMApplicationRegistry = {
     // saved in the registry.
     this._saveApps((function() {
       this.broadcastMessage("Webapps:AddApp", { id: id, app: appObject });
-      this.broadcastMessage("Webapps:Install:Return:OK", aData);
-      Services.obs.notifyObservers(null, "webapps-installed",
-        JSON.stringify({ manifestURL: app.manifestURL }));
+      if (aData.isPackage && aData.silentInstall) {
+        // Skip directly to onInstallSuccessAck, since there isn't
+        // a WebappsRegistry to receive Webapps:Install:Return:OK and respond
+        // Webapps:Install:Return:Ack.
+        this.onInstallSuccessAck(app.manifestURL);
+      }
+      else {
+        // Broadcast Webapps:Install:Return:OK so the WebappsRegistry can notify
+        // the installing page about the successful install, after which it'll
+        // respond Webapps:Install:Return:Ack, which calls onInstallSuccessAck.
+        this.broadcastMessage("Webapps:Install:Return:OK", aData);
+      }
     }).bind(this));
 
     if (!aData.isPackage) {

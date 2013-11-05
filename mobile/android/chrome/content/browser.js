@@ -14,6 +14,7 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/AddonManager.jsm");
 Cu.import("resource://gre/modules/FileUtils.jsm");
+Cu.import("resource://gre/modules/NetUtil.jsm");
 Cu.import("resource://gre/modules/JNI.jsm");
 Cu.import('resource://gre/modules/Payment.jsm');
 Cu.import("resource://gre/modules/PermissionPromptHelper.jsm");
@@ -1493,6 +1494,13 @@ var BrowserApp = {
         this.notifyPrefObservers(aData);
         break;
 
+      case "SynthAPK:AppAdded":
+        dump("browser.js: SynthAPK added: " + JSON.stringify(aData));
+        break;
+
+      case "SynthAPK:AppRemoved":
+        dump("SynthAPK removed: " + JSON.stringify(aData));
+        break;
       default:
         dump('BrowserApp.observe: unexpected topic "' + aTopic + '"\n');
         break;
@@ -6796,6 +6804,7 @@ var WebappsUI = {
     DOMApplicationRegistry.allAppsLaunchable = true;
 
     Services.obs.addObserver(this, "webapps-ask-install", false);
+    Services.obs.addObserver(this, "webapps-download-apk", false);
     Services.obs.addObserver(this, "webapps-launch", false);
     Services.obs.addObserver(this, "webapps-uninstall", false);
     Services.obs.addObserver(this, "webapps-install-error", false);
@@ -6803,6 +6812,7 @@ var WebappsUI = {
 
   uninit: function unint() {
     Services.obs.removeObserver(this, "webapps-ask-install");
+    Services.obs.removeObserver(this, "webapps-download-apk");
     Services.obs.removeObserver(this, "webapps-launch");
     Services.obs.removeObserver(this, "webapps-uninstall");
     Services.obs.removeObserver(this, "webapps-install-error");
@@ -6836,6 +6846,9 @@ var WebappsUI = {
         break;
       case "webapps-ask-install":
         this.doInstall(data);
+        break;
+      case "webapps-download-apk":
+        this.downloadApk(data);
         break;
       case "webapps-launch":
         this.openURL(data.manifestURL, data.origin);
@@ -6882,10 +6895,161 @@ var WebappsUI = {
     return iconURI ? iconURI.spec : DEFAULT_ICON;
   },
 
+  downloadApk: function downloadApk(aData) {
+    console.log("Downloading apk from " + aData.generatorUrl);
+    
+    let filePath = sendMessageToJava({
+      type: "WebApps:GetTempFilePath"
+    });
+    console.log("FileName : " + filePath);
+    try {
+      let uri = NetUtil.newURI(aData.generatorUrl);
+
+      NetUtil.asyncFetch(uri, function read_asyncFetch(aInputStream, aStatus) {
+        console.log("internal callback status: " + aStatus);
+        console.log(" status success: " + Components.isSuccessCode(aStatus));
+        try {
+          if (Components.isSuccessCode(aStatus)) {
+            //let channel = aRequest.QueryInterface(Ci.nsIChannel);
+
+            let file = Components.classes["@mozilla.org/file/local;1"]
+                         .createInstance(Components.interfaces.nsILocalFile);
+            file.initWithPath(filePath);
+
+            let fos = Components.classes["@mozilla.org/network/file-output-stream;1"]
+                        .createInstance(Components.interfaces.nsIFileOutputStream);
+            fos.init(file, -1, -1, 0);
+              
+            let outputStream = Components.classes["@mozilla.org/binaryoutputstream;1"]
+                                 .createInstance(Components.interfaces.nsIBinaryOutputStream);
+
+            outputStream.setOutputStream(fos);
+             
+            NetUtil.asyncCopy(aInputStream, outputStream, function(aResult) {
+              if (!Components.isSuccessCode(aResult)) {
+                console.log("Downloading failed")
+              } else {
+                console.log("Downloaded successfully"); 
+              }
+            });
+
+           } else {
+             console.log("can't download");
+           }
+        } catch (e) {
+          console.log("Error in fetch - " + e);
+        }
+       });
+    } catch (e) {
+      console.log("Download error : " + e);
+    }
+/*    function StreamListener(fileContentType,filePath,callback,callbackArgs) {
+        this.fileContentType=fileContentType;
+        this.filePath=filePath;
+        this.callback=callback;
+        this.callbackArgs=callbackArgs;
+      };
+    StreamListener.prototype = {  
+      onStartRequest: function(request,context) {
+        this.httpChannel=request.QueryInterface(Components.interfaces.nsIHttpChannel);
+        this.responseStatus=this.httpChannel.responseStatus;
+        this.responseStatusText=this.httpChannel.responseStatusText;
+        this.contentType=this.httpChannel.getResponseHeader("content-type");
+        if(this.contentType==this.fileContentType) {
+          let file = Components.classes["@mozilla.org/file/local;1"]
+                      .createInstance(Components.interfaces.nsILocalFile);
+          file.initWithPath(this.filePath);
+
+          let fos = Components.classes["@mozilla.org/network/file-output-stream;1"].
+                      createInstance(Components.interfaces.nsIFileOutputStream);
+          fos.init(file, -1, -1, 0);
+          
+          this.outputStream = Components.classes["@mozilla.org/binaryoutputstream;1"].
+              createInstance(Components.interfaces.nsIBinaryOutputStream);
+          this.outputStream.setOutputStream(fos);
+          
+          this.type="file";
+        } else if(this.contentType=="text/xml") {
+          this.pipe=Components.classes["@mozilla.org/pipe;1"].
+                      createInstance(Components.interfaces.nsIPipe);
+          this.pipe.init(true,false,1024,10,null);
+          this.outputStream = Components.classes["@mozilla.org/binaryoutputstream;1"].
+                      createInstance(Components.interfaces.nsIBinaryOutputStream);
+          this.outputStream.setOutputStream(this.pipe.outputStream);
+          this.type="xml";
+        }
+      },
+      onDataAvailable: function(request,context,inputStream,offset,count) {
+        if(this.outputStream!=null) {
+
+          let bistream = Components.classes["@mozilla.org/binaryinputstream;1"].
+                      createInstance(Components.interfaces.nsIBinaryInputStream);
+          bistream.setInputStream(inputStream);
+          let n=0;
+          while(n<count) {
+            let ba=bistream.readByteArray(bistream.available());
+            this.outputStream.writeByteArray(ba,ba.length);
+            n+=ba.length;
+          }                                        
+        }
+      },
+      onStopRequest: function(request,context,nsresult) {
+        let status=false;
+        if(this.responseStatus==200) {
+          if(this.type=="file") {
+            status=true;
+          } else if(this.type=="xml") {
+            let parser=Components.classes["@mozilla.org/xmlextras/domparser;1"]
+                         .createInstance(Components.interfaces.nsIDOMParser);
+            this.xmlDoc=parser.parseFromStream(this.pipe.inputStream,null,this.pipe.inputStream.available(),this.contentType);
+          }
+        }
+        if(this.callback) {
+          try {
+            this.callback(status,this.callbackArgs,this);
+          } catch(e) { dump("Callback exception: "+e+"\n"); }
+        }
+        this.outputStream.close();
+      }
+    };
+    
+    let cb=function(status,args,listener) {
+      if(status) {
+        // do stuff on success
+        console.log("Downloaded successfully");      
+      } else {
+        // do stuff on failure
+        console.log("Downloading failed");
+      }
+    }*/
+
+    /* url is the address where to get the file or xml document */
+    /* file is the nsILocalFile where to store the downloaded data */
+/*
+    let ioService = Components.classes["@mozilla.org/network/io-service;1"]
+                      .getService(Components.interfaces.nsIIOService);        
+    let channel = ioService.newChannel(aData.generatorUrl,'',null);
+
+    let filePath = sendMessageToJava({
+      type: "WebApps:GetTempFilePath"
+    });
+    console.log("FileName : " + filePath);
+
+    let tempFile = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsILocalFile);
+    try {
+      tempFile.initWithPath(filePath);
+    }  catch (e) {
+      console.log("Error when initialising file path - " + e);
+    }
+
+    channel.asyncOpen(new StreamListener("application/vnd.android.package-archive",tempFile,cb,{}),null);
+    */
+  },
+
   doInstall: function doInstall(aData) {
     let jsonManifest = aData.isPackage ? aData.app.updateManifest : aData.app.manifest;
     let manifest = new ManifestHelper(jsonManifest, aData.app.origin);
-    let showPrompt = true;
+    let showPrompt = !aData.silentInstall;
 
     if (!showPrompt || Services.prompt.confirm(null, Strings.browser.GetStringFromName("webapps.installTitle"), manifest.name + "\n" + aData.app.origin)) {
       // Get a profile for the app to be installed in. We'll download everything before creating the icons.
