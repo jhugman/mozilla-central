@@ -6916,15 +6916,8 @@ var WebappsUI = {
                          .createInstance(Components.interfaces.nsILocalFile);
             file.initWithPath(filePath);
 
-            let fos = Components.classes["@mozilla.org/network/file-output-stream;1"]
-                        .createInstance(Components.interfaces.nsIFileOutputStream);
-            fos.init(file, -1, -1, 0);
-              
-            let outputStream = Components.classes["@mozilla.org/binaryoutputstream;1"]
-                                 .createInstance(Components.interfaces.nsIBinaryOutputStream);
+            let outputStream = FileUtils.openSafeFileOutputStream(file);
 
-            outputStream.setOutputStream(fos);
-             
             NetUtil.asyncCopy(aInputStream, outputStream, function(aResult) {
               if (!Components.isSuccessCode(aResult)) {
                 console.log("Downloading failed")
