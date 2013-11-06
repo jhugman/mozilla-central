@@ -87,10 +87,10 @@ interface RTCDataChannel;
 // moz-prefixed until sufficiently standardized.
 interface mozRTCPeerConnection : EventTarget  {
   void createOffer (RTCSessionDescriptionCallback successCallback,
-                    RTCPeerConnectionErrorCallback? failureCallback, // for apprtc
+                    RTCPeerConnectionErrorCallback failureCallback,
                     optional MediaConstraints constraints);
   void createAnswer (RTCSessionDescriptionCallback successCallback,
-                     RTCPeerConnectionErrorCallback? failureCallback, // for apprtc
+                     RTCPeerConnectionErrorCallback failureCallback,
                      optional MediaConstraints constraints);
   void setLocalDescription (mozRTCSessionDescription description,
                             optional VoidFunction successCallback,
@@ -124,18 +124,11 @@ interface mozRTCPeerConnection : EventTarget  {
   void getStats (MediaStreamTrack? selector,
                  RTCStatsCallback successCallback,
                  RTCPeerConnectionErrorCallback failureCallback);
-};
 
-// Mozilla extensions.
-partial interface mozRTCPeerConnection {
-  // Deprecated callbacks (use causes warning)
-  attribute RTCPeerConnectionErrorCallback onicechange;
-  attribute RTCPeerConnectionErrorCallback ongatheringchange;
-
-  // Deprecated attributes (use causes warning)
-  readonly attribute object localStreams;
-  readonly attribute object remoteStreams;
-  readonly attribute DOMString readyState;
+  [ChromeOnly]
+  void getStatsInternal (MediaStreamTrack? selector,
+                         RTCStatsCallback successCallback,
+                         RTCPeerConnectionErrorCallback failureCallback);
 
   // Data channel.
   RTCDataChannel createDataChannel (DOMString label,

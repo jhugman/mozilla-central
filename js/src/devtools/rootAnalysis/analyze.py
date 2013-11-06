@@ -124,16 +124,21 @@ JOBS = { 'dbs':
               'allFunctions.txt'),
 
          'hazards':
-             (generate_hazards, 'rootingHazards.txt')
-         }
+             (generate_hazards, 'rootingHazards.txt'),
 
+         'explain':
+             (('python', '%(analysis_scriptdir)s/explain.py',
+               '--expect-file=%(expect_file)s',
+               '%(hazards)s', '%(gcFunctions)s',
+               '[explained_hazards]', '[unnecessary]', '[refs]'),
+              ('hazards.txt', 'unnecessary.txt', 'refs.txt'))
+         }
 
 def out_indexes(command):
     for i in range(len(command)):
         m = re.match(r'^\[(.*)\]$', command[i])
         if m:
             yield (i, m.group(1))
-
 
 def run_job(name, config):
     cmdspec, outfiles = JOBS[name]
@@ -205,6 +210,8 @@ parser.add_argument('--buildcommand', '--build', '-b', type=str, nargs='?',
                     help='command to build the tree being analyzed')
 parser.add_argument('--tag', '-t', type=str, nargs='?',
                     help='name of job, also sets build command to "build.<tag>"')
+parser.add_argument('--expect-file', type=str, nargs='?',
+                    help='file containing expected number of hazards/refs')
 
 args = parser.parse_args()
 for k,v in vars(args).items():
@@ -221,6 +228,11 @@ elif 'BUILD' in os.environ:
 else:
     data['buildcommand'] = 'make -j4 -s'
 
+if args.expect_file:
+    data['expect_file'] = args.expect_file
+else:
+    data['expect_file'] = '%(analysis_scriptdir)s/expect.json'
+
 if 'ANALYZED_OBJDIR' in os.environ:
     data['objdir'] = os.environ['ANALYZED_OBJDIR']
 
@@ -232,7 +244,8 @@ steps = [ 'dbs',
           'gcTypes',
           'gcFunctions',
           'allFunctions',
-          'hazards' ]
+          'hazards',
+          'explain' ]
 
 if args.list:
     for step in steps:
@@ -252,7 +265,7 @@ for step in steps:
         for (i, name) in out_indexes(command):
             data[name] = outfiles[outfile]
             outfile += 1
-        assert len(outfiles) == outfile, 'step %s: mismatched number of output files and params' % step
+        assert len(outfiles) == outfile, 'step \'%s\': mismatched number of output files and params' % step
 
 if args.step:
     steps = steps[steps.index(args.step):]

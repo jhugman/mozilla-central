@@ -13,6 +13,8 @@
 #include "nsAccUtils.h"
 #include "nsAccessibleRelation.h"
 #include "nsAccessibilityService.h"
+#include "ApplicationAccessible.h"
+#include "nsCoreUtils.h"
 #include "nsIAccessibleRelation.h"
 #include "nsIAccessibleRole.h"
 #include "nsEventShell.h"
@@ -86,69 +88,27 @@ using namespace mozilla::a11y;
 
 
 ////////////////////////////////////////////////////////////////////////////////
-// Accessible. nsISupports
+// Accessible: nsISupports and cycle collection
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_2(Accessible, nsAccessNode,
-                                     mParent, mChildren)
+NS_IMPL_CYCLE_COLLECTION_3(Accessible,
+                           mContent, mParent, mChildren)
 
-NS_IMPL_ADDREF_INHERITED(Accessible, nsAccessNode)
-NS_IMPL_RELEASE_INHERITED(Accessible, nsAccessNode)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Accessible)
+  NS_INTERFACE_MAP_ENTRY(nsIAccessible)
+  if (aIID.Equals(NS_GET_IID(Accessible)))
+    foundInterface = static_cast<nsIAccessible*>(this);
+  else
+  NS_INTERFACE_MAP_ENTRY_CONDITIONAL(nsIAccessibleSelectable, IsSelect())
+  NS_INTERFACE_MAP_ENTRY_CONDITIONAL(nsIAccessibleValue, HasNumericValue())
+  NS_INTERFACE_MAP_ENTRY_CONDITIONAL(nsIAccessibleHyperLink, IsLink())
+  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIAccessible)
+NS_INTERFACE_MAP_END
 
-nsresult
-Accessible::QueryInterface(REFNSIID aIID, void** aInstancePtr)
-{
-  // Custom-built QueryInterface() knows when we support nsIAccessibleSelectable
-  // based on role attribute and aria-multiselectable
-  *aInstancePtr = nullptr;
-
-  if (aIID.Equals(NS_GET_IID(nsXPCOMCycleCollectionParticipant))) {
-    *aInstancePtr = NS_CYCLE_COLLECTION_PARTICIPANT(Accessible);
-    return NS_OK;
-  }
-
-  if (aIID.Equals(NS_GET_IID(nsIAccessible))) {
-    *aInstancePtr = static_cast<nsIAccessible*>(this);
-    NS_ADDREF_THIS();
-    return NS_OK;
-  }
-
-  if (aIID.Equals(NS_GET_IID(Accessible))) {
-    *aInstancePtr = static_cast<Accessible*>(this);
-    NS_ADDREF_THIS();
-    return NS_OK;
-  }
-
-  if (aIID.Equals(NS_GET_IID(nsIAccessibleSelectable))) {
-    if (IsSelect()) {
-      *aInstancePtr = static_cast<nsIAccessibleSelectable*>(this);
-      NS_ADDREF_THIS();
-      return NS_OK;
-    }
-    return NS_ERROR_NO_INTERFACE;
-  }
-
-  if (aIID.Equals(NS_GET_IID(nsIAccessibleValue))) {
-    if (HasNumericValue()) {
-      *aInstancePtr = static_cast<nsIAccessibleValue*>(this);
-      NS_ADDREF_THIS();
-      return NS_OK;
-    }
-  }
-
-  if (aIID.Equals(NS_GET_IID(nsIAccessibleHyperLink))) {
-    if (IsLink()) {
-      *aInstancePtr = static_cast<nsIAccessibleHyperLink*>(this);
-      NS_ADDREF_THIS();
-      return NS_OK;
-    }
-    return NS_ERROR_NO_INTERFACE;
-  }
-
-  return nsAccessNode::QueryInterface(aIID, aInstancePtr);
-}
+NS_IMPL_CYCLE_COLLECTING_ADDREF(Accessible)
+NS_IMPL_CYCLE_COLLECTING_RELEASE_WITH_DESTROY(Accessible, LastRelease())
 
 Accessible::Accessible(nsIContent* aContent, DocAccessible* aDoc) :
-  nsAccessNode(aContent, aDoc),
+  mContent(aContent), mDoc(aDoc),
   mParent(nullptr), mIndexInParent(-1), mChildrenFlags(eChildrenUninitialized),
   mStateFlags(0), mType(0), mGenericTypes(0), mIndexOfEmbeddedChild(-1),
   mRoleMapEntry(nullptr)
@@ -173,11 +133,9 @@ Accessible::Accessible(nsIContent* aContent, DocAccessible* aDoc) :
 #endif
 }
 
-//-----------------------------------------------------
-// destruction
-//-----------------------------------------------------
 Accessible::~Accessible()
 {
+  NS_ASSERTION(!mDoc, "LastRelease was never called!?!");
 }
 
 NS_IMETHODIMP
@@ -1055,7 +1013,7 @@ Accessible::TakeSelection()
   Accessible* select = nsAccUtils::GetSelectableContainer(this, State());
   if (select) {
     if (select->State() & states::MULTISELECTABLE)
-      select->ClearSelection();
+      select->UnselectAll();
     return SetSelected(true);
   }
 
@@ -2180,6 +2138,33 @@ Accessible::RelationByType(RelationType aType)
       return Relation();
     }
 
+    case RelationType::CONTAINING_DOCUMENT:
+      return Relation(mDoc);
+
+    case RelationType::CONTAINING_TAB_PANE: {
+      nsCOMPtr<nsIDocShell> docShell =
+        nsCoreUtils::GetDocShellFor(GetNode());
+      if (docShell) {
+        // Walk up the parent chain without crossing the boundary at which item
+        // types change, preventing us from walking up out of tab content.
+        nsCOMPtr<nsIDocShellTreeItem> root;
+        docShell->GetSameTypeRootTreeItem(getter_AddRefs(root));
+        if (root) {
+          // If the item type is typeContent, we assume we are in browser tab
+          // content. Note, this includes content such as about:addons,
+          // for consistency.
+          int32_t itemType = 0;
+          root->GetItemType(&itemType);
+          if (itemType == nsIDocShellTreeItem::typeContent)
+            return Relation(nsAccUtils::GetDocAccessibleFor(root));
+        }
+      }
+      return  Relation();
+    }
+
+    case RelationType::CONTAINING_APPLICATION:
+      return Relation(ApplicationAcc());
+
     default:
       return Relation();
   }
@@ -2214,7 +2199,10 @@ Accessible::GetRelations(nsIArray **aRelations)
     nsIAccessibleRelation::RELATION_EMBEDDED_BY,
     nsIAccessibleRelation::RELATION_POPUP_FOR,
     nsIAccessibleRelation::RELATION_PARENT_WINDOW_OF,
-    nsIAccessibleRelation::RELATION_DEFAULT_BUTTON
+    nsIAccessibleRelation::RELATION_DEFAULT_BUTTON,
+    nsIAccessibleRelation::RELATION_CONTAINING_DOCUMENT,
+    nsIAccessibleRelation::RELATION_CONTAINING_TAB_PANE,
+    nsIAccessibleRelation::RELATION_CONTAINING_APPLICATION
   };
 
   for (uint32_t idx = 0; idx < ArrayLength(relationTypes); idx++) {
@@ -2341,118 +2329,6 @@ Accessible::ScrollToPoint(uint32_t aCoordinateType, int32_t aX, int32_t aY)
   while ((parentFrame = parentFrame->GetParent()))
     nsCoreUtils::ScrollFrameToPoint(parentFrame, frame, coords);
 
-  return NS_OK;
-}
-
-// nsIAccessibleSelectable
-NS_IMETHODIMP
-Accessible::GetSelectedChildren(nsIArray** aSelectedAccessibles)
-{
-  NS_ENSURE_ARG_POINTER(aSelectedAccessibles);
-  *aSelectedAccessibles = nullptr;
-
-  if (IsDefunct() || !IsSelect())
-    return NS_ERROR_FAILURE;
-
-  nsCOMPtr<nsIArray> items = SelectedItems();
-  if (items) {
-    uint32_t length = 0;
-    items->GetLength(&length);
-    if (length)
-      items.swap(*aSelectedAccessibles);
-  }
-
-  return NS_OK;
-}
-
-// return the nth selected descendant nsIAccessible object
-NS_IMETHODIMP
-Accessible::RefSelection(int32_t aIndex, nsIAccessible** aSelected)
-{
-  NS_ENSURE_ARG_POINTER(aSelected);
-  *aSelected = nullptr;
-
-  if (IsDefunct() || !IsSelect())
-    return NS_ERROR_FAILURE;
-
-  if (aIndex < 0) {
-    return NS_ERROR_INVALID_ARG;
-  }
-
-  *aSelected = GetSelectedItem(aIndex);
-  if (*aSelected) {
-    NS_ADDREF(*aSelected);
-    return NS_OK;
-  }
-
-  return NS_ERROR_INVALID_ARG;
-}
-
-NS_IMETHODIMP
-Accessible::GetSelectionCount(int32_t* aSelectionCount)
-{
-  NS_ENSURE_ARG_POINTER(aSelectionCount);
-  *aSelectionCount = 0;
-
-  if (IsDefunct() || !IsSelect())
-    return NS_ERROR_FAILURE;
-
-  *aSelectionCount = SelectedItemCount();
-  return NS_OK;
-}
-
-NS_IMETHODIMP Accessible::AddChildToSelection(int32_t aIndex)
-{
-  if (IsDefunct() || !IsSelect())
-    return NS_ERROR_FAILURE;
-
-  return aIndex >= 0 && AddItemToSelection(aIndex) ?
-    NS_OK : NS_ERROR_INVALID_ARG;
-}
-
-NS_IMETHODIMP Accessible::RemoveChildFromSelection(int32_t aIndex)
-{
-  if (IsDefunct() || !IsSelect())
-    return NS_ERROR_FAILURE;
-
-  return aIndex >=0 && RemoveItemFromSelection(aIndex) ?
-    NS_OK : NS_ERROR_INVALID_ARG;
-}
-
-NS_IMETHODIMP Accessible::IsChildSelected(int32_t aIndex, bool *aIsSelected)
-{
-  NS_ENSURE_ARG_POINTER(aIsSelected);
-  *aIsSelected = false;
-
-  if (IsDefunct() || !IsSelect())
-    return NS_ERROR_FAILURE;
-
-  NS_ENSURE_TRUE(aIndex >= 0, NS_ERROR_FAILURE);
-
-  *aIsSelected = IsItemSelected(aIndex);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-Accessible::ClearSelection()
-{
-  if (IsDefunct() || !IsSelect())
-    return NS_ERROR_FAILURE;
-
-  UnselectAll();
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-Accessible::SelectAllSelection(bool* aIsMultiSelect)
-{
-  NS_ENSURE_ARG_POINTER(aIsMultiSelect);
-  *aIsMultiSelect = false;
-
-  if (IsDefunct() || !IsSelect())
-    return NS_ERROR_FAILURE;
-
-  *aIsMultiSelect = SelectAll();
   return NS_OK;
 }
 
@@ -2592,9 +2468,6 @@ Accessible::AppendTextTo(nsAString& aText, uint32_t aStartOffset,
   }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// nsAccessNode public methods
-
 void
 Accessible::Shutdown()
 {
@@ -2606,7 +2479,8 @@ Accessible::Shutdown()
   if (mParent)
     mParent->RemoveChild(this);
 
-  nsAccessNode::Shutdown();
+  mContent = nullptr;
+  mDoc = nullptr;
 }
 
 // Accessible protected
@@ -2683,6 +2557,53 @@ Accessible::UnbindFromParent()
 
 ////////////////////////////////////////////////////////////////////////////////
 // Accessible public methods
+
+RootAccessible*
+Accessible::RootAccessible() const
+{
+  nsCOMPtr<nsIDocShell> docShell = nsCoreUtils::GetDocShellFor(GetNode());
+  NS_ASSERTION(docShell, "No docshell for mContent");
+  if (!docShell) {
+    return nullptr;
+  }
+
+  nsCOMPtr<nsIDocShellTreeItem> root;
+  docShell->GetRootTreeItem(getter_AddRefs(root));
+  NS_ASSERTION(root, "No root content tree item");
+  if (!root) {
+    return nullptr;
+  }
+
+  DocAccessible* docAcc = nsAccUtils::GetDocAccessibleFor(root);
+  return docAcc ? docAcc->AsRoot() : nullptr;
+}
+
+nsIFrame*
+Accessible::GetFrame() const
+{
+  return mContent ? mContent->GetPrimaryFrame() : nullptr;
+}
+
+nsINode*
+Accessible::GetNode() const
+{
+  return mContent;
+}
+
+void
+Accessible::Language(nsAString& aLanguage)
+{
+  aLanguage.Truncate();
+
+  if (!mDoc)
+    return;
+
+  nsCoreUtils::GetLanguageFor(mContent, nullptr, aLanguage);
+  if (aLanguage.IsEmpty()) { // Nothing found, so use document's language
+    mDoc->DocumentNode()->GetHeaderData(nsGkAtoms::headerContentLanguage,
+                                        aLanguage);
+  }
+}
 
 void
 Accessible::InvalidateChildren()
@@ -3094,6 +3015,19 @@ Accessible::ContainerWidget() const
 
 ////////////////////////////////////////////////////////////////////////////////
 // Accessible protected methods
+
+void
+Accessible::LastRelease()
+{
+  // First cleanup if needed...
+  if (mDoc) {
+    Shutdown();
+    NS_ASSERTION(!mDoc,
+                 "A Shutdown() impl forgot to call its parent's Shutdown?");
+  }
+  // ... then die.
+  delete this;
+}
 
 void
 Accessible::CacheChildren()

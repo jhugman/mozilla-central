@@ -14,12 +14,13 @@ interface nsIDOMMozSmsSegmentInfo;
 #define MOBILE_MESSAGE_SERVICE_CONTRACTID "@mozilla.org/mobilemessage/mobilemessageservice;1"
 %}
 
-[scriptable, builtinclass, uuid(bea56ecf-472d-4b6b-b462-66753f3c1179)]
+[scriptable, builtinclass, uuid(729b616e-2766-11e3-9c6a-47e6110e44c6)]
 interface nsIMobileMessageService : nsISupports
 {
   [implicit_jscontext]
   nsIDOMMozSmsMessage createSmsMessage(in long      id,
                                        in unsigned long long threadId,
+                                       in DOMString iccId,
                                        in DOMString delivery,
                                        in DOMString deliveryStatus,
                                        in DOMString sender,
@@ -27,13 +28,15 @@ interface nsIMobileMessageService : nsISupports
                                        in DOMString body,
                                        in DOMString messageClass,
                                        in jsval     timestamp,
+                                       in jsval     deliveryTimestamp,
                                        in bool      read);
 
   [implicit_jscontext]
   nsIDOMMozMmsMessage createMmsMessage(in long      id,
                                        in unsigned long long threadId,
+                                       in DOMString iccId,
                                        in DOMString delivery,
-                                       in jsval     deliveryStatus,
+                                       in jsval     deliveryInfo,
                                        in DOMString sender,
                                        in jsval     receivers,
                                        in jsval     timestamp,

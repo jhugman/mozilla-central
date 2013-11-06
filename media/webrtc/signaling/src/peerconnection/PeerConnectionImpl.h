@@ -74,6 +74,7 @@ class PeerConnectionObserver;
 typedef NS_ConvertUTF8toUTF16 PCObserverString;
 #endif
 }
+class MediaConstraintsExternal;
 }
 
 #if defined(__cplusplus) && __cplusplus >= 201103L
@@ -98,6 +99,7 @@ namespace sipcc {
 using mozilla::dom::PeerConnectionObserver;
 using mozilla::dom::RTCConfiguration;
 using mozilla::dom::MediaConstraintsInternal;
+using mozilla::MediaConstraintsExternal;
 using mozilla::DOMMediaStream;
 using mozilla::NrIceCtx;
 using mozilla::NrIceMediaStream;
@@ -109,7 +111,6 @@ using mozilla::NrIceTurnServer;
 class PeerConnectionWrapper;
 class PeerConnectionMedia;
 class RemoteSourceStreamInfo;
-class MediaConstraintsExternal;
 class OnCallEventArgs;
 
 class IceConfiguration
@@ -253,7 +254,7 @@ public:
 
   // Initialize PeerConnection from an IceConfiguration object (unit-tests)
   nsresult Initialize(PeerConnectionObserver& aObserver,
-                      nsIDOMWindow* aWindow,
+                      nsGlobalWindow* aWindow,
                       const IceConfiguration& aConfiguration,
                       nsIThread* aThread) {
     return Initialize(aObserver, aWindow, &aConfiguration, nullptr, aThread);
@@ -261,12 +262,12 @@ public:
 
   // Initialize PeerConnection from an RTCConfiguration object (JS entrypoint)
   void Initialize(PeerConnectionObserver& aObserver,
-                  nsIDOMWindow* aWindow,
+                  nsGlobalWindow& aWindow,
                   const RTCConfiguration& aConfiguration,
                   nsISupports* aThread,
                   ErrorResult &rv)
   {
-    nsresult r = Initialize(aObserver, aWindow, nullptr, &aConfiguration, aThread);
+    nsresult r = Initialize(aObserver, &aWindow, nullptr, &aConfiguration, aThread);
     if (NS_FAILED(r)) {
       rv.Throw(r);
     }
@@ -300,9 +301,10 @@ public:
   }
 
   NS_IMETHODIMP_TO_ERRORRESULT(GetStats, ErrorResult &rv,
-                               mozilla::dom::MediaStreamTrack *aSelector)
+                               mozilla::dom::MediaStreamTrack *aSelector,
+                               bool internalStats)
   {
-    rv = GetStats(aSelector);
+    rv = GetStats(aSelector, internalStats);
   }
 
   NS_IMETHODIMP AddIceCandidate(const char* aCandidate, const char* aMid,
@@ -446,7 +448,7 @@ private:
   PeerConnectionImpl(const PeerConnectionImpl&rhs);
   PeerConnectionImpl& operator=(PeerConnectionImpl);
   NS_IMETHODIMP Initialize(PeerConnectionObserver& aObserver,
-                           nsIDOMWindow* aWindow,
+                           nsGlobalWindow* aWindow,
                            const IceConfiguration* aConfiguration,
                            const RTCConfiguration* aRTCConfiguration,
                            nsISupports* aThread);
@@ -485,6 +487,7 @@ private:
 #ifdef MOZILLA_INTERNAL_API
   // Fills in an RTCStatsReportInternal. Must be run on STS.
   void GetStats_s(uint32_t trackId,
+                  bool internalStats,
                   DOMHighResTimeStamp now);
 
   // Sends an RTCStatsReport to JS. Must run on main thread.

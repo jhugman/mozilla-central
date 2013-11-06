@@ -43,6 +43,7 @@
 #include "Location.h"
 #include "Navigator.h"
 #include "Principal.h"
+#include "RuntimeService.h" // For WorkersDumpEnabled().
 #include "ScriptLoader.h"
 #include "Worker.h"
 #include "WorkerPrivate.h"
@@ -107,7 +108,7 @@ public:
   InitClass(JSContext* aCx, JSObject* aObj, JSObject* aParentProto)
   {
     return JS_InitClass(aCx, aObj, aParentProto, Class(), Construct, 0,
-                        sProperties, sFunctions, NULL, NULL);
+                        sProperties, sFunctions, nullptr, nullptr);
   }
 
   using EventTarget::GetEventListener;
@@ -233,8 +234,8 @@ private:
   static bool
   Construct(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
-    JS_ReportErrorNumber(aCx, js_GetErrorMessage, NULL, JSMSG_WRONG_CONSTRUCTOR,
-                         sClass.name);
+    JS_ReportErrorNumber(aCx, js_GetErrorMessage, nullptr,
+                         JSMSG_WRONG_CONSTRUCTOR, sClass.name);
     return false;
   }
 
@@ -322,7 +323,7 @@ private:
     }
 
     if (JSVAL_IS_BOOLEAN(rval) && JSVAL_TO_BOOLEAN(rval) &&
-        !JS_CallFunctionName(aCx, event, "preventDefault", 0, NULL,
+        !JS_CallFunctionName(aCx, event, "preventDefault", 0, nullptr,
                              rval.address())) {
       return false;
     }
@@ -587,6 +588,13 @@ private:
   static bool
   Dump(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
+    RuntimeService* runtimeService = RuntimeService::GetService();
+    MOZ_ASSERT(runtimeService);
+
+    if (!runtimeService->WorkersDumpEnabled()) {
+      return true;
+    }
+
     JS::Rooted<JSObject*> obj(aCx, JS_THIS_OBJECT(aCx, aVp));
     if (!obj) {
       return false;
@@ -757,7 +765,7 @@ public:
   {
     JS::Rooted<JSObject*> proto(aCx,
       JS_InitClass(aCx, aObj, aParentProto, ProtoClass(), Construct, 0,
-                   sProperties, sFunctions, NULL, NULL));
+                   sProperties, sFunctions, nullptr, nullptr));
     if (proto) {
       void* domClass = const_cast<DOMClass *>(DOMClassStruct());
       js::SetReservedSlot(proto, DOM_PROTO_INSTANCE_CLASS_SLOT,
@@ -887,17 +895,17 @@ private:
       return UnwrapDOMObject<DedicatedWorkerGlobalScope>(aObj);
     }
 
-    JS_ReportErrorNumber(aCx, js_GetErrorMessage, NULL,
+    JS_ReportErrorNumber(aCx, js_GetErrorMessage, nullptr,
                          JSMSG_INCOMPATIBLE_PROTO, Class()->name, aFunctionName,
                          classPtr->name);
-    return NULL;
+    return nullptr;
   }
 
   static bool
   Construct(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
-    JS_ReportErrorNumber(aCx, js_GetErrorMessage, NULL, JSMSG_WRONG_CONSTRUCTOR,
-                         Class()->name);
+    JS_ReportErrorNumber(aCx, js_GetErrorMessage, nullptr,
+                         JSMSG_WRONG_CONSTRUCTOR, Class()->name);
     return false;
   }
 
@@ -910,7 +918,7 @@ private:
       return false;
     }
 
-    aObjp.set(resolved ? aObj.get() : NULL);
+    aObjp.set(resolved ? aObj.get() : nullptr);
     return true;
   }
 
@@ -1394,9 +1402,14 @@ CreateGlobalScope(JSContext* aCx)
   WorkerPrivate* worker = GetWorkerPrivateFromContext(aCx);
   MOZ_ASSERT(worker);
 
-  const JSClass* classPtr = worker->IsSharedWorker() ?
-                            SharedWorkerGlobalScope::Class() :
-                            DedicatedWorkerGlobalScope::Class();
+  const JSClass* classPtr;
+  if (worker->IsDedicatedWorker()) {
+    classPtr = DedicatedWorkerGlobalScope::Class();
+  } else if (worker->IsSharedWorker()) {
+    classPtr = SharedWorkerGlobalScope::Class();
+  } else {
+    MOZ_CRASH("Bad type");
+  }
 
   JS::CompartmentOptions options;
   if (worker->IsChromeWorker()) {
@@ -1413,12 +1426,16 @@ CreateGlobalScope(JSContext* aCx)
   JSAutoCompartment ac(aCx, global);
 
   // Make the private slots now so that all our instance checks succeed.
-  if (worker->IsSharedWorker()) {
+  if (worker->IsDedicatedWorker()) {
+    if (!DedicatedWorkerGlobalScope::InitPrivate(aCx, global, worker)) {
+      return nullptr;
+    }
+  } else if (worker->IsSharedWorker()) {
     if (!SharedWorkerGlobalScope::InitPrivate(aCx, global, worker)) {
       return nullptr;
-  }
-  } else if (!DedicatedWorkerGlobalScope::InitPrivate(aCx, global, worker)) {
-    return nullptr;
+    }
+  } else {
+    MOZ_CRASH("Bad type");
   }
 
   // Proto chain should be:
@@ -1439,10 +1456,15 @@ CreateGlobalScope(JSContext* aCx)
     return nullptr;
   }
 
-  JS::Rooted<JSObject*> finalScopeProto(aCx,
-    worker->IsSharedWorker() ?
-    SharedWorkerGlobalScope::InitClass(aCx, global, scopeProto) :
-    DedicatedWorkerGlobalScope::InitClass(aCx, global, scopeProto));
+  JS::Rooted<JSObject*> finalScopeProto(aCx);
+  if (worker->IsDedicatedWorker()) {
+    finalScopeProto = DedicatedWorkerGlobalScope::InitClass(aCx, global, scopeProto);
+  } else if (worker->IsSharedWorker()) {
+    finalScopeProto = SharedWorkerGlobalScope::InitClass(aCx, global, scopeProto);
+  } else {
+    MOZ_CRASH("Bad type");
+  }
+
   if (!finalScopeProto) {
     return nullptr;
   }

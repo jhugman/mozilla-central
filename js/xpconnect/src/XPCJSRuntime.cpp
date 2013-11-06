@@ -289,12 +289,46 @@ CompartmentPrivate::~CompartmentPrivate()
         --kLivingAdopters;
 }
 
-bool CompartmentPrivate::TryParseLocationURI()
+static bool
+TryParseLocationURICandidate(const nsACString& uristr,
+                             CompartmentPrivate::LocationHint aLocationHint,
+                             nsIURI** aURI)
 {
-    // Already tried parsing the location before
-    if (locationWasParsed)
-      return false;
-    locationWasParsed = true;
+    static NS_NAMED_LITERAL_CSTRING(kGRE, "resource://gre/");
+    static NS_NAMED_LITERAL_CSTRING(kToolkit, "chrome://global/");
+    static NS_NAMED_LITERAL_CSTRING(kBrowser, "chrome://browser/");
+
+    if (aLocationHint == CompartmentPrivate::LocationHintAddon) {
+        // Blacklist some known locations which are clearly not add-on related.
+        if (StringBeginsWith(uristr, kGRE) ||
+            StringBeginsWith(uristr, kToolkit) ||
+            StringBeginsWith(uristr, kBrowser))
+            return false;
+    }
+
+    nsCOMPtr<nsIURI> uri;
+    if (NS_FAILED(NS_NewURI(getter_AddRefs(uri), uristr)))
+        return false;
+
+    nsAutoCString scheme;
+    if (NS_FAILED(uri->GetScheme(scheme)))
+        return false;
+
+    // Cannot really map data: and blob:.
+    // Also, data: URIs are pretty memory hungry, which is kinda bad
+    // for memory reporter use.
+    if (scheme.EqualsLiteral("data") || scheme.EqualsLiteral("blob"))
+        return false;
+
+    uri.forget(aURI);
+    return true;
+}
+
+bool CompartmentPrivate::TryParseLocationURI(CompartmentPrivate::LocationHint aLocationHint,
+                                             nsIURI **aURI)
+{
+    if (!aURI)
+        return false;
 
     // Need to parse the URI.
     if (location.IsEmpty())
@@ -320,12 +354,13 @@ bool CompartmentPrivate::TryParseLocationURI()
     // See: XPCComponents.cpp#AssembleSandboxMemoryReporterName
     int32_t idx = location.Find(from);
     if (idx < 0)
-        return TryParseLocationURICandidate(location);
+        return TryParseLocationURICandidate(location, aLocationHint, aURI);
 
 
     // When parsing we're looking for the right-most URI. This URI may be in
     // <sandboxName>, so we try this first.
-    if (TryParseLocationURICandidate(Substring(location, 0, idx)))
+    if (TryParseLocationURICandidate(Substring(location, 0, idx), aLocationHint,
+                                     aURI))
         return true;
 
     // Not in <sandboxName> so we need to inspect <js-stack-frame-filename> and
@@ -343,40 +378,19 @@ bool CompartmentPrivate::TryParseLocationURI()
         idx = chain.RFind(arrow);
         if (idx < 0) {
             // This is the last chain item. Try to parse what is left.
-            return TryParseLocationURICandidate(chain);
+            return TryParseLocationURICandidate(chain, aLocationHint, aURI);
         }
 
         // Try to parse current chain item
-        if (TryParseLocationURICandidate(Substring(chain, idx + arrowLength)))
+        if (TryParseLocationURICandidate(Substring(chain, idx + arrowLength),
+                                         aLocationHint, aURI))
             return true;
 
         // Current chain item couldn't be parsed.
-        // Don't forget whitespace in " -> "
-        idx -= 1;
-        // Strip current item and continue
+        // Strip current item and continue.
         chain = Substring(chain, 0, idx);
     }
     MOZ_ASSUME_UNREACHABLE("Chain parser loop does not terminate");
-}
-
-bool CompartmentPrivate::TryParseLocationURICandidate(const nsACString& uristr)
-{
-    nsCOMPtr<nsIURI> uri;
-    if (NS_FAILED(NS_NewURI(getter_AddRefs(uri), uristr)))
-        return false;
-
-    nsAutoCString scheme;
-    if (NS_FAILED(uri->GetScheme(scheme)))
-        return false;
-
-    // Cannot really map data: and blob:.
-    // Also, data: URIs are pretty memory hungry, which is kinda bad
-    // for memory reporter use.
-    if (scheme.EqualsLiteral("data") || scheme.EqualsLiteral("blob"))
-        return false;
-
-    locationURI = uri.forget();
-    return true;
 }
 
 CompartmentPrivate*
@@ -404,6 +418,12 @@ IsXBLScope(JSCompartment *compartment)
     if (!priv || !priv->scope)
         return false;
     return priv->scope->IsXBLScope();
+}
+
+bool
+IsInXBLScope(JSObject *obj)
+{
+    return IsXBLScope(js::GetObjectCompartment(obj));
 }
 
 bool
@@ -2366,8 +2386,11 @@ ReportJSRuntimeExplicitTreeStats(const JS::RuntimeStats &rtStats,
                                  nsIMemoryReporterCallback *cb,
                                  nsISupports *closure, size_t *rtTotalOut)
 {
-    nsCOMPtr<amIAddonManager> am =
-      do_GetService("@mozilla.org/addons/integration;1");
+    nsCOMPtr<amIAddonManager> am;
+    if (XRE_GetProcessType() == GeckoProcessType_Default) {
+        // Only try to access the service from the main process.
+        am = do_GetService("@mozilla.org/addons/integration;1");
+    }
     return ReportJSRuntimeExplicitTreeStats(rtStats, rtPath, am.get(), cb,
                                             closure, rtTotalOut);
 }
@@ -2531,7 +2554,8 @@ class XPCJSRuntimeStats : public JS::RuntimeStats
         if (mGetLocations) {
             CompartmentPrivate *cp = GetCompartmentPrivate(c);
             if (cp)
-              cp->GetLocationURI(getter_AddRefs(extras->location));
+              cp->GetLocationURI(CompartmentPrivate::LocationHintAddon,
+                                 getter_AddRefs(extras->location));
             // Note: cannot use amIAddonManager implementation at this point,
             // as it is a JS service and the JS heap is currently not idle.
             // Otherwise, we could have computed the add-on id at this point.
@@ -2604,8 +2628,11 @@ JSReporter::CollectReports(WindowPaths *windowPaths,
     // callback may be a JS function, and executing JS while getting these
     // stats seems like a bad idea.
 
-    nsCOMPtr<amIAddonManager> addonManager =
-      do_GetService("@mozilla.org/addons/integration;1");
+    nsCOMPtr<amIAddonManager> addonManager;
+    if (XRE_GetProcessType() == GeckoProcessType_Default) {
+        // Only try to access the service from the main process.
+        addonManager = do_GetService("@mozilla.org/addons/integration;1");
+    }
     bool getLocations = !!addonManager;
     XPCJSRuntimeStats rtStats(windowPaths, topWindowPaths, getLocations);
     OrphanReporter orphanReporter(XPCConvert::GetISupportsFromJSObject);
@@ -2705,10 +2732,11 @@ JSReporter::CollectReports(WindowPaths *windowPaths,
 }
 
 static nsresult
-JSSizeOfTab(JSObject *obj, size_t *jsObjectsSize, size_t *jsStringsSize,
+JSSizeOfTab(JSObject *objArg, size_t *jsObjectsSize, size_t *jsStringsSize,
             size_t *jsPrivateSize, size_t *jsOtherSize)
 {
     JSRuntime *rt = nsXPConnect::GetRuntimeInstance()->Runtime();
+    JS::RootedObject obj(rt, objArg);
 
     TabSizes sizes;
     OrphanReporter orphanReporter(XPCConvert::GetISupportsFromJSObject);
@@ -3378,10 +3406,7 @@ XPCJSRuntime::GetJunkScope()
         SandboxOptions options;
         options.sandboxName.AssignASCII("XPConnect Junk Compartment");
         RootedValue v(cx);
-        nsresult rv = CreateSandboxObject(cx, v.address(),
-                                          nsContentUtils::GetSystemPrincipal(),
-                                          options);
-
+        nsresult rv = CreateSandboxObject(cx, &v, nsContentUtils::GetSystemPrincipal(), options);
         NS_ENSURE_SUCCESS(rv, nullptr);
 
         mJunkScope = js::UncheckedUnwrap(&v.toObject());

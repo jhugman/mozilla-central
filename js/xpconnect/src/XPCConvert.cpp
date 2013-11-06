@@ -155,7 +155,7 @@ XPCConvert::NativeData2JS(MutableHandleValue d, const void* s,
     case nsXPTType::T_JSVAL :
         {
             d.set(*((Value*)s));
-            if (!JS_WrapValue(cx, d.address()))
+            if (!JS_WrapValue(cx, d))
                 return false;
             break;
         }
@@ -986,6 +986,11 @@ XPCConvert::JSObject2NativeInterface(void** dest, HandleObject src,
         // If we're looking at a security wrapper, see now if we're allowed to
         // pass it to C++. If we are, then fall through to the code below. If
         // we aren't, throw an exception eagerly.
+        //
+        // NB: It's very important that we _don't_ unwrap in the aOuter case,
+        // because the caller may explicitly want to create the XPCWrappedJS
+        // around a security wrapper. XBL does this with Xrays from the XBL
+        // scope - see nsBindingManager::GetBindingImplementation.
         JSObject* inner = js::CheckedUnwrap(src, /* stopAtOuter = */ false);
 
         // Hack - For historical reasons, wrapped chrome JS objects have been
@@ -993,6 +998,9 @@ XPCConvert::JSObject2NativeInterface(void** dest, HandleObject src,
         // involves fixing the contacts API and PeerConnection to stop using
         // COWs. This needs to happen, but for now just preserve the old
         // behavior.
+        //
+        // Note that there is an identical hack in getWrapper which should be
+        // removed if this one is.
         if (!inner && MOZ_UNLIKELY(xpc::WrapperFactory::IsCOW(src)))
             inner = js::UncheckedUnwrap(src);
         if (!inner) {

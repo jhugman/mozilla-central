@@ -22,7 +22,9 @@
 
 struct gfxMatrix;
 class nsFrameLoader;
+class nsIContent;
 class nsIURI;
+class nsIWidget;
 class CpowHolder;
 
 namespace mozilla {
@@ -162,6 +164,9 @@ public:
                                            const CSSToScreenScale& aMaxZoom);
     virtual bool RecvUpdateScrollOffset(const uint32_t& aPresShellId, const ViewID& aViewId, const CSSIntPoint& aScrollOffset);
     virtual bool RecvContentReceivedTouch(const bool& aPreventDefault);
+    virtual bool RecvRecordingDeviceEvents(const nsString& aRecordingStatus,
+                                           const bool& aIsAudio,
+                                           const bool& aIsVideo);
     virtual PContentDialogParent* AllocPContentDialogParent(const uint32_t& aType,
                                                             const nsCString& aName,
                                                             const nsCString& aFeatures,

@@ -1129,8 +1129,17 @@ LIRGenerator::visitUrsh(MUrsh *ins)
 bool
 LIRGenerator::visitFloor(MFloor *ins)
 {
-    JS_ASSERT(ins->num()->type() == MIRType_Double);
-    LFloor *lir = new LFloor(useRegister(ins->num()));
+    MIRType type = ins->num()->type();
+    JS_ASSERT(IsFloatingPointType(type));
+
+    if (type == MIRType_Double) {
+        LFloor *lir = new LFloor(useRegister(ins->num()));
+        if (!assignSnapshot(lir))
+            return false;
+        return define(lir, ins);
+    }
+
+    LFloorF *lir = new LFloorF(useRegister(ins->num()));
     if (!assignSnapshot(lir))
         return false;
     return define(lir, ins);
@@ -1732,17 +1741,10 @@ LIRGenerator::visitToInt32(MToInt32 *convert)
       }
 
       case MIRType_String:
-        // Strings are complicated - we don't handle them yet.
-        IonSpew(IonSpew_Abort, "String to Int32 not supported yet.");
-        return false;
-
       case MIRType_Object:
-        // Objects might be effectful.
-        IonSpew(IonSpew_Abort, "Object to Int32 not supported yet.");
-        return false;
-
       case MIRType_Undefined:
-        IonSpew(IonSpew_Abort, "Undefined coerces to NaN, not int32_t.");
+        // Objects might be effectful. Undefined coerces to NaN, not int32.
+        MOZ_ASSUME_UNREACHABLE("ToInt32 invalid input type");
         return false;
 
       default:

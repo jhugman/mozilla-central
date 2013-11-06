@@ -75,6 +75,7 @@
 #include "mozilla/dom/TypedArray.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/PathHelpers.h"
+#include "mozilla/gfx/DataSurfaceHelpers.h"
 #include "mozilla/ipc/DocumentRendererParent.h"
 #include "mozilla/ipc/PDocumentRendererParent.h"
 #include "mozilla/MathAlgorithms.h"
@@ -88,6 +89,7 @@
 #include "mozilla/dom/HTMLVideoElement.h"
 #include "mozilla/dom/TextMetrics.h"
 #include "mozilla/dom/UnionTypes.h"
+#include "nsGlobalWindow.h"
 
 #ifdef USE_SKIA_GPU
 #undef free // apparently defined by some windows header, clashing with a free()
@@ -1059,40 +1061,20 @@ CanvasRenderingContext2D::GetImageBuffer(uint8_t** aImageBuffer,
   *aImageBuffer = nullptr;
   *aFormat = 0;
 
-  nsRefPtr<gfxASurface> surface;
-  nsresult rv = GetThebesSurface(getter_AddRefs(surface));
-  if (NS_FAILED(rv)) {
+  EnsureTarget();
+  RefPtr<SourceSurface> snapshot = mTarget->Snapshot();
+  if (!snapshot) {
     return;
   }
 
-  static const fallible_t fallible = fallible_t();
-  uint8_t* imageBuffer = new (fallible) uint8_t[mWidth * mHeight * 4];
-  if (!imageBuffer) {
+  RefPtr<DataSourceSurface> data = snapshot->GetDataSurface();
+  if (!data) {
     return;
   }
 
-  nsRefPtr<gfxImageSurface> imgsurf =
-    new gfxImageSurface(imageBuffer,
-                        gfxIntSize(mWidth, mHeight),
-                        mWidth * 4,
-                        gfxImageFormatARGB32);
+  MOZ_ASSERT(data->GetSize() == IntSize(mWidth, mHeight));
 
-  if (!imgsurf || imgsurf->CairoStatus()) {
-    delete[] imageBuffer;
-    return;
-  }
-
-  nsRefPtr<gfxContext> ctx = new gfxContext(imgsurf);
-  if (!ctx || ctx->HasError()) {
-    delete[] imageBuffer;
-    return;
-  }
-
-  ctx->SetOperator(gfxContext::OPERATOR_SOURCE);
-  ctx->SetSource(surface, gfxPoint(0, 0));
-  ctx->Paint();
-
-  *aImageBuffer = imageBuffer;
+  *aImageBuffer = SurfaceToPackedBGRA(data);
   *aFormat = imgIEncoder::INPUT_FORMAT_HOSTARGB;
 }
 
@@ -2577,7 +2559,7 @@ CanvasRenderingContext2D::DrawOrMeasureText(const nsAString& aRawText,
   GetAppUnitsValues(&processor.mAppUnitsPerDevPixel, nullptr);
   processor.mPt = gfxPoint(aX, aY);
   processor.mThebes =
-    new gfxContext(gfxPlatform::GetPlatform()->ScreenReferenceSurface());
+    new gfxContext(gfxPlatform::GetPlatform()->ScreenReferenceDrawTarget());
 
   // If we don't have a target then we don't have a transform. A target won't
   // be needed in the case where we're measuring the text size. This allows
@@ -2858,27 +2840,27 @@ CanvasRenderingContext2D::SetMozDashOffset(double mozDashOffset)
 }
 
 void
-CanvasRenderingContext2D::SetLineDash(const mozilla::dom::AutoSequence<double>& mSegments) {
+CanvasRenderingContext2D::SetLineDash(const mozilla::dom::AutoSequence<double>& aSegments) {
   FallibleTArray<mozilla::gfx::Float>& dash = CurrentState().dash;
   dash.Clear();
 
-  for(mozilla::dom::AutoSequence<double>::index_type x = 0; x < mSegments.Length(); x++) {
-    dash.AppendElement(mSegments[x]);
+  for (uint32_t x = 0; x < aSegments.Length(); x++) {
+    dash.AppendElement(aSegments[x]);
   }
-  if(mSegments.Length()%2) { // If the number of elements is odd, concatenate again
-    for(mozilla::dom::AutoSequence<double>::index_type x = 0; x < mSegments.Length(); x++) {
-      dash.AppendElement(mSegments[x]);
+  if (aSegments.Length() % 2) { // If the number of elements is odd, concatenate again
+    for (uint32_t x = 0; x < aSegments.Length(); x++) {
+      dash.AppendElement(aSegments[x]);
     }
   }
 }
 
 void
-CanvasRenderingContext2D::GetLineDash(nsTArray<double>& mSegments) const {
+CanvasRenderingContext2D::GetLineDash(nsTArray<double>& aSegments) const {
   const FallibleTArray<mozilla::gfx::Float>& dash = CurrentState().dash;
-  mSegments.Clear();
+  aSegments.Clear();
 
-  for(FallibleTArray<mozilla::gfx::Float>::index_type x = 0; x < dash.Length(); x++) {
-    mSegments.AppendElement(dash[x]);
+  for (uint32_t x = 0; x < dash.Length(); x++) {
+    aSegments.AppendElement(dash[x]);
   }
 }
 
@@ -3224,7 +3206,7 @@ CanvasRenderingContext2D::GetGlobalCompositeOperation(nsAString& op,
 }
 
 void
-CanvasRenderingContext2D::DrawWindow(nsIDOMWindow* window, double x,
+CanvasRenderingContext2D::DrawWindow(nsGlobalWindow& window, double x,
                                      double y, double w, double h,
                                      const nsAString& bgColor,
                                      uint32_t flags, ErrorResult& error)
@@ -3253,16 +3235,13 @@ CanvasRenderingContext2D::DrawWindow(nsIDOMWindow* window, double x,
 
   // Flush layout updates
   if (!(flags & nsIDOMCanvasRenderingContext2D::DRAWWINDOW_DO_NOT_FLUSH)) {
-    nsContentUtils::FlushLayoutForTree(window);
+    nsContentUtils::FlushLayoutForTree(&window);
   }
 
   nsRefPtr<nsPresContext> presContext;
-  nsCOMPtr<nsPIDOMWindow> win = do_QueryInterface(window);
-  if (win) {
-    nsIDocShell* docshell = win->GetDocShell();
-    if (docshell) {
-      docshell->GetPresContext(getter_AddRefs(presContext));
-    }
+  nsIDocShell* docshell = window.GetDocShell();
+  if (docshell) {
+    docshell->GetPresContext(getter_AddRefs(presContext));
   }
   if (!presContext) {
     error.Throw(NS_ERROR_FAILURE);
@@ -3303,6 +3282,9 @@ CanvasRenderingContext2D::DrawWindow(nsIDOMWindow* window, double x,
   Matrix matrix = mTarget->GetTransform();
   double sw = matrix._11 * w;
   double sh = matrix._22 * h;
+  if (!sw || !sh) {
+    return;
+  }
   nsRefPtr<gfxContext> thebes;
   nsRefPtr<gfxASurface> drawSurf;
   RefPtr<DrawTarget> drawDT;
@@ -3363,6 +3345,11 @@ CanvasRenderingContext2D::DrawWindow(nsIDOMWindow* window, double x,
                                              data->GetSize(),
                                              data->Stride(),
                                              data->GetFormat());
+    }
+
+    if (!source) {
+      error.Throw(NS_ERROR_FAILURE);
+      return;
     }
 
     mgfx::Rect destRect(0, 0, w, h);

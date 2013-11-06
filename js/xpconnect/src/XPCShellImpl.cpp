@@ -387,17 +387,18 @@ IgnoreReportedErrors(JSContext *cx, unsigned argc, jsval *vp)
 static bool
 DumpXPC(JSContext *cx, unsigned argc, jsval *vp)
 {
-    int32_t depth = 2;
+    JS::CallArgs args = CallArgsFromVp(argc, vp);
 
-    if (argc > 0) {
-        if (!JS_ValueToInt32(cx, JS_ARGV(cx, vp)[0], &depth))
+    uint16_t depth = 2;
+    if (args.length() > 0) {
+        if (!JS::ToUint16(cx, args[0], &depth))
             return false;
     }
 
     nsCOMPtr<nsIXPConnect> xpc = do_GetService(nsIXPConnect::GetCID());
     if (xpc)
         xpc->DebugDump(int16_t(depth));
-    JS_SET_RVAL(cx, vp, JSVAL_VOID);
+    args.rval().setUndefined();
     return true;
 }
 
@@ -417,103 +418,16 @@ GC(JSContext *cx, unsigned argc, jsval *vp)
 static bool
 GCZeal(JSContext *cx, unsigned argc, jsval *vp)
 {
+    CallArgs args = CallArgsFromVp(argc, vp);
     uint32_t zeal;
-    if (!JS_ValueToECMAUint32(cx, argc ? JS_ARGV(cx, vp)[0] : JSVAL_VOID, &zeal))
+    if (!ToUint32(cx, args.get(0), &zeal))
         return false;
 
     JS_SetGCZeal(cx, uint8_t(zeal), JS_DEFAULT_ZEAL_FREQ);
-    JS_SET_RVAL(cx, vp, JSVAL_VOID);
+    args.rval().setUndefined();
     return true;
 }
 #endif
-
-#ifdef DEBUG
-
-static bool
-DumpHeap(JSContext *cx, unsigned argc, jsval *vp)
-{
-    void* startThing = nullptr;
-    JSGCTraceKind startTraceKind = JSTRACE_OBJECT;
-    void *thingToFind = nullptr;
-    size_t maxDepth = (size_t)-1;
-    void *thingToIgnore = nullptr;
-    FILE *dumpFile;
-    bool ok;
-
-    jsval *argv = JS_ARGV(cx, vp);
-    JS_SET_RVAL(cx, vp, JSVAL_VOID);
-
-    vp = argv + 0;
-    JSAutoByteString fileName;
-    if (argc > 0 && *vp != JSVAL_NULL && *vp != JSVAL_VOID) {
-        JSString *str;
-
-        str = JS_ValueToString(cx, *vp);
-        if (!str)
-            return false;
-        *vp = STRING_TO_JSVAL(str);
-        if (!fileName.encodeLatin1(cx, str))
-            return false;
-    }
-
-    vp = argv + 1;
-    if (argc > 1 && *vp != JSVAL_NULL && *vp != JSVAL_VOID) {
-        if (!JSVAL_IS_TRACEABLE(*vp))
-            goto not_traceable_arg;
-        startThing = JSVAL_TO_TRACEABLE(*vp);
-        startTraceKind = JSVAL_TRACE_KIND(*vp);
-    }
-
-    vp = argv + 2;
-    if (argc > 2 && *vp != JSVAL_NULL && *vp != JSVAL_VOID) {
-        if (!JSVAL_IS_TRACEABLE(*vp))
-            goto not_traceable_arg;
-        thingToFind = JSVAL_TO_TRACEABLE(*vp);
-    }
-
-    vp = argv + 3;
-    if (argc > 3 && *vp != JSVAL_NULL && *vp != JSVAL_VOID) {
-        uint32_t depth;
-
-        if (!JS_ValueToECMAUint32(cx, *vp, &depth))
-            return false;
-        maxDepth = depth;
-    }
-
-    vp = argv + 4;
-    if (argc > 4 && *vp != JSVAL_NULL && *vp != JSVAL_VOID) {
-        if (!JSVAL_IS_TRACEABLE(*vp))
-            goto not_traceable_arg;
-        thingToIgnore = JSVAL_TO_TRACEABLE(*vp);
-    }
-
-    if (!fileName) {
-        dumpFile = gOutFile;
-    } else {
-        dumpFile = fopen(fileName.ptr(), "w");
-        if (!dumpFile) {
-            fprintf(gErrFile, "dumpHeap: can't open %s: %s\n",
-                    fileName.ptr(), strerror(errno));
-            return false;
-        }
-    }
-
-    ok = JS_DumpHeap(JS_GetRuntime(cx), dumpFile, startThing, startTraceKind, thingToFind,
-                     maxDepth, thingToIgnore);
-    if (dumpFile != gOutFile)
-        fclose(dumpFile);
-    if (!ok)
-        JS_ReportOutOfMemory(cx);
-    return ok;
-
-  not_traceable_arg:
-    fprintf(gErrFile,
-            "dumpHeap: argument %u is not null or a heap-allocated thing\n",
-            (unsigned)(vp - argv));
-    return false;
-}
-
-#endif /* DEBUG */
 
 static bool
 SendCommand(JSContext* cx,
@@ -546,96 +460,63 @@ SendCommand(JSContext* cx,
     return true;
 }
 
-/*
- * JSContext option name to flag map. The option names are in alphabetical
- * order for better reporting.
- */
-static const struct JSOption {
-    const char  *name;
-    uint32_t    flag;
-} js_options[] = {
-    {"strict",          JSOPTION_EXTRA_WARNINGS},
-    {"werror",          JSOPTION_WERROR},
-    {"strict_mode",     JSOPTION_STRICT_MODE},
-};
-
-static uint32_t
-MapContextOptionNameToFlag(JSContext* cx, const char* name)
-{
-    for (size_t i = 0; i < ArrayLength(js_options); ++i) {
-        if (strcmp(name, js_options[i].name) == 0)
-            return js_options[i].flag;
-    }
-
-    char* msg = JS_sprintf_append(nullptr,
-                                  "unknown option name '%s'."
-                                  " The valid names are ", name);
-    for (size_t i = 0; i < ArrayLength(js_options); ++i) {
-        if (!msg)
-            break;
-        msg = JS_sprintf_append(msg, "%s%s", js_options[i].name,
-                                (i + 2 < ArrayLength(js_options)
-                                 ? ", "
-                                 : i + 2 == ArrayLength(js_options)
-                                 ? " and "
-                                 : "."));
-    }
-    if (!msg) {
-        JS_ReportOutOfMemory(cx);
-    } else {
-        JS_ReportError(cx, msg);
-        free(msg);
-    }
-    return 0;
-}
-
 static bool
 Options(JSContext *cx, unsigned argc, jsval *vp)
 {
-    uint32_t optset, flag;
-    JSString *str;
-    char *names;
-    bool found;
+    JS::CallArgs args = CallArgsFromVp(argc, vp);
+    ContextOptions oldOptions = ContextOptionsRef(cx);
 
-    optset = 0;
-    jsval *argv = JS_ARGV(cx, vp);
-    for (unsigned i = 0; i < argc; i++) {
-        str = JS_ValueToString(cx, argv[i]);
+    for (unsigned i = 0; i < argc; ++i) {
+        JSString *str = JS_ValueToString(cx, args[i]);
         if (!str)
             return false;
-        argv[i] = STRING_TO_JSVAL(str);
+
         JSAutoByteString opt(cx, str);
         if (!opt)
             return false;
-        flag = MapContextOptionNameToFlag(cx,  opt.ptr());
-        if (!flag)
-            return false;
-        optset |= flag;
-    }
-    optset = JS_ToggleOptions(cx, optset);
 
-    names = nullptr;
-    found = false;
-    for (size_t i = 0; i < ArrayLength(js_options); i++) {
-        if (js_options[i].flag & optset) {
-            found = true;
-            names = JS_sprintf_append(names, "%s%s",
-                                      names ? "," : "", js_options[i].name);
-            if (!names)
-                break;
+        if (strcmp(opt.ptr(), "strict") == 0)
+            ContextOptionsRef(cx).toggleExtraWarnings();
+        else if (strcmp(opt.ptr(), "werror") == 0)
+            ContextOptionsRef(cx).toggleWerror();
+        else if (strcmp(opt.ptr(), "strict_mode") == 0)
+            ContextOptionsRef(cx).toggleStrictMode();
+        else {
+            JS_ReportError(cx, "unknown option name '%s'. The valid names are "
+                           "strict, werror, and strict_mode.", opt.ptr());
+            return false;
         }
     }
-    if (!found)
-        names = strdup("");
-    if (!names) {
-        JS_ReportOutOfMemory(cx);
-        return false;
+
+    char *names = NULL;
+    if (oldOptions.extraWarnings()) {
+        names = JS_sprintf_append(names, "%s", "strict");
+        if (!names) {
+            JS_ReportOutOfMemory(cx);
+            return false;
+        }
     }
-    str = JS_NewStringCopyZ(cx, names);
+    if (oldOptions.werror()) {
+        names = JS_sprintf_append(names, "%s%s", names ? "," : "", "werror");
+        if (!names) {
+            JS_ReportOutOfMemory(cx);
+            return false;
+        }
+    }
+    if (names && oldOptions.strictMode()) {
+        names = JS_sprintf_append(names, "%s%s", names ? "," : "", "strict_mode");
+        if (!names) {
+            JS_ReportOutOfMemory(cx);
+            return false;
+        }
+    }
+
+    JSString *str = JS_NewStringCopyZ(cx, names);
     free(names);
     if (!str)
         return false;
-    JS_SET_RVAL(cx, vp, STRING_TO_JSVAL(str));
+
+    args.rval().setString(str);
     return true;
 }
 
@@ -831,9 +712,6 @@ static const JSFunctionSpec glob_functions[] = {
 #endif
     JS_FS("options",         Options,        0,0),
     JS_FN("parent",          Parent,         1,0),
-#ifdef DEBUG
-    JS_FS("dumpHeap",        DumpHeap,       5,0),
-#endif
     JS_FS("sendCommand",     SendCommand,    1,0),
     JS_FS("atob",            Atob,           1,0),
     JS_FS("btoa",            Btoa,           1,0),
@@ -1140,17 +1018,17 @@ ProcessArgsForCompartment(JSContext *cx, char **argv, int argc)
                 return;
             break;
         case 'S':
-            JS_ToggleOptions(cx, JSOPTION_WERROR);
+            ContextOptionsRef(cx).toggleWerror();
         case 's':
-            JS_ToggleOptions(cx, JSOPTION_EXTRA_WARNINGS);
+            ContextOptionsRef(cx).toggleExtraWarnings();
             break;
         case 'I':
-            JS_ToggleOptions(cx, JSOPTION_COMPILE_N_GO);
-            JS_ToggleOptions(cx, JSOPTION_ION);
-            JS_ToggleOptions(cx, JSOPTION_ASMJS);
+            ContextOptionsRef(cx).toggleCompileAndGo()
+                                 .toggleIon()
+                                 .toggleAsmJS();
             break;
         case 'n':
-            JS_ToggleOptions(cx, JSOPTION_TYPE_INFERENCE);
+            ContextOptionsRef(cx).toggleTypeInference();
             break;
         }
     }

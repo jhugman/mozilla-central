@@ -134,8 +134,9 @@ namespace {
 
 const uint32_t kNoIndex = uint32_t(-1);
 
-const uint32_t kRequiredJSContextOptions =
-  JSOPTION_DONT_REPORT_UNCAUGHT | JSOPTION_NO_SCRIPT_RVAL;
+const JS::ContextOptions kRequiredJSContextOptions =
+  JS::ContextOptions().setDontReportUncaught(true)
+                      .setNoScriptRval(true);
 
 uint32_t gMaxWorkersPerDomain = MAX_WORKERS_PER_DOMAIN;
 
@@ -171,6 +172,28 @@ const char* gStringChars[] = {
 
 static_assert(NS_ARRAY_LENGTH(gStringChars) == ID_COUNT,
               "gStringChars should have the right length.");
+
+#if !(defined(DEBUG) || defined(MOZ_ENABLE_JS_DUMP))
+#define DUMP_CONTROLLED_BY_PREF 1
+#define PREF_DOM_WINDOW_DUMP_ENABLED "browser.dom.window.dump.enabled"
+
+// Protected by RuntimeService::mMutex.
+// Initialized by DumpPrefChanged via RuntimeService::Init().
+bool gWorkersDumpEnabled;
+
+static int
+DumpPrefChanged(const char* aPrefName, void* aClosure)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  bool enabled = Preferences::GetBool(PREF_DOM_WINDOW_DUMP_ENABLED, false);
+
+  Mutex* mutex = static_cast<Mutex*>(aClosure);
+  MutexAutoLock lock(*mutex);
+  gWorkersDumpEnabled = enabled;
+  return 0;
+}
+#endif
 
 class LiteralRebindingCString : public nsDependentCString
 {
@@ -294,43 +317,43 @@ LoadJSContextOptions(const char* aPrefName, void* /* aClosure */)
 #endif
 
   // Common options.
-  uint32_t commonOptions = kRequiredJSContextOptions;
+  JS::ContextOptions commonOptions = kRequiredJSContextOptions;
   if (GetWorkerPref<bool>(NS_LITERAL_CSTRING("strict"))) {
-    commonOptions |= JSOPTION_EXTRA_WARNINGS;
+    commonOptions.setExtraWarnings(true);
   }
   if (GetWorkerPref<bool>(NS_LITERAL_CSTRING("werror"))) {
-    commonOptions |= JSOPTION_WERROR;
+    commonOptions.setWerror(true);
   }
   if (GetWorkerPref<bool>(NS_LITERAL_CSTRING("asmjs"))) {
-    commonOptions |= JSOPTION_ASMJS;
+    commonOptions.setAsmJS(true);
   }
 
   // Content options.
-  uint32_t contentOptions = commonOptions;
+  JS::ContextOptions contentOptions = commonOptions;
   if (GetWorkerPref<bool>(NS_LITERAL_CSTRING("baselinejit.content"))) {
-    contentOptions |= JSOPTION_BASELINE;
+    contentOptions.setBaseline(true);
   }
   if (GetWorkerPref<bool>(NS_LITERAL_CSTRING("ion.content"))) {
-    contentOptions |= JSOPTION_ION;
+    contentOptions.setIon(true);
   }
   if (GetWorkerPref<bool>(NS_LITERAL_CSTRING("typeinference.content"))) {
-    contentOptions |= JSOPTION_TYPE_INFERENCE;
+    contentOptions.setTypeInference(true);
   }
 
   // Chrome options.
-  uint32_t chromeOptions = commonOptions;
+  JS::ContextOptions chromeOptions = commonOptions;
   if (GetWorkerPref<bool>(NS_LITERAL_CSTRING("baselinejit.chrome"))) {
-    chromeOptions |= JSOPTION_BASELINE;
+    chromeOptions.setBaseline(true);
   }
   if (GetWorkerPref<bool>(NS_LITERAL_CSTRING("ion.chrome"))) {
-    chromeOptions |= JSOPTION_ION;
+    chromeOptions.setIon(true);
   }
   if (GetWorkerPref<bool>(NS_LITERAL_CSTRING("typeinference.chrome"))) {
-    chromeOptions |= JSOPTION_TYPE_INFERENCE;
+    chromeOptions.setTypeInference(true);
   }
 #ifdef DEBUG
   if (GetWorkerPref<bool>(NS_LITERAL_CSTRING("strict.debug"))) {
-    chromeOptions |= JSOPTION_EXTRA_WARNINGS;
+    chromeOptions.setExtraWarnings(true);
   }
 #endif
 
@@ -771,13 +794,6 @@ CreateJSContextForWorker(WorkerPrivate* aWorkerPrivate, JSRuntime* aRuntime)
   JSSettings settings;
   aWorkerPrivate->CopyJSSettings(settings);
 
-  NS_ASSERTION((settings.chrome.options & kRequiredJSContextOptions) ==
-               kRequiredJSContextOptions,
-               "Somehow we lost our required chrome options!");
-  NS_ASSERTION((settings.content.options & kRequiredJSContextOptions) ==
-               kRequiredJSContextOptions,
-               "Somehow we lost our required content options!");
-
   JSSettings::JSGCSettingsArray& gcSettings = settings.gcSettings;
 
   // This is the real place where we set the max memory for the runtime.
@@ -793,7 +809,7 @@ CreateJSContextForWorker(WorkerPrivate* aWorkerPrivate, JSRuntime* aRuntime)
 
   // Security policy:
   static JSSecurityCallbacks securityCallbacks = {
-    NULL,
+    nullptr,
     ContentSecurityPolicyAllows
   };
   JS_SetSecurityCallbacks(aRuntime, &securityCallbacks);
@@ -821,9 +837,9 @@ CreateJSContextForWorker(WorkerPrivate* aWorkerPrivate, JSRuntime* aRuntime)
 
   js::SetCTypesActivityCallback(aRuntime, CTypesActivityCallback);
 
-  JS_SetOptions(workerCx,
-                aWorkerPrivate->IsChromeWorker() ? settings.chrome.options :
-                                                   settings.content.options);
+  JS::ContextOptionsRef(workerCx) = aWorkerPrivate->IsChromeWorker()
+                                  ? settings.chrome.options
+                                  : settings.content.options;
 
   JS_SetJitHardening(aRuntime, settings.jitHardening);
 
@@ -1611,6 +1627,12 @@ RuntimeService::Init()
                                         PREF_WORKERS_OPTIONS_PREFIX PREF_GCZEAL,
                                         nullptr)) ||
 #endif
+#if DUMP_CONTROLLED_BY_PREF
+      NS_FAILED(Preferences::RegisterCallbackAndCall(
+                                              DumpPrefChanged,
+                                              PREF_DOM_WINDOW_DUMP_ENABLED,
+                                              &mMutex)) ||
+#endif
       NS_FAILED(Preferences::RegisterCallback(LoadJSContextOptions,
                                               PREF_JS_OPTIONS_PREFIX,
                                               nullptr)) ||
@@ -1773,6 +1795,11 @@ RuntimeService::Cleanup()
         NS_FAILED(Preferences::UnregisterCallback(LoadJSContextOptions,
                                                   PREF_WORKERS_OPTIONS_PREFIX,
                                                   nullptr)) ||
+#if DUMP_CONTROLLED_BY_PREF
+        NS_FAILED(Preferences::UnregisterCallback(DumpPrefChanged,
+                                                  PREF_DOM_WINDOW_DUMP_ENABLED,
+                                                  &mMutex)) ||
+#endif
 #ifdef JS_GC_ZEAL
         NS_FAILED(Preferences::UnregisterCallback(
                                              LoadGCZealOptions,
@@ -2033,7 +2060,7 @@ RuntimeService::CreateSharedWorker(JSContext* aCx, nsPIDOMWindow* aWindow,
   if (!workerPrivate) {
     nsRefPtr<WorkerPrivate> newWorkerPrivate =
       WorkerPrivate::Create(aCx, JS::NullPtr(), nullptr, aScriptURL, false,
-                            true, aName, &loadInfo);
+                            WorkerPrivate::WorkerTypeShared, aName, &loadInfo);
     NS_ENSURE_TRUE(newWorkerPrivate, NS_ERROR_FAILURE);
 
     if (!RegisterWorker(aCx, newWorkerPrivate)) {
@@ -2207,4 +2234,18 @@ RuntimeService::Observe(nsISupports* aSubject, const char* aTopic,
 
   NS_NOTREACHED("Unknown observer topic!");
   return NS_OK;
+}
+
+bool
+RuntimeService::WorkersDumpEnabled()
+{
+#if DUMP_CONTROLLED_BY_PREF
+  MutexAutoLock lock(mMutex);
+  // In optimized builds we check a pref that controls if we should
+  // enable output from dump() or not, in debug builds it's always
+  // enabled.
+  return gWorkersDumpEnabled;
+#else
+  return true;
+#endif
 }

@@ -8,8 +8,14 @@
  */
 
 enum RTCStatsType {
-  "inbound-rtp",
-  "outbound-rtp"
+  "inboundrtp",
+  "outboundrtp",
+  "session",
+  "track",
+  "transport",
+  "candidatepair",
+  "localcandidate",
+  "remotecandidate"
 };
 
 dictionary RTCStats {
@@ -21,6 +27,7 @@ dictionary RTCStats {
 dictionary RTCRTPStreamStats : RTCStats {
   DOMString ssrc;
   DOMString remoteId;
+  boolean isRemote;
   DOMString mediaTrackId;
   DOMString transportId;
   DOMString codecId;
@@ -28,13 +35,13 @@ dictionary RTCRTPStreamStats : RTCStats {
 
 dictionary RTCInboundRTPStreamStats : RTCRTPStreamStats {
   unsigned long packetsReceived;
-  unsigned long bytesReceived;
-  float jitter;
+  unsigned long long bytesReceived;
+  double jitter;
 };
 
 dictionary RTCOutboundRTPStreamStats : RTCRTPStreamStats {
   unsigned long packetsSent;
-  unsigned long bytesSent;
+  unsigned long long bytesSent;
 };
 
 dictionary RTCMediaStreamTrackStats : RTCStats {
@@ -44,11 +51,11 @@ dictionary RTCMediaStreamTrackStats : RTCStats {
   unsigned long audioLevel;       // Only for audio, the rest are only for video
   unsigned long frameWidth;
   unsigned long frameHeight;
-  unsigned long framesPerSecond;  // The nominal FPS value
+  double framesPerSecond;         // The nominal FPS value
   unsigned long framesSent;
   unsigned long framesReceived;   // Only for remoteSource=true
   unsigned long framesDecoded;
-  long first;
+  unsigned long first;
 };
 
 dictionary RTCMediaStreamStats : RTCStats {
@@ -69,10 +76,30 @@ dictionary RTCIceComponentStats : RTCStats {
   boolean activeConnection;
 };
 
+enum RTCStatsIceCandidatePairState {
+  "frozen",
+  "waiting",
+  "inprogress",
+  "failed",
+  "succeeded",
+  "cancelled"
+};
+
+dictionary RTCIceCandidatePairStats : RTCStats {
+  DOMString componentId;
+  DOMString localCandidateId;
+  DOMString remoteCandidateId;
+  RTCStatsIceCandidatePairState state;
+  unsigned long long mozPriority;
+  boolean readable;
+  boolean nominated;
+  boolean selected;
+};
+
 enum RTCStatsIceCandidateType {
   "host",
-  "server-reflexive",
-  "peer-reflexive",
+  "serverreflexive",
+  "peerreflexive",
   "relayed"
 };
 
@@ -91,7 +118,7 @@ dictionary RTCCodecStats : RTCStats {
   DOMString parameters;            // From SDP description line
 };
 
-callback RTCStatsReportCallback = void (object value, DOMString key, RTCStatsReport obj);
+callback RTCStatsReportCallback = void (RTCStatsReport obj);
 
 // This is the internal representation of the report in this implementation
 // to be received from c++
@@ -104,6 +131,7 @@ dictionary RTCStatsReportInternal {
   sequence<RTCMediaStreamStats>       mediaStreamStats;
   sequence<RTCTransportStats>         transportStats;
   sequence<RTCIceComponentStats>      iceComponentStats;
+  sequence<RTCIceCandidatePairStats>  iceCandidatePairStats;
   sequence<RTCIceCandidateStats>      iceCandidateStats;
   sequence<RTCCodecStats>             codecStats;
 };
