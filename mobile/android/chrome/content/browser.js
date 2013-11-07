@@ -6923,6 +6923,10 @@ var WebappsUI = {
                 console.log("Downloading failed")
               } else {
                 console.log("Downloaded successfully"); 
+                sendMessageToJava({
+                  type: "WebApps:InstallApk",
+                  filePath: filePath
+                });
               }
             });
 

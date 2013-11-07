@@ -2684,6 +2684,15 @@ public class GeckoAppShell
         ThreadUtils.postToBackgroundThread(new InstallFromHttp(context, url));
     }
 
+    public static void installApk(Context context, String filePath) {
+        File file = new File(filePath);
+        Intent intent = new Intent(Intent.ACTION_VIEW);
+        intent.setDataAndType(Uri.fromFile(file), "application/vnd.android.package-archive");
+        context.startActivity(intent);
+        // We should delete the file, but unsure if we should do it here or elsewhere.
+        // file.deleteOnExit();
+    }
+
     public static class InstallFromHttp implements Runnable {
 
         private final URL mUrl;
