@@ -659,6 +659,8 @@ abstract public class GeckoApp
                 GeckoAppShell.uninstallWebApp(origin);
             } else if (event.equals("WebApps:DownloadApk")) {
                 GeckoAppShell.downloadApk(this, new URL(message.getString("generatorUrl")));
+            } else if (event.equals("WebApps:InstallApk")) {
+                GeckoAppShell.installApk(this, message.getString("filePath"));
             } else if (event.equals("WebApps:GetTempFilePath")) {
                 Log.d(LOGTAG, "WebApps:GetTempFilePath - getting file name");
                 mCurrentResponse = GeckoAppShell.getTempFilePath(this);
@@ -1507,6 +1509,7 @@ abstract public class GeckoApp
         registerEventListener("WebApps:Install");
         registerEventListener("WebApps:Uninstall");
         registerEventListener("WebApps:DownloadApk");
+        registerEventListener("WebApps:InstallApk");
         registerEventListener("WebApps:GetTempFilePath");
         registerEventListener("Share:Text");
         registerEventListener("Share:Image");
@@ -2052,6 +2055,7 @@ abstract public class GeckoApp
         unregisterEventListener("WebApps:Install");
         unregisterEventListener("WebApps:Uninstall");
         unregisterEventListener("WebApps:DownloadApk");
+        unregisterEventListener("WebApps:InstallApk");
         unregisterEventListener("WebApps:GetTempFilePath");
         unregisterEventListener("Share:Text");
         unregisterEventListener("Share:Image");
