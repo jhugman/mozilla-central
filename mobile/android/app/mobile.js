@@ -790,5 +790,7 @@ pref("browser.ui.linkify.phone", false);
 pref("snav.enabled", true);
 
 pref("dom.mozApps.installSynthesizedApk", true);
-pref("dom.mozApps.apkGeneratorEndpoint", "http://10.246.38.116:8080/application.apk");
-//pref("dom.mozApps.apkGeneratorEndpoint", "http://107.22.148.17:8080/application.apk");
+// jhugman's public server:
+pref("dom.mozApps.apkGeneratorEndpoint", "http://107.22.148.17:8080/application.apk");
+// mhaigh's private server:
+// pref("dom.mozApps.apkGeneratorEndpoint", "http://10.246.38.116:8080/application.apk");
