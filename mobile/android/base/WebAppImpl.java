@@ -106,6 +106,11 @@ public class WebAppImpl extends GeckoApp {
         if (uri != null) {
             return uri;
         }
+
+        // TODO this is where we construct the URL from the Intent from the
+        // the synthesized APK.
+        // TODO Translate AndroidIntents into WebActivities here.
+
         return uri;
     }
 
@@ -195,7 +200,6 @@ public class WebAppImpl extends GeckoApp {
      */
     @Override
     protected String getDefaultProfileName() {
-        Log.i(LOGTAG, "Profile: webapp" + getIndex());
         return "webapp" + getIndex();
     }
 
