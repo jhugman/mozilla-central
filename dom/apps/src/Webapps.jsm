@@ -2422,6 +2422,7 @@ this.DOMApplicationRegistry = {
       this.broadcastMessage("Webapps:AddApp", { id: id, app: appObject });
       this.broadcastMessage("Webapps:Install:Return:OK", aData);
       Services.obs.notifyObservers(null, "webapps-installed",
+        JSON.stringify({ manifestURL: app.manifestURL }));
       if (aData.isPackage && aData.silentInstall) {
         // Skip directly to onInstallSuccessAck, since there isn't
         // a WebappsRegistry to receive Webapps:Install:Return:OK and respond
