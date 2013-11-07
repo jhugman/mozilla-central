@@ -551,7 +551,7 @@ var BrowserApp = {
       function(aTarget) {
         aTarget.muted = true;
       });
-  
+
     NativeWindow.contextmenus.add(Strings.browser.GetStringFromName("contextmenu.unmute"),
       NativeWindow.contextmenus.mediaContext("media-muted"),
       function(aTarget) {
@@ -1688,7 +1688,7 @@ var NativeWindow = {
         return;
 
       sendMessageToJava({
-        type: "Menu:Update", 
+        type: "Menu:Update",
         id: aId,
         options: aOptions
       });
@@ -1714,7 +1714,7 @@ var NativeWindow = {
    *                     automatically dismiss before this time.
    *        checkbox:    A string to appear next to a checkbox under the notification
    *                     message. The button callback functions will be called with
-   *                     the checked state as an argument.                   
+   *                     the checked state as an argument.
    */
     show: function(aMessage, aValue, aButtons, aTabID, aOptions) {
       aButtons.forEach((function(aButton) {
@@ -1972,7 +1972,7 @@ var NativeWindow = {
         return this._targetRef.get();
       return null;
     },
-  
+
     set _target(aTarget) {
       if (aTarget)
         this._targetRef = Cu.getWeakReference(aTarget);
@@ -2785,7 +2785,7 @@ Tab.prototype = {
                                   viewportWidth - 15);
   },
 
-  /** 
+  /**
    * Reloads the tab with the desktop mode setting.
    */
   reloadWithMode: function (aDesktopMode) {
@@ -3441,7 +3441,7 @@ Tab.prototype = {
 
             if (sizes == "any") {
               // Since Java expects an integer, use -1 to represent icons with sizes="any"
-              maxSize = -1; 
+              maxSize = -1;
             } else {
               let tokens = sizes.split(" ");
               tokens.forEach(function(token) {
@@ -3643,7 +3643,7 @@ Tab.prototype = {
       let showProgress = restoring ? false : this.showProgress;
 
       // true if the page loaded successfully (i.e., no 404s or other errors)
-      let success = false; 
+      let success = false;
       let uri = "";
       try {
         // Remember original URI for UA changes on redirected pages
@@ -6177,7 +6177,7 @@ var ClipboardHelper = {
       return;
     let target = aElement.QueryInterface(Ci.nsIDOMNSEditableElement);
     target.editor.paste(Ci.nsIClipboard.kGlobalClipboard);
-    target.focus();  
+    target.focus();
   },
 
   inputMethod: function(aElement) {
@@ -6430,7 +6430,7 @@ var IdentityHandler = {
                                .QueryInterface(Components.interfaces.nsISSLStatusProvider)
                                .SSLStatus;
 
-    // Don't pass in the actual location object, since it can cause us to 
+    // Don't pass in the actual location object, since it can cause us to
     // hold on to the window object too long.  Just pass in the fields we
     // care about. (bug 424829)
     let locationObj = {};
@@ -6480,7 +6480,7 @@ var IdentityHandler = {
 
       return result;
     }
-    
+
     // Otherwise, we don't know the cert owner
     result.owner = Strings.browser.GetStringFromName("identity.ownerUnknown3");
 
@@ -6843,6 +6843,7 @@ var WebappsUI = {
       case "webapps-uninstall":
         sendMessageToJava({
           type: "WebApps:Uninstall",
+          packageName: data.packageName,
           origin: data.origin
         });
         break;
@@ -6853,7 +6854,7 @@ var WebappsUI = {
     const DEFAULT_ICON = "chrome://browser/skin/images/default-app-icon.png";
     if (!aIcons)
       return DEFAULT_ICON;
-  
+
     let iconSizes = Object.keys(aIcons);
     if (iconSizes.length == 0)
       return DEFAULT_ICON;
@@ -6885,17 +6886,18 @@ var WebappsUI = {
   doInstall: function doInstall(aData) {
     let jsonManifest = aData.isPackage ? aData.app.updateManifest : aData.app.manifest;
     let manifest = new ManifestHelper(jsonManifest, aData.app.origin);
-    let showPrompt = true;
-
+    let showPrompt = !aData.silentInstall;
     if (!showPrompt || Services.prompt.confirm(null, Strings.browser.GetStringFromName("webapps.installTitle"), manifest.name + "\n" + aData.app.origin)) {
       // Get a profile for the app to be installed in. We'll download everything before creating the icons.
       let origin = aData.app.origin;
-      let profilePath = sendMessageToJava({
-        type: "WebApps:PreInstall",
-        name: manifest.name,
-        manifestURL: aData.app.manifestURL,
-        origin: origin
-      });
+      let profilePath = aData.profilePath ||
+        sendMessageToJava({
+          type: "WebApps:PreInstall",
+          name: manifest.name,
+          packageName: aData.app.packageName,
+          manifestURL: aData.app.manifestURL,
+          origin: origin
+        });
       if (profilePath) {
         let file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsILocalFile);
         file.initWithPath(profilePath);
@@ -6924,6 +6926,7 @@ var WebappsUI = {
                   // aData.app.origin may now point to the app: url that hosts this app
                   sendMessageToJava({
                     type: "WebApps:PostInstall",
+                    packageName: aData.app.packageName,
                     name: localeManifest.name,
                     manifestURL: aData.app.manifestURL,
                     originalOrigin: origin,
@@ -7042,7 +7045,7 @@ var WebappsUI = {
         favicon.src = WebappsUI.getBiggestIcon(null);
       }
     };
-  
+
     favicon.src = aIconURL;
   },
 

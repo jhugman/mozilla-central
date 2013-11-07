@@ -31,7 +31,7 @@ XPCOMUtils.defineLazyGetter(this, "libcutils", function() {
 #endif
 
 function debug(aMsg) {
-  //dump("-*-*- Webapps.jsm : " + aMsg + "\n");
+  dump("-*-*- Webapps.jsm : " + aMsg + "\n");
 }
 
 function supportUseCurrentProfile() {
@@ -895,12 +895,12 @@ this.DOMApplicationRegistry = {
   observe: function(aSubject, aTopic, aData) {
     switch (aTopic) {
       case "xpcom-shutdown":
-      this.messages.forEach((function(msgName) {
-        ppmm.removeMessageListener(msgName, this);
-      }).bind(this));
-      Services.obs.removeObserver(this, "xpcom-shutdown");
-      cpmm = null;
-      ppmm = null;
+        this.messages.forEach((function(msgName) {
+          ppmm.removeMessageListener(msgName, this);
+        }).bind(this));
+        Services.obs.removeObserver(this, "xpcom-shutdown");
+        cpmm = null;
+        ppmm = null;
         break;
 #ifdef MOZ_ANDROID_SYNTHAPKS
       case "Webapps:AutoInstall": // note the capitalization.
@@ -915,6 +915,45 @@ this.DOMApplicationRegistry = {
 #ifdef MOZ_ANDROID_SYNTHAPKS
   doAutoInstall: function (aData) {
     debug("AutoInstalling from Webapps.jsm: " + aData);
+
+
+    let mm = {
+      sendAsyncMessage: function (messageName, data) {
+        // TODO hook this back to Java
+        debug("sendAsyncMessage " + messageName + ": " + JSON.stringify(data));
+      }
+    };
+
+    let data = JSON.parse(aData);
+
+    let manifestUrl = data.manifestUrl,
+        uri = Services.io.newURI(manifestUrl, null, null),
+        origin = uri.prePath;
+
+    let message = {
+        app: {
+          origin: origin,
+          manifestURL: manifestUrl,
+          packageName: data.packageName
+        },
+        profilePath: data.profilePath,
+        silentInstall: true,
+        mm: mm
+    };
+
+    switch (data.type) { // can be hosted or packaged.
+      case "hosted":
+        this.doInstall(message, mm);
+        break;
+
+      case "packaged":
+        message.isPackage = true;
+        message.app.installOrigin = origin;
+        this.doInstallPackage(message, mm);
+        break;
+    }
+
+
   },
 #endif
 
