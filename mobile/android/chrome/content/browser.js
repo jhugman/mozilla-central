@@ -6899,7 +6899,8 @@ var WebappsUI = {
     console.log("Downloading apk from " + aData.generatorUrl);
     
     let filePath = sendMessageToJava({
-      type: "WebApps:GetTempFilePath"
+      type: "WebApps:GetTempFilePath",
+      fileName: aData.generatorUrl.replace(/\/\\.?%&/gi,'');
     });
     console.log("FileName : " + filePath);
     try {
@@ -6940,107 +6941,6 @@ var WebappsUI = {
     } catch (e) {
       console.log("Download error : " + e);
     }
-/*    function StreamListener(fileContentType,filePath,callback,callbackArgs) {
-        this.fileContentType=fileContentType;
-        this.filePath=filePath;
-        this.callback=callback;
-        this.callbackArgs=callbackArgs;
-      };
-    StreamListener.prototype = {  
-      onStartRequest: function(request,context) {
-        this.httpChannel=request.QueryInterface(Components.interfaces.nsIHttpChannel);
-        this.responseStatus=this.httpChannel.responseStatus;
-        this.responseStatusText=this.httpChannel.responseStatusText;
-        this.contentType=this.httpChannel.getResponseHeader("content-type");
-        if(this.contentType==this.fileContentType) {
-          let file = Components.classes["@mozilla.org/file/local;1"]
-                      .createInstance(Components.interfaces.nsILocalFile);
-          file.initWithPath(this.filePath);
-
-          let fos = Components.classes["@mozilla.org/network/file-output-stream;1"].
-                      createInstance(Components.interfaces.nsIFileOutputStream);
-          fos.init(file, -1, -1, 0);
-          
-          this.outputStream = Components.classes["@mozilla.org/binaryoutputstream;1"].
-              createInstance(Components.interfaces.nsIBinaryOutputStream);
-          this.outputStream.setOutputStream(fos);
-          
-          this.type="file";
-        } else if(this.contentType=="text/xml") {
-          this.pipe=Components.classes["@mozilla.org/pipe;1"].
-                      createInstance(Components.interfaces.nsIPipe);
-          this.pipe.init(true,false,1024,10,null);
-          this.outputStream = Components.classes["@mozilla.org/binaryoutputstream;1"].
-                      createInstance(Components.interfaces.nsIBinaryOutputStream);
-          this.outputStream.setOutputStream(this.pipe.outputStream);
-          this.type="xml";
-        }
-      },
-      onDataAvailable: function(request,context,inputStream,offset,count) {
-        if(this.outputStream!=null) {
-
-          let bistream = Components.classes["@mozilla.org/binaryinputstream;1"].
-                      createInstance(Components.interfaces.nsIBinaryInputStream);
-          bistream.setInputStream(inputStream);
-          let n=0;
-          while(n<count) {
-            let ba=bistream.readByteArray(bistream.available());
-            this.outputStream.writeByteArray(ba,ba.length);
-            n+=ba.length;
-          }                                        
-        }
-      },
-      onStopRequest: function(request,context,nsresult) {
-        let status=false;
-        if(this.responseStatus==200) {
-          if(this.type=="file") {
-            status=true;
-          } else if(this.type=="xml") {
-            let parser=Components.classes["@mozilla.org/xmlextras/domparser;1"]
-                         .createInstance(Components.interfaces.nsIDOMParser);
-            this.xmlDoc=parser.parseFromStream(this.pipe.inputStream,null,this.pipe.inputStream.available(),this.contentType);
-          }
-        }
-        if(this.callback) {
-          try {
-            this.callback(status,this.callbackArgs,this);
-          } catch(e) { dump("Callback exception: "+e+"\n"); }
-        }
-        this.outputStream.close();
-      }
-    };
-    
-    let cb=function(status,args,listener) {
-      if(status) {
-        // do stuff on success
-        console.log("Downloaded successfully");      
-      } else {
-        // do stuff on failure
-        console.log("Downloading failed");
-      }
-    }*/
-
-    /* url is the address where to get the file or xml document */
-    /* file is the nsILocalFile where to store the downloaded data */
-/*
-    let ioService = Components.classes["@mozilla.org/network/io-service;1"]
-                      .getService(Components.interfaces.nsIIOService);        
-    let channel = ioService.newChannel(aData.generatorUrl,'',null);
-
-    let filePath = sendMessageToJava({
-      type: "WebApps:GetTempFilePath"
-    });
-    console.log("FileName : " + filePath);
-
-    let tempFile = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsILocalFile);
-    try {
-      tempFile.initWithPath(filePath);
-    }  catch (e) {
-      console.log("Error when initialising file path - " + e);
-    }
-
-    channel.asyncOpen(new StreamListener("application/vnd.android.package-archive",tempFile,cb,{}),null);
-    */
   },
 
   doInstall: function doInstall(aData) {

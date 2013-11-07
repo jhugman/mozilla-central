@@ -2662,15 +2662,21 @@ public class GeckoAppShell
         return "DIRECT";
     }
 
-    public static String getTempFilePath(Context context) {
+    public static String getTempFilePath(Context context, String fileName) {
         String filePath = null;
         File tempFile = null;
         try {
-            tempFile = File.createTempFile("application-", ".apk", Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS));
+            tempFile = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), fileName + ".apk");
+            if(tempFile.exists()) {
+                // perhaps we can send back a message that the file already exists?
+                // file hash so we can compare against version to download?
+                // delete for the moment
+                // TODO revisit if we can keep already downloaded version
+                tempFile.delete();
+            }
             filePath = tempFile.getPath();
-        } catch (IOException e) {
-            Log.e(LOGTAG, "Problem downloading to " + tempFile, e);
-
+        } catch (NullPointerException e) {
+            Log.e(LOGTAG, "Problem creating file " + tempFile, e);
         } finally {
             if (tempFile != null && tempFile.exists()) {
                 tempFile.delete();
@@ -2680,85 +2686,11 @@ public class GeckoAppShell
         return filePath;
     }
 
-    public static void downloadApk(Context context, URL url) {
-        ThreadUtils.postToBackgroundThread(new InstallFromHttp(context, url));
-    }
-
     public static void installApk(Context context, String filePath) {
         File file = new File(filePath);
         Intent intent = new Intent(Intent.ACTION_VIEW);
         intent.setDataAndType(Uri.fromFile(file), "application/vnd.android.package-archive");
         context.startActivity(intent);
-        // We should delete the file, but unsure if we should do it here or elsewhere.
-        // file.deleteOnExit();
     }
 
-    public static class InstallFromHttp implements Runnable {
-
-        private final URL mUrl;
-        private final Context mContext;
-
-        public InstallFromHttp(Context context, URL url) {
-            mUrl = url;
-            mContext = context;
-        }
-
-        @Override
-        public void run() {
-            InputStream in = null;
-            FileOutputStream out = null;
-            File tempFile = null;
-            Log.i(LOGTAG, "Downloading from " + mUrl);
-            
-            try {
-                in = mUrl.openStream();
-
-                tempFile = File.createTempFile("application-", ".apk", Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS));
-                out = new FileOutputStream(tempFile);
-
-                copy(in, out);
-
-            } catch (IOException e) {
-                Log.e(LOGTAG, "Problem downloading to " + tempFile, e);
-                if (tempFile != null && tempFile.exists()) {
-                    tempFile.delete();
-                }
-                tempFile = null;
-            } finally {
-                close(in);
-                close(out);
-            }
-
-            if (tempFile != null) {
-                Intent intent = new Intent(Intent.ACTION_VIEW);
-                intent.setDataAndType(Uri.fromFile(tempFile), "application/vnd.android.package-archive");
-                mContext.startActivity(intent);
-                tempFile.deleteOnExit();
-            }
-        }
-
-        public long copy(InputStream in, OutputStream out) throws IOException {
-
-            byte[] b = new byte[1024];
-            int count;
-            long total = 0l;
-            while ((count = in.read(b)) >= 0) {
-                out.write(b, 0, count);
-                total += count;
-            }
-            out.flush();
-            return total;
-        }
-
-        public void close(Closeable stream) {
-            if (stream != null) {
-                try {
-                    stream.close();
-                } catch (IOException e) {
-                    Log.v(LOGTAG, "An extremely rare IOException while closing problem was reported", e);
-                }
-            }
-        }
-
-    }
 }
