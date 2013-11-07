@@ -6900,47 +6900,42 @@ var WebappsUI = {
     
     let filePath = sendMessageToJava({
       type: "WebApps:GetTempFilePath",
-      fileName: aData.generatorUrl.replace(/\/\\.?%&/gi,'');
+      fileName: aData.generatorUrl.replace(/['`~!@#$%^&*()_|+-=?;:'",.<>\{\}\[\]\\\/]/gi, "")
     });
     console.log("FileName : " + filePath);
-    try {
-      let uri = NetUtil.newURI(aData.generatorUrl);
 
-      NetUtil.asyncFetch(uri, function read_asyncFetch(aInputStream, aStatus) {
-        console.log("internal callback status: " + aStatus);
-        console.log(" status success: " + Components.isSuccessCode(aStatus));
-        try {
-          if (Components.isSuccessCode(aStatus)) {
-            //let channel = aRequest.QueryInterface(Ci.nsIChannel);
+    let uri = NetUtil.newURI(aData.generatorUrl);
 
-            let file = Components.classes["@mozilla.org/file/local;1"]
-                         .createInstance(Components.interfaces.nsILocalFile);
-            file.initWithPath(filePath);
+    NetUtil.asyncFetch(uri, function read_asyncFetch(aInputStream, aStatus) {
+      try {
+        if (Components.isSuccessCode(aStatus)) {
+          //let channel = aRequest.QueryInterface(Ci.nsIChannel);
 
-            let outputStream = FileUtils.openSafeFileOutputStream(file);
+          let file = Components.classes["@mozilla.org/file/local;1"]
+                       .createInstance(Components.interfaces.nsILocalFile);
+          file.initWithPath(filePath);
 
-            NetUtil.asyncCopy(aInputStream, outputStream, function(aResult) {
-              if (!Components.isSuccessCode(aResult)) {
-                console.log("Downloading failed")
-              } else {
-                console.log("Downloaded successfully"); 
-                sendMessageToJava({
-                  type: "WebApps:InstallApk",
-                  filePath: filePath
-                });
-              }
-            });
+          let outputStream = FileUtils.openSafeFileOutputStream(file);
 
-           } else {
-             console.log("can't download");
-           }
-        } catch (e) {
-          console.log("Error in fetch - " + e);
-        }
-       });
-    } catch (e) {
-      console.log("Download error : " + e);
-    }
+          NetUtil.asyncCopy(aInputStream, outputStream, function(aResult) {
+            if (!Components.isSuccessCode(aResult)) {
+              console.log("Downloading failed")
+            } else {
+              console.log("Downloaded successfully"); 
+              sendMessageToJava({
+                type: "WebApps:InstallApk",
+                filePath: filePath
+              });
+            }
+          });
+         } else {
+           console.log("can't download");
+         }
+      } catch (e) {
+        console.log("Error in fetch - " + e);
+      }
+     });
+
   },
 
   doInstall: function doInstall(aData) {

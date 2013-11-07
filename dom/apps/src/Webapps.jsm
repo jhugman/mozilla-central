@@ -1130,8 +1130,6 @@ this.DOMApplicationRegistry = {
       case "Webapps:GetAll":
         this.doGetAll(msg, mm);
         break;
-      case "Webapps:InstallPackage":
-        this.doInstallPackage(msg, mm);
       case "Webapps:InstallPackage": {
         let prefName = "dom.mozApps.installSynthesizedApk";
         if (!Services.prefs.prefHasUserValue(prefName) || Services.prefs.getBoolPref(prefName, true)) {
