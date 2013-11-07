@@ -125,10 +125,9 @@ this.DOMApplicationRegistry = {
     cpmm.addMessageListener("Activities:Register:OK", this);
 
     Services.obs.addObserver(this, "xpcom-shutdown", false);
-
+#ifdef MOZ_ANDROID_SYNTHAPKS
     Services.obs.addObserver(this, "Webapps:AutoInstall", false);
-    Services.obs.addObserver(this, "Webapps:AutoInstallPackage", false);
-
+#endif
     AppDownloadManager.registerCancelFunction(this.cancelDownload.bind(this));
 
     this.appsFile = FileUtils.getFile(DIRECTORY_NAME,
@@ -894,67 +893,28 @@ this.DOMApplicationRegistry = {
   },
 
   observe: function(aSubject, aTopic, aData) {
-    if (aTopic == "xpcom-shutdown") {
+    switch (aTopic) {
+      case "xpcom-shutdown":
       this.messages.forEach((function(msgName) {
         ppmm.removeMessageListener(msgName, this);
       }).bind(this));
       Services.obs.removeObserver(this, "xpcom-shutdown");
       cpmm = null;
       ppmm = null;
-    } else if (aTopic === "Webapps:AutoInstall") {
-      debug("Webapps:AutoInstall: aSubject=" + JSON.stringify(aSubject) + "; aData=" + aData);
-      this._autoInstall(aData);
-    } else if (aTopic === "Webapps:AutoInstallPackage") {
-      debug("Webapps:AutoInstallPackage: aSubject=" + JSON.stringify(aSubject) + "; aData=" + aData);
-      this._autoInstallPackage(aData);      
+        break;
+#ifdef MOZ_ANDROID_SYNTHAPKS
+      case "Webapps:AutoInstall": // note the capitalization.
+        this.doAutoInstall(aData);
+        break;
+#endif
     }
+
+
   },
 
-  _autoInstall: function (aData) {
-    debug("AutoInstalling from Webapps.jsm");
-
-    let mm = {
-      sendAsyncMessage: function (messageName, data) {
-        debug("sendAsyncMessage " + messageName + ": " + JSON.stringify(data));
-      }
-    };
-
-    let data = JSON.parse(aData);
-    let type = data.type; // can be hosted or packaged.
-
-    this.doInstall({
-      app: {
-        origin: data.origin,
-        manifestURL: data.manifestUrl
-      },
-      silentInstall: true,
-      mm: mm
-    }, mm);
-    debug("Tried usual doInstall()");
-  },
-
-  _autoInstallPackage: function (aData) {
-    debug("AutoInstalling package from Webapps.jsm");
-
-    let data = JSON.parse(aData);
-    let type = data.type; // can be hosted or packaged.
-
-    let mm = {
-      sendAsyncMessage: function (messageName, data) {
-        debug("sendAsyncMessage " + messageName + ": " + JSON.stringify(data));
-      }
-    };
-    this.doInstallPackage({
-      isPackage: true,
-      app: {
-        origin: data.origin,
-        installOrigin: data.origin,
-        manifestURL: data.manifestUrl
-      },
-      silentInstall: true,
-      mm: mm
-    }, mm);
-    debug("Tried usual doInstallPackage()");
+#ifdef MOZ_ANDROID_SYNTHAPKS
+  doAutoInstall: function (aData) {
+    debug("AutoInstalling from Webapps.jsm: " + aData);
   },
 
   _downloadApk: function (aData, aMm) {
@@ -986,6 +946,8 @@ this.DOMApplicationRegistry = {
     Services.obs.notifyObservers(aMm, "webapps-download-apk",
                                  JSON.stringify(aData));
   },
+
+#endif
 
   _loadJSONAsync: function(aFile, aCallback) {
     try {
@@ -1168,6 +1130,8 @@ this.DOMApplicationRegistry = {
       case "Webapps:GetAll":
         this.doGetAll(msg, mm);
         break;
+      case "Webapps:InstallPackage":
+        this.doInstallPackage(msg, mm);
       case "Webapps:InstallPackage": {
         let prefName = "dom.mozApps.installSynthesizedApk";
         if (!Services.prefs.prefHasUserValue(prefName) || Services.prefs.getBoolPref(prefName, true)) {
@@ -2456,6 +2420,8 @@ this.DOMApplicationRegistry = {
     // saved in the registry.
     this._saveApps((function() {
       this.broadcastMessage("Webapps:AddApp", { id: id, app: appObject });
+      this.broadcastMessage("Webapps:Install:Return:OK", aData);
+      Services.obs.notifyObservers(null, "webapps-installed",
       if (aData.isPackage && aData.silentInstall) {
         // Skip directly to onInstallSuccessAck, since there isn't
         // a WebappsRegistry to receive Webapps:Install:Return:OK and respond

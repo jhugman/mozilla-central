@@ -203,6 +203,8 @@ gbjar.sources += [
     'VideoPlayer.java',
     'WebAppAllocator.java',
     'WebAppImpl.java',
+    'webapp/WebAppDispatcher.java',
+    'webapp/InstallHelper.java',
     'ZoomConstraints.java',
     'db/BrowserContract.java',
     'db/BrowserProvider.java',
