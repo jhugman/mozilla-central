@@ -548,7 +548,7 @@ public class GeckoAppShell
         case GeckoHalDefines.SENSOR_ORIENTATION:
             if(gOrientationSensor == null)
                 gOrientationSensor = sm.getDefaultSensor(Sensor.TYPE_ORIENTATION);
-            if (gOrientationSensor != null) 
+            if (gOrientationSensor != null)
                 sm.registerListener(gi.getSensorEventListener(), gOrientationSensor, sDefaultSensorHint);
             break;
 
@@ -675,7 +675,7 @@ public class GeckoAppShell
 
     public static void postInstallWebApp(String aTitle, String aURI, String aOrigin, String aIconURL, String aOriginalOrigin) {
     	WebAppAllocator allocator = WebAppAllocator.getInstance(getContext());
-		int index = allocator.getIndexForApp(aOriginalOrigin);
+		int index = allocator.getIndexForApp(aOrigin);
     	assert index != -1 && aIconURL != null;
     	allocator.updateAppAllocation(aOrigin, index, BitmapUtils.getBitmapFromDataURI(aIconURL));
     	createShortcut(aTitle, aURI, aOrigin, aIconURL, "webapp");
@@ -741,7 +741,7 @@ public class GeckoAppShell
                     shortcutIntent.setClassName(AppConstants.ANDROID_PACKAGE_NAME,
                                                 AppConstants.BROWSER_INTENT_CLASS);
                 }
-        
+
                 Intent intent = new Intent();
                 intent.putExtra(Intent.EXTRA_SHORTCUT_INTENT, shortcutIntent);
                 if (aTitle != null)
@@ -781,7 +781,7 @@ public class GeckoAppShell
                                                 AppConstants.BROWSER_INTENT_CLASS);
                     shortcutIntent.setData(Uri.parse(aURI));
                 }
-        
+
                 Intent intent = new Intent();
                 intent.putExtra(Intent.EXTRA_SHORTCUT_INTENT, shortcutIntent);
                 if (aTitle != null)
@@ -1191,7 +1191,7 @@ public class GeckoAppShell
         if (action.equalsIgnoreCase(Intent.ACTION_SEND)) {
             Intent shareIntent = getShareIntent(context, targetURI, mimeType, title);
             return Intent.createChooser(shareIntent,
-                                        context.getResources().getString(R.string.share_title)); 
+                                        context.getResources().getString(R.string.share_title));
         }
 
         final Uri uri = normalizeUriScheme(Uri.parse(targetURI));
@@ -1605,7 +1605,7 @@ public class GeckoAppShell
                 return true;
             }
         };
-            
+
         EnumerateGeckoProcesses(visitor);
     }
 
@@ -1620,9 +1620,9 @@ public class GeckoAppShell
                     return false;
                 }
                 return true;
-            }            
+            }
         }
-        GeckoPidCallback visitor = new GeckoPidCallback();            
+        GeckoPidCallback visitor = new GeckoPidCallback();
         EnumerateGeckoProcesses(visitor);
         return visitor.otherPidExist;
     }
@@ -1645,7 +1645,7 @@ public class GeckoAppShell
 
             // figure out the column offsets.  We only care about the pid and user fields
             StringTokenizer st = new StringTokenizer(headerOutput);
-            
+
             int tokenSoFar = 0;
             while (st.hasMoreTokens()) {
                 String next = st.nextToken();
@@ -1800,7 +1800,7 @@ public class GeckoAppShell
         final MimeTypeMap mtm = MimeTypeMap.getSingleton();
         return mtm.getMimeTypeFromExtension(ext);
     }
-    
+
     private static Drawable getDrawableForExtension(PackageManager pm, String aExt) {
         Intent intent = new Intent(Intent.ACTION_VIEW);
         final String mimeType = getMimeTypeFromExtension(aExt);
@@ -2433,7 +2433,7 @@ public class GeckoAppShell
       for (byte c='0'; c<='9'; c++) map1[i++] = c;
       map1[i++] = '+'; map1[i++] = '/';
       map1_urlsafe = map1.clone();
-      map1_urlsafe[62] = '-'; map1_urlsafe[63] = '_'; 
+      map1_urlsafe[62] = '-'; map1_urlsafe[63] = '_';
     }
 
     // Mapping table from Base64 characters to 6-bit nibbles.
@@ -2475,7 +2475,7 @@ public class GeckoAppShell
             out[op] = op < oDataLen ? toMap[o2] : EQUALS_ASCII; op++;
             out[op] = op < oDataLen ? toMap[o3] : EQUALS_ASCII; op++;
         }
-        return out; 
+        return out;
     }
 
     /**
@@ -2518,7 +2518,7 @@ public class GeckoAppShell
             out[op++] = (byte)o0;
             if (op<oLen) out[op++] = (byte)o1;
             if (op<oLen) out[op++] = (byte)o2; }
-        return out; 
+        return out;
     }
 
     public static byte[] decodeBase64(String s, int flags) {
@@ -2562,7 +2562,7 @@ public class GeckoAppShell
             msg.recycle();
             return false;
         }
-        if (msg.getTarget() == null) 
+        if (msg.getTarget() == null)
             Looper.myLooper().quit();
         else
             msg.getTarget().dispatchMessage(msg);

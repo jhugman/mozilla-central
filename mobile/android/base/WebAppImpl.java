@@ -5,32 +5,35 @@
 
 package org.mozilla.gecko;
 
-import android.content.Intent;
-import android.net.Uri;
-import android.os.Bundle;
-import android.util.Log;
-import android.view.View;
-import android.widget.TextView;
+import java.io.File;
+import java.net.URL;
+
+import org.json.JSONException;
+import org.json.JSONObject;
+import org.mozilla.gecko.webapp.InstallHelper;
+
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
-import android.view.animation.AnimationUtils;
-import android.view.animation.Animation;
-import android.widget.ImageView;
+import android.net.Uri;
+import android.os.Bundle;
+import android.util.Log;
 import android.view.Display;
-
-import java.net.URL;
-import java.io.File;
-
-import org.json.JSONObject;
-import org.mozilla.gecko.webapp.InstallHelper;
+import android.view.View;
+import android.view.animation.Animation;
+import android.view.animation.AnimationUtils;
+import android.widget.ImageView;
+import android.widget.TextView;
 
 public class WebAppImpl extends GeckoApp {
     private static final String LOGTAG = "GeckoWebAppImpl";
+
+    private static final String[] INSTALL_EVENT_NAMES = new String[] {"WebApps:PostInstall"};
 
     private URL mOrigin;
     private TextView mTitlebarText = null;
@@ -52,6 +55,7 @@ public class WebAppImpl extends GeckoApp {
         super.onCreate(extras);
 
         String action = getIntent().getAction();
+        extras = null;
         if (extras == null) {
             extras = getIntent().getExtras();
         }
@@ -66,13 +70,7 @@ public class WebAppImpl extends GeckoApp {
         }
 
         if (!isInstalled) {
-            InstallHelper installHelper = new InstallHelper(this.getApplicationContext());
-            JSONObject message = installHelper.createInstallMessage(extras);
-
-            Log.i(LOGTAG, "Installing app: \n" + message.toString());
-            // TODO check that this can't be null.
-            GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Webapps:AutoInstall", message.toString()));
-
+            startInstall(extras);
             return;
         }
 
@@ -100,6 +98,20 @@ public class WebAppImpl extends GeckoApp {
                 Log.e(LOGTAG, "Unable to parse intent url: ", ex);
             }
         }
+    }
+
+    @Override
+    protected String getURIFromIntent(Intent intent) {
+        String uri = super.getURIFromIntent(intent);
+        if (uri != null) {
+            return uri;
+        }
+
+        // TODO this is where we construct the URL from the Intent from the
+        // the synthesized APK.
+        // TODO Translate AndroidIntents into WebActivities here.
+
+        return uri;
     }
 
     @Override
@@ -146,7 +158,7 @@ public class WebAppImpl extends GeckoApp {
         if (d != null) {
             if (dominantColor == -1) {
                 Bitmap bitmap = ((BitmapDrawable) d).getBitmap();
-                WebAppAllocator.getInstance(getApplicationContext()).updateColor(null, getIndex(), bitmap);
+                WebAppAllocator.getInstance(getApplicationContext()).updateAppAllocation(null, getIndex(), bitmap);
             }
 
             Animation fadein = AnimationUtils.loadAnimation(this, R.anim.grow_fade_in_center);
@@ -188,7 +200,6 @@ public class WebAppImpl extends GeckoApp {
      */
     @Override
     protected String getDefaultProfileName() {
-        Log.i(LOGTAG, "Profile: webapp" + getIndex());
         return "webapp" + getIndex();
     }
 
@@ -258,5 +269,36 @@ public class WebAppImpl extends GeckoApp {
                 break;
         }
         super.onTabChanged(tab, msg, data);
+    }
+
+    protected void startInstall(Bundle extras) {
+        InstallHelper installHelper = new InstallHelper(this.getApplicationContext());
+        JSONObject message = installHelper.createInstallMessage(extras);
+
+        if (message == null) {
+            throw new NullPointerException("Cannot find package name in the calling intent to install this app");
+        }
+
+        GeckoProfile profile = getProfile(); // GeckoProfile.get(getApplicationContext(), getDefaultProfileName());
+        try {
+            message.putOpt("profilePath", profile.getDir());
+        } catch (JSONException e) {
+            // NOP
+        }
+
+        Log.i(LOGTAG, "Installing app: \n" + message.toString());
+
+        for (String eventName : INSTALL_EVENT_NAMES) {
+            GeckoAppShell.registerEventListener(eventName, installHelper);
+        }
+        GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Webapps:AutoInstall", message.toString()));
+    }
+
+    public void installCompleted(InstallHelper installHelper) {
+
+        for (String eventName : INSTALL_EVENT_NAMES) {
+            GeckoAppShell.unregisterEventListener(eventName, installHelper);
+        }
+
     }
 }

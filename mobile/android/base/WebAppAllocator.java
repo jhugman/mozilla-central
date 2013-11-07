@@ -42,7 +42,7 @@ public class WebAppAllocator {
         return "app" + index;
     }
 
-    static public String iconKey(int index) {
+    public static String iconKey(int index) {
         return "icon" + index;
     }
 

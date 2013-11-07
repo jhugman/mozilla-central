@@ -205,6 +205,7 @@ abstract public class GeckoApp
     private boolean mShouldReportGeoData = false;
 
     abstract public int getLayout();
+    @Override
     abstract public boolean hasTabsSideBar();
     abstract protected String getDefaultProfileName();
 
@@ -226,17 +227,21 @@ abstract public class GeckoApp
 
     void focusChrome() { }
 
+    @Override
     public Context getContext() {
         return sAppContext;
     }
 
+    @Override
     public Activity getActivity() {
         return this;
     }
 
+    @Override
     public LocationListener getLocationListener() {
         if (mShouldReportGeoData && mPhoneStateListener == null) {
             mPhoneStateListener = new PhoneStateListener() {
+                @Override
                 public void onSignalStrengthsChanged(SignalStrength signalStrength) {
                     setCurrentSignalStrenth(signalStrength);
                 }
@@ -247,6 +252,7 @@ abstract public class GeckoApp
         return this;
     }
 
+    @Override
     public SensorEventListener getSensorEventListener() {
         return this;
     }
@@ -255,18 +261,22 @@ abstract public class GeckoApp
         return GeckoApp.sAppContext.getSharedPreferences(PREFS_NAME, 0);
     }
 
+    @Override
     public View getCameraView() {
         return mCameraView;
     }
 
+    @Override
     public void addAppStateListener(GeckoAppShell.AppStateListener listener) {
         mAppStateListeners.add(listener);
     }
 
+    @Override
     public void removeAppStateListener(GeckoAppShell.AppStateListener listener) {
         mAppStateListeners.remove(listener);
     }
 
+    @Override
     public FormAssistPopup getFormAssistPopup() {
         return mFormAssistPopup;
     }
@@ -526,11 +536,11 @@ abstract public class GeckoApp
      */
     public boolean autoHideTabs() { return false; }
 
+    @Override
     public boolean areTabsShown() { return false; }
 
     @Override
     public void handleMessage(String event, JSONObject message) {
-        Log.d(LOGTAG, "handleMessage " + event);
         try {
             if (event.equals("Toast:Show")) {
                 final String msg = message.getString("message");
@@ -639,24 +649,28 @@ abstract public class GeckoApp
                 String iconURL = message.getString("iconURL");
                 String origin = message.getString("origin");
                 // preInstallWebapp will return a File object pointing to the profile directory of the webapp
-                mCurrentResponse = GeckoAppShell.preInstallWebApp(name, manifestURL, origin).toString();
-                GeckoAppShell.postInstallWebApp(name, manifestURL, origin, iconURL, origin);
+                String packageName = message.getString("packageName");
+                mCurrentResponse = GeckoAppShell.preInstallWebApp(name, manifestURL, packageName).toString();
+                GeckoAppShell.postInstallWebApp(name, manifestURL, packageName, iconURL, origin);
             } else if (event.equals("WebApps:PreInstall")) {
                 String name = message.getString("name");
                 String manifestURL = message.getString("manifestURL");
                 String origin = message.getString("origin");
                 // preInstallWebapp will return a File object pointing to the profile directory of the webapp
-                mCurrentResponse = GeckoAppShell.preInstallWebApp(name, manifestURL, origin).toString();
+                String packageName = message.getString("packageName");
+                mCurrentResponse = GeckoAppShell.preInstallWebApp(name, manifestURL, packageName).toString();
             } else if (event.equals("WebApps:PostInstall")) {
                 String name = message.getString("name");
                 String manifestURL = message.getString("manifestURL");
                 String iconURL = message.getString("iconURL");
                 String originalOrigin = message.getString("originalOrigin");
                 String origin = message.getString("origin");
-                GeckoAppShell.postInstallWebApp(name, manifestURL, origin, iconURL, originalOrigin);
+                String packageName = message.getString("packageName");
+                GeckoAppShell.postInstallWebApp(name, manifestURL, packageName, iconURL, originalOrigin);
             } else if (event.equals("WebApps:Uninstall")) {
                 String origin = message.getString("origin");
-                GeckoAppShell.uninstallWebApp(origin);
+                String packageName = message.optString("packageName");
+                GeckoAppShell.uninstallWebApp(packageName);
             } else if (event.equals("WebApps:InstallApk")) {
                 GeckoAppShell.installApk(this, message.getString("filePath"));
             } else if (event.equals("WebApps:GetTempFilePath")) {
@@ -720,6 +734,7 @@ abstract public class GeckoApp
         }
     }
 
+    @Override
     public String getResponse(JSONObject origMessage) {
         String res = mCurrentResponse;
         mCurrentResponse = "";
@@ -842,6 +857,7 @@ abstract public class GeckoApp
     void showButtonToast(final String message, final String buttonText,
                          final String buttonIcon, final String buttonId) {
         BitmapUtils.getDrawable(GeckoApp.this, buttonIcon, new BitmapUtils.BitmapLoader() {
+            @Override
             public void onBitmapFound(final Drawable d) {
 
                 ThreadUtils.postToUiThread(new Runnable() {
@@ -894,6 +910,7 @@ abstract public class GeckoApp
         mFullScreenPluginView = view;
     }
 
+    @Override
     public void addPluginView(final View view, final RectF rect, final boolean isFullScreen) {
         ThreadUtils.postToUiThread(new Runnable() {
             @Override
@@ -951,6 +968,7 @@ abstract public class GeckoApp
         setFullScreen(false);
     }
 
+    @Override
     public void removePluginView(final View view, final boolean isFullScreen) {
         ThreadUtils.postToUiThread(new Runnable() {
             @Override
@@ -1099,6 +1117,7 @@ abstract public class GeckoApp
         requestRender();
     }
 
+    @Override
     public void setFullScreen(final boolean fullscreen) {
         ThreadUtils.postToUiThread(new Runnable() {
             @Override
@@ -1664,6 +1683,7 @@ abstract public class GeckoApp
         }
     }
 
+    @Override
     public GeckoProfile getProfile() {
         // fall back to default profile if we didn't load a specific one
         if (mProfile == null) {
@@ -1736,6 +1756,7 @@ abstract public class GeckoApp
                                .build());
     }
 
+    @Override
     public void enableCameraView() {
         // Start listening for orientation events
         mCameraOrientationEventListener = new OrientationEventListener(this) {
@@ -1764,6 +1785,7 @@ abstract public class GeckoApp
                               new AbsoluteLayout.LayoutParams(8, 16, 0, 0));
     }
 
+    @Override
     public void disableCameraView() {
         if (mCameraOrientationEventListener != null) {
             mCameraOrientationEventListener.disable();
@@ -1773,6 +1795,7 @@ abstract public class GeckoApp
         mCameraLayout.removeView(mCameraView);
     }
 
+    @Override
     public String getDefaultUAString() {
         return HardwareUtils.isTablet() ? AppConstants.USER_AGENT_FENNEC_TABLET :
                                           AppConstants.USER_AGENT_FENNEC_MOBILE;
@@ -2159,6 +2182,7 @@ abstract public class GeckoApp
         }
     }
 
+    @Override
     public void doRestart() {
         doRestart(RESTARTER_ACTION, null);
     }
@@ -2256,6 +2280,7 @@ abstract public class GeckoApp
         }
     }
 
+    @Override
     public PromptService getPromptService() {
         return mPromptService;
     }
@@ -2321,6 +2346,7 @@ abstract public class GeckoApp
         }
     }
 
+    @Override
     public AbsoluteLayout getPluginContainer() { return mPluginContainer; }
 
     // Accelerometer.
@@ -2500,6 +2526,7 @@ abstract public class GeckoApp
         }
 
         ThreadUtils.postToBackgroundThread(new Runnable() {
+            @Override
             public void run() {
                 try {
                     URL url = new URL(LOCATION_URL);
@@ -2564,6 +2591,7 @@ abstract public class GeckoApp
     }
 
     // Called when a Gecko Hal WakeLock is changed
+    @Override
     public void notifyWakeLockChanged(String topic, String state) {
         PowerManager.WakeLock wl = mWakeLocks.get(topic);
         if (state.equals("locked-foreground") && wl == null) {
@@ -2577,6 +2605,7 @@ abstract public class GeckoApp
         }
     }
 
+    @Override
     public void notifyCheckUpdateResult(String result) {
         GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Update:CheckResult", result));
     }

@@ -1,10 +1,9 @@
 package org.mozilla.gecko.webapp;
 
 import java.net.MalformedURLException;
-import java.net.URL;
-
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.mozilla.gecko.util.GeckoEventListener;
 
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
@@ -13,7 +12,7 @@ import android.content.pm.PackageManager.NameNotFoundException;
 import android.os.Bundle;
 import android.util.Log;
 
-public class InstallHelper {
+public class InstallHelper implements GeckoEventListener {
 
     private static final String LOGTAG = "GeckoInstallHelper";
 
@@ -31,39 +30,38 @@ public class InstallHelper {
                 return getInstallMessageFromPackage(packageName);
 
             } catch (Exception e) {
-                Log.e(LOGTAG, "Can't install " + packageName);
+                Log.e(LOGTAG, "Can't install " + packageName, e);
             }
         }
         return null;
     }
 
     private JSONObject getInstallMessageFromPackage(String packageName) throws NameNotFoundException, MalformedURLException, JSONException {
+
+        Bundle metadata = getPackageMetadata(packageName);
+        String urlString = metadata.getString("manifestUrl");
+
+        JSONObject messageObject = new JSONObject();
+        messageObject.putOpt("manifestUrl", urlString);
+        messageObject.putOpt("type", metadata.getString("webapp"));
+        messageObject.putOpt("packageName", packageName);
+
+        return messageObject;
+    }
+
+    protected Bundle getPackageMetadata(String packageName)
+            throws NameNotFoundException {
         ApplicationInfo app = mContext.getPackageManager()
                 .getApplicationInfo(packageName,
                         PackageManager.GET_META_DATA);
 
         Bundle metadata = app.metaData;
-
-        JSONObject messageObject = new JSONObject();
-        String urlString = metadata.getString("manifestUrl");
-        URL url = new URL(urlString);
-        messageObject.putOpt("origin", getOrigin(url));
-        messageObject.putOpt("manifestUrl", urlString);
-        messageObject.putOpt("type", metadata.getString("webapp"));
-
-        return messageObject;
+        return metadata;
     }
 
-    private String getOrigin(URL url) {
-        StringBuilder sb = new StringBuilder();
-        sb.append(url.getProtocol()).append("://");
-        sb.append(url.getHost());
-        int port = url.getPort();
-        if (port >= 0) {
-            sb.append(":").append(port);
-        }
-
-        return sb.toString();
+    @Override
+    public void handleMessage(String event, JSONObject message) {
+        Log.i(LOGTAG, "Install complete: " + event + "\n" + message);
     }
 
 }

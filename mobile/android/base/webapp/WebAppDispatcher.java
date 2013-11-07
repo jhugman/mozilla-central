@@ -6,7 +6,6 @@ import android.app.Activity;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.os.Bundle;
-import android.util.Log;
 
 public class WebAppDispatcher extends Activity {
     private static final String LOGTAG = "GeckoWebAppDispatcher";
@@ -21,20 +20,21 @@ public class WebAppDispatcher extends Activity {
             bundle = getIntent().getExtras();
         }
 
-        String app = bundle.getString("packageName");
-        String uri = bundle.getString("iconUri");
-        Log.i(LOGTAG, "Icon drawable with " + uri);
+        String packageName = bundle.getString("packageName");
 
-
-        int index = allocator.getIndexForApp(app);
-        boolean isInstalled = index < 0;
-        if (isInstalled) {
-            index = allocator.findAndAllocateIndex(app, app, (Bitmap) null);
+        int index = allocator.getIndexForApp(packageName);
+        boolean isInstalled = index >= 0;
+        if (!isInstalled) {
+            index = allocator.findAndAllocateIndex(packageName, packageName, (Bitmap) null);
         }
 
+        // Copy the intent, without interfering with it.
         Intent intent = new Intent(getIntent());
+
+        // Only change it's destination.
         intent.setClassName(getApplicationContext(), getPackageName() + ".WebApps$WebApp" + index);
 
+        // If and only if we haven't seen this before.
         intent.putExtra("isInstalled", isInstalled);
 
         startActivity(intent);
