@@ -138,6 +138,10 @@ XPCOMUtils.defineLazyServiceGetter(this, "gSystemMessenger",
                                    "@mozilla.org/system-message-internal;1",
                                    "nsISystemMessagesInternal");
 
+XPCOMUtils.defineLazyServiceGetter(this, "gRil",
+                                   "@mozilla.org/ril;1",
+                                   "nsIRadioInterfaceLayer");
+
 XPCOMUtils.defineLazyGetter(this, "MMS", function () {
   let MMS = {};
   Cu.import("resource://gre/modules/MmsPduHelper.jsm", MMS);
@@ -146,9 +150,7 @@ XPCOMUtils.defineLazyGetter(this, "MMS", function () {
 
 function MmsConnection(aServiceId) {
   this.serviceId = aServiceId;
-  let ril = Cc["@mozilla.org/ril;1"]
-              .getService(Ci["nsIRadioInterfaceLayer"]);
-  this.radioInterface = ril.getRadioInterface(aServiceId);
+  this.radioInterface = gRil.getRadioInterface(aServiceId);
 };
 
 MmsConnection.prototype = {
@@ -1314,6 +1316,47 @@ function getDefaultServiceId() {
 }
 
 /**
+ * Return M-Read-Rec.ind back to MMSC
+ *
+ * @param messageID
+ *        Message-ID of the message.
+ * @param toAddress
+ *        The address of the recipient of the Read Report, i.e. the originator
+ *        of the original multimedia message.
+ *
+ * @see OMA-TS-MMS_ENC-V1_3-20110913-A section 6.7.2
+ */
+function ReadRecTransaction(mmsConnection, messageID, toAddress) {
+  this.mmsConnection = mmsConnection;
+  let headers = {};
+
+  // Mandatory fields
+  headers["x-mms-message-type"] = MMS.MMS_PDU_TYPE_READ_REC_IND;
+  headers["x-mms-mms-version"] = MMS.MMS_VERSION;
+  headers["message-id"] = messageID;
+  let type = MMS.Address.resolveType(toAddress);
+  let to = {address: toAddress,
+            type: type}
+  headers["to"] = to;
+  headers["from"] = null;
+  headers["x-mms-read-status"] = true;
+
+  this.istream = MMS.PduHelper.compose(null, {headers: headers});
+  if (!this.istream) {
+    throw Cr.NS_ERROR_FAILURE;
+  }
+}
+ReadRecTransaction.prototype = {
+  run: function() {
+    gMmsTransactionHelper.sendRequest(this.mmsConnection,
+                                      "POST",
+                                      null,
+                                      this.istream,
+                                      null);
+  }
+};
+
+/**
  * MmsService
  */
 function MmsService() {
@@ -1501,19 +1544,19 @@ MmsService.prototype = {
     // because the system message mechamism will rewrap the object
     // based on the content window, which needs to know the properties.
     gSystemMessenger.broadcastMessage(aName, {
-      type:           aDomMessage.type,
-      id:             aDomMessage.id,
-      threadId:       aDomMessage.threadId,
-      delivery:       aDomMessage.delivery,
-      deliveryInfo:   aDomMessage.deliveryInfo,
-      sender:         aDomMessage.sender,
-      receivers:      aDomMessage.receivers,
-      timestamp:      aDomMessage.timestamp,
-      read:           aDomMessage.read,
-      subject:        aDomMessage.subject,
-      smil:           aDomMessage.smil,
-      attachments:    aDomMessage.attachments,
-      expiryDate:     aDomMessage.expiryDate
+      type:         aDomMessage.type,
+      id:           aDomMessage.id,
+      threadId:     aDomMessage.threadId,
+      delivery:     aDomMessage.delivery,
+      deliveryInfo: aDomMessage.deliveryInfo,
+      sender:       aDomMessage.sender,
+      receivers:    aDomMessage.receivers,
+      timestamp:    aDomMessage.timestamp,
+      read:         aDomMessage.read,
+      subject:      aDomMessage.subject,
+      smil:         aDomMessage.smil,
+      attachments:  aDomMessage.attachments,
+      expiryDate:   aDomMessage.expiryDate
     });
   },
 
@@ -1655,11 +1698,19 @@ MmsService.prototype = {
 
     this.broadcastReceivedMessageEvent(domMessage);
 
-    // In roaming environment, we send notify response only in
+    // In the roaming environment, we send notify response only for the
     // automatic retrieval mode.
     if ((retrievalMode !== RETRIEVAL_MODE_AUTOMATIC) &&
         mmsConnection.isVoiceRoaming()) {
       return;
+    }
+
+    // Under the "automatic" retrieval mode, for the non-active SIM, we have to
+    // download the MMS as if it is downloaded by the "manual" retrieval mode.
+    if ((retrievalMode == RETRIEVAL_MODE_AUTOMATIC ||
+         retrievalMode == RETRIEVAL_MODE_AUTOMATIC_HOME) &&
+        mmsConnection.serviceId != this.mmsDefaultServiceId) {
+      retrievalMode = RETRIEVAL_MODE_MANUAL;
     }
 
     if (RETRIEVAL_MODE_MANUAL === retrievalMode ||
@@ -1679,6 +1730,7 @@ MmsService.prototype = {
       transaction.run();
       return;
     }
+
     let url = savableMessage.headers["x-mms-content-location"].uri;
 
     // For RETRIEVAL_MODE_AUTOMATIC or RETRIEVAL_MODE_AUTOMATIC_HOME but not
@@ -2135,14 +2187,21 @@ MmsService.prototype = {
 
       // Get the RIL service ID based on the saved MMS message record's ICC ID,
       // which could fail when the corresponding SIM card isn't installed.
-      let ril = Cc["@mozilla.org/ril;1"]
-                  .getService(Ci["nsIRadioInterfaceLayer"]);
       let serviceId;
       try {
-        serviceId = ril.getClientIdByIccId(aMessageRecord.iccId);
+        serviceId = gRil.getClientIdByIccId(aMessageRecord.iccId);
       } catch (e) {
         if (DEBUG) debug("RIL service is not available for ICC ID.");
         aRequest.notifyGetMessageFailed(Ci.nsIMobileMessageCallback.NO_SIM_CARD_ERROR);
+        return;
+      }
+
+      // To support DSDS, we have to stop users retrieving MMS when the needed
+      // SIM is not active, thus avoiding the data disconnection of the current
+      // SIM. Users have to manually swith the default SIM before retrieving.
+      if (serviceId != this.mmsDefaultServiceId) {
+        if (DEBUG) debug("RIL service is not active to retrieve MMS.");
+        aRequest.notifyGetMessageFailed(Ci.nsIMobileMessageCallback.NON_ACTIVE_SIM_CARD_ERROR);
         return;
       }
 
@@ -2256,6 +2315,32 @@ MmsService.prototype = {
                                aDomMessage);
         }).bind(this));
     }).bind(this));
+  },
+
+  sendReadReport: function sendReadReport(messageID, toAddress, iccId) {
+    if (DEBUG) {
+      debug("messageID: " + messageID + " toAddress: " +
+            JSON.stringify(toAddress));
+    }
+
+    // Get the RIL service ID based on the saved MMS message record's ICC ID,
+    // which could fail when the corresponding SIM card isn't installed.
+    let serviceId;
+    try {
+      serviceId = gRil.getClientIdByIccId(iccId);
+    } catch (e) {
+      if (DEBUG) debug("RIL service is not available for ICC ID.");
+      return;
+    }
+
+    let mmsConnection = gMmsConnections.getConnByServiceId(serviceId);
+    try {
+      let transaction =
+        new ReadRecTransaction(mmsConnection, messageID, toAddress);
+      transaction.run();
+    } catch (e) {
+      if (DEBUG) debug("sendReadReport fail. e = " + e);
+    }
   },
 
   // nsIWapPushApplication

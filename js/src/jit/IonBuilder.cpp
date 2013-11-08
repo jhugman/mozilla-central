@@ -46,6 +46,7 @@ IonBuilder::IonBuilder(JSContext *cx, TempAllocator *temp, MIRGraph *graph,
     cx(cx),
     baselineFrame_(baselineFrame),
     abortReason_(AbortReason_Disable),
+    reprSetHash_(nullptr),
     constraints_(constraints),
     analysis_(info->script()),
     thisTypes(nullptr),
@@ -1222,7 +1223,6 @@ IonBuilder::traverseBytecode()
               case JSOP_SETARG:
               case JSOP_SETLOCAL:
               case JSOP_SETRVAL:
-              case JSOP_POPV:
               case JSOP_VOID:
                 // Don't require SSA uses for values popped by these ops.
                 break;
@@ -1271,7 +1271,6 @@ IonBuilder::snoopControlFlow(JSOp op)
         return maybeLoop(op, info().getNote(gsn, pc));
 
       case JSOP_RETURN:
-      case JSOP_STOP:
       case JSOP_RETRVAL:
         return processReturn(op);
 
@@ -1678,7 +1677,6 @@ IonBuilder::inspectOpcode(JSOp op)
         return jsop_in();
 
       case JSOP_SETRVAL:
-      case JSOP_POPV:
         JS_ASSERT(!script()->noScriptRval);
         current->setSlot(info().returnValueSlot(), current->pop());
         return true;
@@ -3478,7 +3476,7 @@ IonBuilder::processReturn(JSOp op)
         def = current->pop();
         break;
 
-      case JSOP_STOP:
+      case JSOP_RETRVAL:
         // Return undefined eagerly if script doesn't use return value.
         if (script()->noScriptRval) {
             MInstruction *ins = MConstant::New(UndefinedValue());
@@ -3487,9 +3485,6 @@ IonBuilder::processReturn(JSOp op)
             break;
         }
 
-        // Fall through
-      case JSOP_RETRVAL:
-        // Return the value in the return value slot.
         def = current->getSlot(info().returnValueSlot());
         break;
 
@@ -4969,19 +4964,17 @@ IonBuilder::jsop_call(uint32_t argc, bool constructing)
     }
     JS_ASSERT_IF(gotLambda, originals.length() <= 1);
 
-    // If any call targets need to be cloned, clone them. Keep track of the
-    // originals as we need to case on them for poly inline.
+    // If any call targets need to be cloned, look for existing clones to use.
+    // Keep track of the originals as we need to case on them for poly inline.
     bool hasClones = false;
     ObjectVector targets;
-    RootedFunction fun(cx);
-    RootedScript scriptRoot(cx, script());
     for (uint32_t i = 0; i < originals.length(); i++) {
-        fun = &originals[i]->as<JSFunction>();
+        JSFunction *fun = &originals[i]->as<JSFunction>();
         if (fun->hasScript() && fun->nonLazyScript()->shouldCloneAtCallsite) {
-            fun = CloneFunctionAtCallsite(cx, fun, scriptRoot, pc);
-            if (!fun)
-                return false;
-            hasClones = true;
+            if (JSFunction *clone = ExistingCloneFunctionAtCallsite(compartment, fun, script(), pc)) {
+                fun = clone;
+                hasClones = true;
+            }
         }
         if (!targets.append(fun))
             return false;
@@ -5704,7 +5697,11 @@ IonBuilder::newOsrPreheader(MBasicBlock *predecessor, jsbytecode *loopEntry)
         for (uint32_t i = 0; i < info().nargs(); i++) {
             uint32_t slot = needsArgsObj ? info().argSlotUnchecked(i) : info().argSlot(i);
 
-            if (needsArgsObj) {
+            // Only grab arguments from the arguments object if the arguments object
+            // aliases formals.  If the argsobj does not alias formals, then the
+            // formals may have been assigned to during interpretation, and that change
+            // will not be reflected in the argsobj.
+            if (needsArgsObj && info().argsObjAliasesFormals()) {
                 JS_ASSERT(argsObj && argsObj->isOsrArgumentsObject());
                 // If this is an aliased formal, then the arguments object
                 // contains a hole at this index.  Any references to this
@@ -5955,8 +5952,8 @@ ClassHasResolveHook(JSCompartment *comp, const Class *clasp, PropertyName *name)
     return true;
 }
 
-bool
-IonBuilder::testSingletonProperty(JSObject *obj, JSObject *singleton, PropertyName *name)
+JSObject *
+IonBuilder::testSingletonProperty(JSObject *obj, PropertyName *name)
 {
     // We would like to completely no-op property/global accesses which can
     // produce only a particular JSObject. When indicating the access result is
@@ -5974,26 +5971,26 @@ IonBuilder::testSingletonProperty(JSObject *obj, JSObject *singleton, PropertyNa
 
     while (obj) {
         if (!ClassHasEffectlessLookup(obj->getClass()))
-            return false;
+            return nullptr;
 
         types::TypeObjectKey *objType = types::TypeObjectKey::get(obj);
         if (objType->unknownProperties())
-            return false;
+            return nullptr;
 
         types::HeapTypeSetKey property = objType->property(NameToId(name), context());
         if (property.isOwnProperty(constraints())) {
             if (obj->hasSingletonType())
-                return property.singleton(constraints()) == singleton;
-            return false;
+                return property.singleton(constraints());
+            return nullptr;
         }
 
         if (ClassHasResolveHook(compartment, obj->getClass(), name))
-            return false;
+            return nullptr;
 
         obj = obj->getProto();
     }
 
-    return false;
+    return nullptr;
 }
 
 bool
@@ -6017,7 +6014,7 @@ IonBuilder::testSingletonPropertyTypes(MDefinition *obj, JSObject *singleton, Pr
 
     JSObject *objectSingleton = types ? types->getSingleton() : nullptr;
     if (objectSingleton)
-        return testSingletonProperty(objectSingleton, singleton, name);
+        return testSingletonProperty(objectSingleton, name) == singleton;
 
     JSProtoKey key;
     switch (obj->type()) {
@@ -6061,7 +6058,7 @@ IonBuilder::testSingletonPropertyTypes(MDefinition *obj, JSObject *singleton, Pr
 
             if (JSObject *proto = object->proto().toObjectOrNull()) {
                 // Test this type.
-                if (!testSingletonProperty(proto, singleton, name))
+                if (testSingletonProperty(proto, name) != singleton)
                     return false;
             } else {
                 // Can't be on the prototype chain with no prototypes...
@@ -6073,12 +6070,12 @@ IonBuilder::testSingletonPropertyTypes(MDefinition *obj, JSObject *singleton, Pr
         return true;
       }
       default:
-        return true;
+        return false;
     }
 
     JSObject *proto = GetClassPrototypePure(&script()->global(), key);
     if (proto)
-        return testSingletonProperty(proto, singleton, name);
+        return testSingletonProperty(proto, name) == singleton;
 
     return false;
 }
@@ -6216,7 +6213,7 @@ IonBuilder::getStaticName(JSObject *staticObject, PropertyName *name, bool *psuc
     if (!barrier) {
         if (singleton) {
             // Try to inline a known constant value.
-            if (testSingletonProperty(staticObject, singleton, name))
+            if (testSingletonProperty(staticObject, name) == singleton)
                 return pushConstant(ObjectValue(*singleton));
         }
         if (knownType == JSVAL_TYPE_UNDEFINED)
@@ -6377,11 +6374,8 @@ IonBuilder::jsop_intrinsic(PropertyName *name)
     }
 
     // Bake in the intrinsic. Make sure that TI agrees with us on the type.
-    RootedPropertyName nameRoot(cx, name);
-    RootedValue vp(cx, UndefinedValue());
-    if (!cx->global()->getIntrinsicValue(cx, nameRoot, &vp))
-        return false;
-
+    Value vp;
+    JS_ALWAYS_TRUE(script()->global().maybeGetIntrinsicValue(name, &vp));
     JS_ASSERT(types->hasType(types::GetValueType(vp)));
 
     MConstant *ins = MConstant::New(vp);
@@ -7482,23 +7476,14 @@ IonBuilder::jsop_arguments_length()
     return pushConstant(Int32Value(inlineCallInfo_->argv().length()));
 }
 
-static JSObject *
-CreateRestArgumentsTemplateObject(JSContext *cx, unsigned length)
-{
-    JSObject *templateObject = NewDenseUnallocatedArray(cx, length, nullptr, TenuredObject);
-    if (templateObject)
-        types::FixRestArgumentsType(cx, templateObject);
-    return templateObject;
-}
-
 bool
 IonBuilder::jsop_rest()
 {
-    // We don't know anything about the callee.
+    JSObject *templateObject = inspector->getTemplateObject(pc);
+    JS_ASSERT(templateObject->is<ArrayObject>());
+
     if (inliningDepth_ == 0) {
-        JSObject *templateObject = CreateRestArgumentsTemplateObject(cx, 0);
-        if (!templateObject)
-            return false;
+        // We don't know anything about the callee.
         MArgumentsLength *numActuals = MArgumentsLength::New();
         current->add(numActuals);
 
@@ -7514,9 +7499,6 @@ IonBuilder::jsop_rest()
     unsigned numActuals = inlineCallInfo_->argv().length();
     unsigned numFormals = info().nargs() - 1;
     unsigned numRest = numActuals > numFormals ? numActuals - numFormals : 0;
-    JSObject *templateObject = CreateRestArgumentsTemplateObject(cx, numRest);
-    if (!templateObject)
-        return false;
 
     MNewArray *array = new MNewArray(numRest, templateObject, MNewArray::NewArray_Allocating);
     current->add(array);
@@ -7701,8 +7683,9 @@ IonBuilder::testCommonGetterSetter(types::TemporaryTypeSet *types, PropertyName 
 }
 
 bool
-IonBuilder::annotateGetPropertyCache(JSContext *cx, MDefinition *obj, MGetPropertyCache *getPropCache,
-                                    types::TemporaryTypeSet *objTypes, types::TemporaryTypeSet *pushedTypes)
+IonBuilder::annotateGetPropertyCache(MDefinition *obj, MGetPropertyCache *getPropCache,
+                                     types::TemporaryTypeSet *objTypes,
+                                     types::TemporaryTypeSet *pushedTypes)
 {
     PropertyName *name = getPropCache->name();
 
@@ -7741,25 +7724,7 @@ IonBuilder::annotateGetPropertyCache(JSContext *cx, MDefinition *obj, MGetProper
         if (ownTypes.isOwnProperty(constraints()))
             continue;
 
-        JSObject *singleton = nullptr;
-        JSObject *proto = typeObj->proto().toObject();
-        while (true) {
-            types::TypeObjectKey *protoType = types::TypeObjectKey::get(proto);
-            if (!protoType->unknownProperties()) {
-                types::HeapTypeSetKey property = protoType->property(NameToId(name));
-
-                singleton = property.singleton(constraints());
-                if (singleton) {
-                    if (singleton->is<JSFunction>())
-                        break;
-                    singleton = nullptr;
-                }
-            }
-            TaggedProto taggedProto = proto->getTaggedProto();
-            if (!taggedProto.isObject())
-                break;
-            proto = taggedProto.toObject();
-        }
+        JSObject *singleton = testSingletonProperty(typeObj->proto().toObject(), name);
         if (!singleton)
             continue;
 
@@ -8263,7 +8228,7 @@ IonBuilder::getPropTryInlineAccess(bool *emitted, PropertyName *name,
         Shape *objShape = shapes[0];
         obj = addShapeGuard(obj, objShape, Bailout_ShapeGuard);
 
-        Shape *shape = objShape->search(cx, NameToId(name));
+        Shape *shape = objShape->searchLinear(NameToId(name));
         JS_ASSERT(shape);
 
         if (!loadSlot(obj, shape, rvalType, barrier, types))
@@ -8278,7 +8243,7 @@ IonBuilder::getPropTryInlineAccess(bool *emitted, PropertyName *name,
 
         for (size_t i = 0; i < shapes.length(); i++) {
             Shape *objShape = shapes[i];
-            Shape *shape =  objShape->search(cx, NameToId(name));
+            Shape *shape =  objShape->searchLinear(NameToId(name));
             JS_ASSERT(shape);
             if (!load->addShape(objShape, shape))
                 return false;
@@ -8330,7 +8295,7 @@ IonBuilder::getPropTryCache(bool *emitted, PropertyName *name,
     }
 
     if (JSOp(*pc) == JSOP_CALLPROP) {
-        if (!annotateGetPropertyCache(cx, obj, load, obj->resultTypeSet(), types))
+        if (!annotateGetPropertyCache(obj, load, obj->resultTypeSet(), types))
             return false;
     }
 
@@ -8665,7 +8630,7 @@ IonBuilder::setPropTryInlineAccess(bool *emitted, MDefinition *obj,
         Shape *objShape = shapes[0];
         obj = addShapeGuard(obj, objShape, Bailout_ShapeGuard);
 
-        Shape *shape = objShape->search(cx, NameToId(name));
+        Shape *shape = objShape->searchLinear(NameToId(name));
         JS_ASSERT(shape);
 
         bool needsBarrier = objTypes->propertyNeedsBarrier(constraints(), NameToId(name));
@@ -8681,7 +8646,7 @@ IonBuilder::setPropTryInlineAccess(bool *emitted, MDefinition *obj,
 
         for (size_t i = 0; i < shapes.length(); i++) {
             Shape *objShape = shapes[i];
-            Shape *shape =  objShape->search(cx, NameToId(name));
+            Shape *shape =  objShape->searchLinear(NameToId(name));
             JS_ASSERT(shape);
             if (!ins->addShape(objShape, shape))
                 return false;
@@ -8750,9 +8715,8 @@ IonBuilder::jsop_delelem()
 bool
 IonBuilder::jsop_regexp(RegExpObject *reobj)
 {
-    JSObject *prototype = script()->global().getOrCreateRegExpPrototype(cx);
-    if (!prototype)
-        return false;
+    JSObject *prototype = reobj->getProto();
+    JS_ASSERT(prototype == script()->global().maybeGetRegExpPrototype());
 
     JS_ASSERT(&reobj->JSObject::global() == &script()->global());
 
@@ -9080,7 +9044,7 @@ IonBuilder::walkScopeChain(unsigned hops)
 bool
 IonBuilder::hasStaticScopeObject(ScopeCoordinate sc, JSObject **pcall)
 {
-    JSScript *outerScript = ScopeCoordinateFunctionScript(cx, script(), pc);
+    JSScript *outerScript = ScopeCoordinateFunctionScript(script(), pc);
     if (!outerScript || !outerScript->treatAsRunOnce)
         return false;
 
@@ -9137,7 +9101,7 @@ IonBuilder::jsop_getaliasedvar(ScopeCoordinate sc)
 {
     JSObject *call = nullptr;
     if (hasStaticScopeObject(sc, &call) && call) {
-        PropertyName *name = ScopeCoordinateName(cx, script(), pc);
+        PropertyName *name = ScopeCoordinateName(script(), pc);
         bool succeeded;
         if (!getStaticName(call, name, &succeeded))
             return false;
@@ -9147,7 +9111,7 @@ IonBuilder::jsop_getaliasedvar(ScopeCoordinate sc)
 
     MDefinition *obj = walkScopeChain(sc.hops);
 
-    Shape *shape = ScopeCoordinateToStaticScopeShape(cx, script(), pc);
+    Shape *shape = ScopeCoordinateToStaticScopeShape(script(), pc);
 
     MInstruction *load;
     if (shape->numFixedSlots() <= sc.slot) {
@@ -9177,7 +9141,7 @@ IonBuilder::jsop_setaliasedvar(ScopeCoordinate sc)
                 return false;
         }
         MDefinition *value = current->pop();
-        PropertyName *name = ScopeCoordinateName(cx, script(), pc);
+        PropertyName *name = ScopeCoordinateName(script(), pc);
 
         if (call) {
             // Push the object on the stack to match the bound object expected in
@@ -9200,7 +9164,7 @@ IonBuilder::jsop_setaliasedvar(ScopeCoordinate sc)
     MDefinition *rval = current->peek(-1);
     MDefinition *obj = walkScopeChain(sc.hops);
 
-    Shape *shape = ScopeCoordinateToStaticScopeShape(cx, script(), pc);
+    Shape *shape = ScopeCoordinateToStaticScopeShape(script(), pc);
 
     if (NeedsPostBarrier(info(), rval))
         current->add(MPostWriteBarrier::New(obj, rval));
@@ -9356,16 +9320,14 @@ TypeRepresentationSetHash *
 IonBuilder::getOrCreateReprSetHash()
 {
     if (!reprSetHash_) {
-        TypeRepresentationSetHash* hash =
-            cx->new_<TypeRepresentationSetHash>();
-        if (!hash || !hash->init()) {
-            js_delete(hash);
+        TypeRepresentationSetHash *hash =
+            temp_->lifoAlloc()->new_<TypeRepresentationSetHash>();
+        if (!hash || !hash->init())
             return nullptr;
-        }
 
         reprSetHash_ = hash;
     }
-    return reprSetHash_.get();
+    return reprSetHash_;
 }
 
 bool

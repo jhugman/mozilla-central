@@ -7,9 +7,6 @@
 #include "vm/ThreadPool.h"
 
 #include "jslock.h"
-#ifdef JS_THREADSAFE
-# include "prthread.h"
-#endif
 
 #include "vm/Monitor.h"
 #include "vm/Runtime.h"
@@ -186,10 +183,7 @@ ThreadPoolWorker::terminate()
 // them down when requested.
 
 ThreadPool::ThreadPool(JSRuntime *rt)
-  :
-#if defined(JS_THREADSAFE) || defined(DEBUG)
-    runtime_(rt)
-#endif
+  : runtime_(rt)
 {
 }
 

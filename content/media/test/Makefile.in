@@ -116,20 +116,21 @@ MOCHITEST_FILES = \
 		test_volume.html \
 		test_video_to_canvas.html \
 		test_audiowrite.html \
-		test_mediarecorder_creation.html \
 		test_mediarecorder_avoid_recursion.html \
-		test_mediarecorder_record_timeslice.html \
+		test_mediarecorder_creation.html \
 		test_mediarecorder_record_audiocontext.html \
-		test_mediarecorder_record_stopms.html \
+		test_mediarecorder_record_immediate_stop.html \
+		test_mediarecorder_record_no_timeslice.html \
 		test_mediarecorder_record_nosrc.html \
+		test_mediarecorder_record_session.html \
+		test_mediarecorder_record_stopms.html \
+		test_mediarecorder_record_timeslice.html \
+		test_mediarecorder_reload_crash.html \
+		test_mediarecorder_state_transition.html \
 		test_mozHasAudio.html \
 		test_source_media.html \
 		test_autoplay_contentEditable.html \
 		test_decoder_disable.html \
-		test_mediarecorder_record_no_timeslice.html \
-		test_mediarecorder_reload_crash.html \
-		test_mediarecorder_record_immediate_stop.html \
-		test_mediarecorder_record_session.html \
 		test_playback.html \
 		test_seekLies.html \
 		test_media_sniffer.html \
@@ -378,26 +379,6 @@ else
 MOCHITEST_FILES += \
 		test_can_play_type_no_webm.html \
 		$(NULL)
-endif
-
-ifdef MOZ_DASH
-MOCHITEST_FILES += \
-    test_can_play_type_dash.html \
-    dash/dash-manifest.mpd \
-    dash/dash-manifest-sjs.mpd \
-    test_dash_detect_stream_switch.html \
-    dash_detect_stream_switch.sjs \
-    dash/dash-webm-video-320x180.webm \
-    dash/dash-webm-video-428x240.webm \
-    dash/dash-webm-audio-128k.webm \
-    dash/dash-manifest-garbled.mpd \
-    dash/dash-manifest-garbled-webm.mpd \
-    dash/garbled.webm \
-    $(NULL)
-else
-MOCHITEST_FILES += \
-    test_can_play_type_no_dash.html \
-    $(NULL)
 endif
 
 ifdef MOZ_WAVE

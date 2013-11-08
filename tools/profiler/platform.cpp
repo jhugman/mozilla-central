@@ -427,7 +427,7 @@ void set_tls_stack_top(void* stackTop)
 }
 
 bool is_main_thread_name(const char* aName) {
-  if (aName) {
+  if (!aName) {
     return false;
   }
   return strcmp(aName, gGeckoThreadName) == 0;
@@ -606,6 +606,10 @@ const char** mozilla_sampler_get_features()
     "privacy",
     // Add main thread I/O to the profile
     "mainthreadio",
+#if defined(XP_WIN)
+    // Add power collection
+    "power",
+#endif
     NULL
   };
 

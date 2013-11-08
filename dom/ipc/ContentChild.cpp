@@ -72,6 +72,8 @@
 #include "nsPermissionManager.h"
 #endif
 
+#include "PermissionMessageUtils.h"
+
 #if defined(MOZ_WIDGET_ANDROID)
 #include "APKOpen.h"
 #endif
@@ -433,7 +435,7 @@ ContentChild::InitXPCOM()
 }
 
 PMemoryReportRequestChild*
-ContentChild::AllocPMemoryReportRequestChild()
+ContentChild::AllocPMemoryReportRequestChild(const uint32_t& generation)
 {
     return new MemoryReportRequestChild();
 }
@@ -480,7 +482,9 @@ NS_IMPL_ISUPPORTS1(
 )
 
 bool
-ContentChild::RecvPMemoryReportRequestConstructor(PMemoryReportRequestChild* child)
+ContentChild::RecvPMemoryReportRequestConstructor(
+    PMemoryReportRequestChild* child,
+    const uint32_t& generation)
 {
     nsCOMPtr<nsIMemoryReporterManager> mgr = do_GetService("@mozilla.org/memory-reporter-manager;1");
 
@@ -504,7 +508,7 @@ ContentChild::RecvPMemoryReportRequestConstructor(PMemoryReportRequestChild* chi
       r->CollectReports(cb, wrappedReports);
     }
 
-    child->Send__delete__(child, reports);
+    child->Send__delete__(child, generation, reports);
     return true;
 }
 
@@ -1170,14 +1174,15 @@ ContentChild::RecvNotifyVisited(const URIParams& aURI)
 bool
 ContentChild::RecvAsyncMessage(const nsString& aMsg,
                                const ClonedMessageData& aData,
-                               const InfallibleTArray<CpowEntry>& aCpows)
+                               const InfallibleTArray<CpowEntry>& aCpows,
+                               const IPC::Principal& aPrincipal)
 {
   nsRefPtr<nsFrameMessageManager> cpm = nsFrameMessageManager::sChildProcessManager;
   if (cpm) {
     StructuredCloneData cloneData = ipc::UnpackClonedMessageDataForChild(aData);
     CpowIdHolder cpows(GetCPOWManager(), aCpows);
     cpm->ReceiveMessage(static_cast<nsIContentFrameMessageManager*>(cpm.get()),
-                        aMsg, false, &cloneData, &cpows, nullptr);
+                        aMsg, false, &cloneData, &cpows, aPrincipal, nullptr);
   }
   return true;
 }

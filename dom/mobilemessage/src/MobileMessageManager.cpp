@@ -397,6 +397,7 @@ MobileMessageManager::GetMessages(nsIDOMMozSmsFilter* aFilter,
 
 NS_IMETHODIMP
 MobileMessageManager::MarkMessageRead(int32_t aId, bool aValue,
+                                      bool aSendReadReport,
                                       nsIDOMDOMRequest** aRequest)
 {
   nsCOMPtr<nsIMobileMessageDatabaseService> mobileMessageDBService =
@@ -405,7 +406,9 @@ MobileMessageManager::MarkMessageRead(int32_t aId, bool aValue,
 
   nsRefPtr<DOMRequest> request = new DOMRequest(GetOwner());
   nsCOMPtr<nsIMobileMessageCallback> msgCallback = new MobileMessageCallback(request);
-  nsresult rv = mobileMessageDBService->MarkMessageRead(aId, aValue, msgCallback);
+  nsresult rv = mobileMessageDBService->MarkMessageRead(aId, aValue,
+                                                        aSendReadReport,
+                                                        msgCallback);
   NS_ENSURE_SUCCESS(rv, rv);
 
   request.forget(aRequest);
@@ -519,6 +522,28 @@ MobileMessageManager::Observe(nsISupports* aSubject, const char* aTopic,
     return DispatchTrustedSmsEventToSelf(aTopic, DELIVERY_ERROR_EVENT_NAME, aSubject);
   }
 
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+MobileMessageManager::GetSmscAddress(uint32_t aServiceId, uint8_t aArgc,
+                                     nsIDOMDOMRequest** aRequest)
+{
+  nsCOMPtr<nsISmsService> smsService = do_GetService(SMS_SERVICE_CONTRACTID);
+  NS_ENSURE_TRUE(smsService, NS_ERROR_FAILURE);
+
+  nsresult rv;
+  if (aArgc != 1) {
+    rv = smsService->GetSmsDefaultServiceId(&aServiceId);
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
+
+  nsRefPtr<DOMRequest> request = new DOMRequest(GetOwner());
+  nsCOMPtr<nsIMobileMessageCallback> msgCallback = new MobileMessageCallback(request);
+  rv = smsService->GetSmscAddress(aServiceId, msgCallback);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  request.forget(aRequest);
   return NS_OK;
 }
 

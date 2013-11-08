@@ -11,7 +11,7 @@ interface nsIDOMDOMCursor;
 interface nsIDOMDOMRequest;
 interface nsIDOMBlob;
 
-[scriptable, builtinclass, uuid(d1e35354-3d21-11e3-86da-77253f4c5683)]
+[scriptable, builtinclass, uuid(cfcc7067-083f-4e09-91aa-75067a721b70)]
 interface nsIDOMMozMobileMessageManager : nsIDOMEventTarget
 {
   nsIDOMDOMRequest getSegmentInfoForText(in DOMString text);
@@ -57,12 +57,16 @@ interface nsIDOMMozMobileMessageManager : nsIDOMEventTarget
   // Iterates through nsIDOMMoz{Mms,Sms}Message.
   nsIDOMDOMCursor getMessages(in nsIDOMMozSmsFilter filter, in boolean reverse);
 
-  nsIDOMDOMRequest markMessageRead(in long id, in boolean value);
+  nsIDOMDOMRequest markMessageRead(in long id, in boolean value,
+                                   [optional] in boolean aSendReadReport);
 
   // Iterates through nsIDOMMozMobileMessageThread.
   nsIDOMDOMCursor getThreads();
 
   nsIDOMDOMRequest retrieveMMS(in long id);
+
+  [optional_argc]
+  nsIDOMDOMRequest getSmscAddress([optional] in unsigned long serviceId);
 
   [implicit_jscontext] attribute jsval onreceived;
   [implicit_jscontext] attribute jsval onretrieving;

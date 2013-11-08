@@ -559,6 +559,7 @@ class IonBuilder : public MIRGenerator
 
     // String natives.
     InliningStatus inlineStringObject(CallInfo &callInfo);
+    InliningStatus inlineStringSplit(CallInfo &callInfo);
     InliningStatus inlineStrCharCodeAt(CallInfo &callInfo);
     InliningStatus inlineStrFromCharCode(CallInfo &callInfo);
     InliningStatus inlineStrCharAt(CallInfo &callInfo);
@@ -583,10 +584,11 @@ class IonBuilder : public MIRGenerator
     InliningStatus inlineNewParallelArray(CallInfo &callInfo);
     InliningStatus inlineParallelArray(CallInfo &callInfo);
     InliningStatus inlineParallelArrayTail(CallInfo &callInfo,
-                                           HandleFunction target,
+                                           JSFunction *target,
                                            MDefinition *ctor,
                                            types::TemporaryTypeSet *ctorTypes,
-                                           uint32_t discards);
+                                           uint32_t discards,
+                                           Native native);
 
     // Utility intrinsics.
     InliningStatus inlineIsCallable(CallInfo &callInfo);
@@ -635,12 +637,13 @@ class IonBuilder : public MIRGenerator
     bool testShouldDOMCall(types::TypeSet *inTypes,
                            JSFunction *func, JSJitInfo::OpType opType);
 
-    bool annotateGetPropertyCache(JSContext *cx, MDefinition *obj, MGetPropertyCache *getPropCache,
-                                  types::TemporaryTypeSet *objTypes, types::TemporaryTypeSet *pushedTypes);
+    bool annotateGetPropertyCache(MDefinition *obj, MGetPropertyCache *getPropCache,
+                                  types::TemporaryTypeSet *objTypes,
+                                  types::TemporaryTypeSet *pushedTypes);
 
     MGetPropertyCache *getInlineableGetPropertyCache(CallInfo &callInfo);
 
-    bool testSingletonProperty(JSObject *obj, JSObject *singleton, PropertyName *name);
+    JSObject *testSingletonProperty(JSObject *obj, PropertyName *name);
     bool testSingletonPropertyTypes(MDefinition *obj, JSObject *singleton, PropertyName *name,
                                     bool *testObject, bool *testString);
     bool getDefiniteSlot(types::TemporaryTypeSet *types, PropertyName *name,
@@ -711,7 +714,7 @@ class IonBuilder : public MIRGenerator
     JSContext *cx;
     BaselineFrame *baselineFrame_;
     AbortReason abortReason_;
-    ScopedJSDeletePtr<TypeRepresentationSetHash> reprSetHash_;
+    TypeRepresentationSetHash *reprSetHash_;
 
     // Constraints for recording dependencies on type information.
     types::CompilerConstraintList *constraints_;

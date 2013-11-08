@@ -969,6 +969,10 @@ class MConstant : public MNullaryInstruction
     const js::Value *vp() const {
         return &value_;
     }
+    const bool valueToBoolean() const {
+        // A hack to avoid this wordy pattern everywhere in the JIT.
+        return ToBoolean(HandleValue::fromMarkedLocation(&value_));
+    }
 
     void printOpcode(FILE *fp) const;
 
@@ -4148,6 +4152,48 @@ class MFromCharCode
     }
 };
 
+class MStringSplit
+  : public MBinaryInstruction,
+    public MixPolicy<StringPolicy<0>, StringPolicy<1> >
+{
+    types::TypeObject *typeObject_;
+
+    MStringSplit(MDefinition *string, MDefinition *sep, JSObject *templateObject)
+      : MBinaryInstruction(string, sep),
+        typeObject_(templateObject->type())
+    {
+        setResultType(MIRType_Object);
+        setResultTypeSet(MakeSingletonTypeSet(templateObject));
+    }
+
+  public:
+    INSTRUCTION_HEADER(StringSplit)
+
+    static MStringSplit *New(MDefinition *string, MDefinition *sep, JSObject *templateObject) {
+        return new MStringSplit(string, sep, templateObject);
+    }
+    types::TypeObject *typeObject() const {
+        return typeObject_;
+    }
+    MDefinition *string() const {
+        return getOperand(0);
+    }
+    MDefinition *separator() const {
+        return getOperand(1);
+    }
+    TypePolicy *typePolicy() {
+        return this;
+    }
+    bool possiblyCalls() const {
+        return true;
+    }
+    virtual AliasSet getAliasSet() const {
+        // Although this instruction returns a new array, we don't have to mark
+        // it as store instruction, see also MNewArray.
+        return AliasSet::None();
+    }
+};
+
 // Returns an object to use as |this| value. See also ComputeThis and
 // BoxNonStrictThis in Interpreter.h.
 class MComputeThis
@@ -5769,7 +5815,7 @@ class MLoadTypedArrayElementHole
 // Load a value fallibly or infallibly from a statically known typed array.
 class MLoadTypedArrayElementStatic
   : public MUnaryInstruction,
-    public IntPolicy<0>
+    public ConvertToInt32Policy<0>
 {
     MLoadTypedArrayElementStatic(TypedArrayObject *typedArray, MDefinition *ptr)
       : MUnaryInstruction(ptr), typedArray_(typedArray), fallible_(true)

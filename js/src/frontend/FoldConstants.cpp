@@ -126,7 +126,7 @@ FoldBinaryNumeric(ExclusiveContext *cx, JSOp op, ParseNode *pn1, ParseNode *pn2,
         i = ToInt32(d);
         j = ToInt32(d2);
         j &= 31;
-        d = (op == JSOP_LSH) ? i << j : i >> j;
+        d = int32_t((op == JSOP_LSH) ? uint32_t(i) << j : i >> j);
         break;
 
       case JSOP_URSH:
@@ -264,10 +264,6 @@ Fold(ExclusiveContext *cx, ParseNode **pnp,
             pn->pn_funbox->useAsmOrInsideUseAsm() && options.asmJSOption)
         {
             return true;
-        }
-        if (pn->getKind() == PNK_MODULE) {
-            if (!Fold(cx, &pn->pn_body, handler, options, false, SyntacticContext::Other))
-                return false;
         } else {
             // Note: pn_body is nullptr for functions which are being lazily parsed.
             JS_ASSERT(pn->getKind() == PNK_FUNCTION);

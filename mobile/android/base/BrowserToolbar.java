@@ -301,8 +301,12 @@ public class BrowserToolbar extends GeckoRelativeLayout
         mForward.setEnabled(false); // initialize the forward button to not be enabled
 
         mFavicon = (ImageButton) findViewById(R.id.favicon);
-        if (Build.VERSION.SDK_INT >= 16)
-            mFavicon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        if (Build.VERSION.SDK_INT >= 11) {
+            if (Build.VERSION.SDK_INT >= 16) {
+                mFavicon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            }
+            mFavicon.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        }
         mFaviconSize = Math.round(res.getDimension(R.dimen.browser_toolbar_favicon_size));
 
         mSiteSecurity = (ImageButton) findViewById(R.id.site_security);
@@ -373,15 +377,19 @@ public class BrowserToolbar extends GeckoRelativeLayout
                         menu.findItem(R.id.share).setVisible(false);
                         menu.findItem(R.id.add_to_launcher).setVisible(false);
                     }
-                    if (!tab.getFeedsEnabled()) {
+
+                    if (!tab.hasFeeds()) {
                         menu.findItem(R.id.subscribe).setVisible(false);
                     }
+
+                    menu.findItem(R.id.add_search_engine).setVisible(tab.hasOpenSearch());
                 } else {
                     // if there is no tab, remove anything tab dependent
                     menu.findItem(R.id.copyurl).setVisible(false);
                     menu.findItem(R.id.share).setVisible(false);
                     menu.findItem(R.id.add_to_launcher).setVisible(false);
                     menu.findItem(R.id.subscribe).setVisible(false);
+                    menu.findItem(R.id.add_search_engine).setVisible(false);
                 }
 
                 menu.findItem(R.id.share).setVisible(!GeckoProfile.get(getContext()).inGuestMode());
@@ -737,6 +745,10 @@ public class BrowserToolbar extends GeckoRelativeLayout
     // have no autocomplete results
     @Override
     public void onAutocomplete(final String result) {
+        if (!isEditing()) {
+            return;
+        }
+
         final String text = mUrlEditText.getText().toString();
 
         if (result == null) {
@@ -755,6 +767,10 @@ public class BrowserToolbar extends GeckoRelativeLayout
 
     @Override
     public void afterTextChanged(final Editable s) {
+        if (!isEditing()) {
+            return;
+        }
+
         final String text = s.toString();
         boolean useHandler = false;
         boolean reuseAutocomplete = false;
@@ -1148,7 +1164,7 @@ public class BrowserToolbar extends GeckoRelativeLayout
             image = Bitmap.createScaledBitmap(image, mFaviconSize, mFaviconSize, false);
             mFavicon.setImageBitmap(image);
         } else {
-            mFavicon.setImageBitmap(null);
+            mFavicon.setImageDrawable(null);
         }
     }
     
