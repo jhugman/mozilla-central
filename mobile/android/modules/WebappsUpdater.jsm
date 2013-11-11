@@ -42,7 +42,7 @@ this.WebappsUpdater = {
       let appsCount = this.result.length;
       let appsChecked = 0;
       let appsToUpdate = [];
-      this.result.forEach(function updateApp(aApp) {
+      this.result.forEach(function(aApp) {
         let update = aApp.checkForUpdate();
         update.onsuccess = function() {
           if (aApp.downloadAvailable) {
