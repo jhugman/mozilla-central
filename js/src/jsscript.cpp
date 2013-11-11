@@ -1520,20 +1520,30 @@ MarkScriptData(JSRuntime *rt, const jsbytecode *bytecode)
 }
 
 void
+js::UnmarkScriptData(JSRuntime *rt)
+{
+    JS_ASSERT(rt->gcIsFull);
+    ScriptDataTable &table = rt->scriptDataTable();
+    for (ScriptDataTable::Enum e(table); !e.empty(); e.popFront()) {
+        SharedScriptData *entry = e.front();
+        entry->marked = false;
+    }
+}
+
+void
 js::SweepScriptData(JSRuntime *rt)
 {
     JS_ASSERT(rt->gcIsFull);
     ScriptDataTable &table = rt->scriptDataTable();
 
-    bool keepAtoms = false;
-    for (ThreadDataIter iter(rt); !iter.done(); iter.next())
-        keepAtoms |= iter->gcKeepAtoms;
+    for (ThreadDataIter iter(rt); !iter.done(); iter.next()) {
+        if (iter->gcKeepAtoms)
+            return;
+    }
 
     for (ScriptDataTable::Enum e(table); !e.empty(); e.popFront()) {
         SharedScriptData *entry = e.front();
-        if (entry->marked) {
-            entry->marked = false;
-        } else if (!keepAtoms) {
+        if (!entry->marked) {
             js_free(entry);
             e.removeFront();
         }
@@ -1670,7 +1680,7 @@ JSScript::initCompartment(ExclusiveContext *cx)
 
 JSScript *
 JSScript::Create(ExclusiveContext *cx, HandleObject enclosingScope, bool savedCallerFun,
-                 const CompileOptions &options, unsigned staticLevel,
+                 const ReadOnlyCompileOptions &options, unsigned staticLevel,
                  HandleScriptSource sourceObject, uint32_t bufStart, uint32_t bufEnd)
 {
     JS_ASSERT(bufStart <= bufEnd);

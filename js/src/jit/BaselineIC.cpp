@@ -419,6 +419,11 @@ ICStub::trace(JSTracer *trc)
         MarkObject(trc, &stub->templateObject(), "baseline-newobject-template");
         break;
       }
+      case ICStub::Rest_Fallback: {
+        ICRest_Fallback *stub = toRest_Fallback();
+        MarkObject(trc, &stub->templateObject(), "baseline-rest-template");
+        break;
+      }
       default:
         break;
     }
@@ -582,7 +587,7 @@ ICStubCompiler::getStubCode()
     if (!generateStubCode(masm))
         return nullptr;
     Linker linker(masm);
-    Rooted<IonCode *> newStubCode(cx, linker.newCode(cx, JSC::BASELINE_CODE));
+    Rooted<IonCode *> newStubCode(cx, linker.newCode<CanGC>(cx, JSC::BASELINE_CODE));
     if (!newStubCode)
         return nullptr;
 

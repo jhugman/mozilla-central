@@ -2766,7 +2766,7 @@ JS_LookupElement(JSContext *cx, JSObject *objArg, uint32_t index, MutableHandleV
     RootedObject obj(cx, objArg);
     CHECK_REQUEST(cx);
     RootedId id(cx);
-    if (!IndexToId(cx, index, &id))
+    if (!IndexToId(cx, index, id.address()))
         return false;
     return JS_LookupPropertyById(cx, obj, id, vp);
 }
@@ -2784,7 +2784,7 @@ JS_LookupUCProperty(JSContext *cx, JSObject *objArg, const jschar *name, size_t 
                     MutableHandleValue vp)
 {
     RootedObject obj(cx, objArg);
-    JSAtom *atom = AtomizeChars<CanGC>(cx, name, AUTO_NAMELEN(name, namelen));
+    JSAtom *atom = AtomizeChars(cx, name, AUTO_NAMELEN(name, namelen));
     return atom && JS_LookupPropertyById(cx, obj, AtomToId(atom), vp);
 }
 
@@ -2841,7 +2841,7 @@ JS_HasElement(JSContext *cx, JSObject *objArg, uint32_t index, bool *foundp)
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
     RootedId id(cx);
-    if (!IndexToId(cx, index, &id))
+    if (!IndexToId(cx, index, id.address()))
         return false;
     return JS_HasPropertyById(cx, obj, id, foundp);
 }
@@ -2858,7 +2858,7 @@ JS_PUBLIC_API(bool)
 JS_HasUCProperty(JSContext *cx, JSObject *objArg, const jschar *name, size_t namelen, bool *foundp)
 {
     RootedObject obj(cx, objArg);
-    JSAtom *atom = AtomizeChars<CanGC>(cx, name, AUTO_NAMELEN(name, namelen));
+    JSAtom *atom = AtomizeChars(cx, name, AUTO_NAMELEN(name, namelen));
     return atom && JS_HasPropertyById(cx, obj, AtomToId(atom), foundp);
 }
 
@@ -2897,7 +2897,7 @@ JS_AlreadyHasOwnElement(JSContext *cx, JSObject *objArg, uint32_t index, bool *f
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
     RootedId id(cx);
-    if (!IndexToId(cx, index, &id))
+    if (!IndexToId(cx, index, id.address()))
         return false;
     return JS_AlreadyHasOwnPropertyById(cx, obj, id, foundp);
 }
@@ -2915,7 +2915,7 @@ JS_AlreadyHasOwnUCProperty(JSContext *cx, JSObject *objArg, const jschar *name, 
                            bool *foundp)
 {
     RootedObject obj(cx, objArg);
-    JSAtom *atom = AtomizeChars<CanGC>(cx, name, AUTO_NAMELEN(name, namelen));
+    JSAtom *atom = AtomizeChars(cx, name, AUTO_NAMELEN(name, namelen));
     return atom && JS_AlreadyHasOwnPropertyById(cx, obj, AtomToId(atom), foundp);
 }
 
@@ -3039,7 +3039,7 @@ JS_DefineElement(JSContext *cx, JSObject *objArg, uint32_t index, jsval valueArg
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
     RootedId id(cx);
-    if (!IndexToId(cx, index, &id))
+    if (!IndexToId(cx, index, id.address()))
         return false;
     return DefinePropertyById(cx, obj, id, value, GetterWrapper(getter),
                               SetterWrapper(setter), attrs, 0, 0);
@@ -3095,7 +3095,7 @@ DefineUCProperty(JSContext *cx, HandleObject obj, const jschar *name, size_t nam
 {
     RootedValue value(cx, value_);
     AutoRooterGetterSetter gsRoot(cx, attrs, &getter, &setter);
-    JSAtom *atom = AtomizeChars<CanGC>(cx, name, AUTO_NAMELEN(name, namelen));
+    JSAtom *atom = AtomizeChars(cx, name, AUTO_NAMELEN(name, namelen));
     if (!atom)
         return false;
     RootedId id(cx, AtomToId(atom));
@@ -3357,7 +3357,7 @@ JS_GetUCProperty(JSContext *cx, JSObject *objArg, const jschar *name, size_t nam
                  MutableHandleValue vp)
 {
     RootedObject obj(cx, objArg);
-    JSAtom *atom = AtomizeChars<CanGC>(cx, name, AUTO_NAMELEN(name, namelen));
+    JSAtom *atom = AtomizeChars(cx, name, AUTO_NAMELEN(name, namelen));
     return atom && JS_GetPropertyById(cx, obj, AtomToId(atom), vp);
 }
 
@@ -3400,7 +3400,7 @@ JS_SetUCProperty(JSContext *cx, JSObject *objArg, const jschar *name, size_t nam
                  HandleValue v)
 {
     RootedObject obj(cx, objArg);
-    JSAtom *atom = AtomizeChars<CanGC>(cx, name, AUTO_NAMELEN(name, namelen));
+    JSAtom *atom = AtomizeChars(cx, name, AUTO_NAMELEN(name, namelen));
     return atom && JS_SetPropertyById(cx, obj, AtomToId(atom), v);
 }
 
@@ -3475,7 +3475,7 @@ JS_DeleteUCProperty2(JSContext *cx, JSObject *objArg, const jschar *name, size_t
     assertSameCompartment(cx, obj);
     JSAutoResolveFlags rf(cx, 0);
 
-    JSAtom *atom = AtomizeChars<CanGC>(cx, name, AUTO_NAMELEN(name, namelen));
+    JSAtom *atom = AtomizeChars(cx, name, AUTO_NAMELEN(name, namelen));
     if (!atom)
         return false;
 
@@ -4140,7 +4140,7 @@ JS_DefineUCFunction(JSContext *cx, JSObject *objArg,
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, obj);
-    JSAtom *atom = AtomizeChars<CanGC>(cx, name, AUTO_NAMELEN(name, namelen));
+    JSAtom *atom = AtomizeChars(cx, name, AUTO_NAMELEN(name, namelen));
     if (!atom)
         return nullptr;
     Rooted<jsid> id(cx, AtomToId(atom));
@@ -4267,39 +4267,116 @@ AutoFile::open(JSContext *cx, const char *filename)
     return true;
 }
 
+JSObject * const JS::ReadOnlyCompileOptions::nullObjectPtr = nullptr;
 
-JS::CompileOptions::CompileOptions(JSContext *cx, JSVersion version)
-    : principals_(nullptr),
-      originPrincipals_(nullptr),
-      version(version != JSVERSION_UNKNOWN ? version : cx->findVersion()),
-      versionSet(false),
-      utf8(false),
-      filename(nullptr),
-      sourceMapURL(nullptr),
-      lineno(1),
-      column(0),
-      element(NullPtr()),
-      compileAndGo(cx->options().compileAndGo()),
-      forEval(false),
-      noScriptRval(cx->options().noScriptRval()),
-      selfHostingMode(false),
-      canLazilyParse(true),
-      strictOption(cx->options().strictMode()),
-      extraWarningsOption(cx->options().extraWarnings()),
-      werrorOption(cx->options().werror()),
-      asmJSOption(cx->options().asmJS()),
-      sourcePolicy(SAVE_SOURCE)
+void
+JS::ReadOnlyCompileOptions::copyPODOptions(const ReadOnlyCompileOptions &rhs)
 {
+    version = rhs.version;
+    versionSet = rhs.versionSet;
+    utf8 = rhs.utf8;
+    lineno = rhs.lineno;
+    column = rhs.column;
+    compileAndGo = rhs.compileAndGo;
+    forEval = rhs.forEval;
+    noScriptRval = rhs.noScriptRval;
+    selfHostingMode = rhs.selfHostingMode;
+    canLazilyParse = rhs.canLazilyParse;
+    strictOption = rhs.strictOption;
+    extraWarningsOption = rhs.extraWarningsOption;
+    werrorOption = rhs.werrorOption;
+    asmJSOption = rhs.asmJSOption;
+    sourcePolicy = rhs.sourcePolicy;
 }
 
 JSPrincipals *
-CompileOptions::originPrincipals() const
+JS::ReadOnlyCompileOptions::originPrincipals() const
 {
     return NormalizeOriginPrincipals(principals_, originPrincipals_);
 }
 
+JS::OwningCompileOptions::OwningCompileOptions(JSContext *cx)
+    : ReadOnlyCompileOptions(),
+      runtime(GetRuntime(cx)),
+      elementRoot(cx)
+{
+}
+
+JS::OwningCompileOptions::~OwningCompileOptions()
+{
+    if (principals_)
+        JS_DropPrincipals(runtime, principals_);
+    if (originPrincipals_)
+        JS_DropPrincipals(runtime, originPrincipals_);
+
+    // OwningCompileOptions always owns these, so these casts are okay.
+    js_free(const_cast<char *>(filename_));
+    js_free(const_cast<jschar *>(sourceMapURL_));
+}
+
+bool
+JS::OwningCompileOptions::copy(JSContext *cx, const ReadOnlyCompileOptions &rhs)
+{
+    copyPODOptions(rhs);
+
+    setPrincipals(rhs.principals());
+    setOriginPrincipals(rhs.originPrincipals());
+    setElement(rhs.element());
+
+    return (setFileAndLine(cx, rhs.filename(), rhs.lineno) &&
+            setSourceMapURL(cx, rhs.sourceMapURL()));
+}
+
+bool
+JS::OwningCompileOptions::setFileAndLine(JSContext *cx, const char *f, unsigned l)
+{
+    char *copy = nullptr;
+    if (f) {
+        copy = JS_strdup(cx, f);
+        if (!copy)
+            return false;
+    }
+
+    // OwningCompileOptions always owns filename_, so this cast is okay.
+    js_free(const_cast<char *>(filename_));
+
+    filename_ = copy;
+    lineno = l;
+    return true;
+}
+
+bool
+JS::OwningCompileOptions::setSourceMapURL(JSContext *cx, const jschar *s)
+{
+    jschar *copy = nullptr;
+    if (s) {
+        copy = js_strdup(cx, s);
+        if (!copy)
+            return false;
+    }
+
+    // OwningCompileOptions always owns sourceMapURL_, so this cast is okay.
+    js_free(const_cast<jschar *>(sourceMapURL_));
+
+    sourceMapURL_ = copy;
+    return true;
+}
+
+JS::CompileOptions::CompileOptions(JSContext *cx, JSVersion version)
+    : ReadOnlyCompileOptions(), elementRoot(cx)
+{
+    this->version = (version != JSVERSION_UNKNOWN) ? version : cx->findVersion();
+
+    compileAndGo = cx->options().compileAndGo();
+    noScriptRval = cx->options().noScriptRval();
+    strictOption = cx->options().strictMode();
+    extraWarningsOption = cx->options().extraWarnings();
+    werrorOption = cx->options().werror();
+    asmJSOption = cx->options().asmJS();
+}
+
 JSScript *
-JS::Compile(JSContext *cx, HandleObject obj, CompileOptions options,
+JS::Compile(JSContext *cx, HandleObject obj, const ReadOnlyCompileOptions &options,
             const jschar *chars, size_t length)
 {
     JS_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
@@ -4313,7 +4390,7 @@ JS::Compile(JSContext *cx, HandleObject obj, CompileOptions options,
 }
 
 JSScript *
-JS::Compile(JSContext *cx, HandleObject obj, CompileOptions options,
+JS::Compile(JSContext *cx, HandleObject obj, const ReadOnlyCompileOptions &options,
             const char *bytes, size_t length)
 {
     jschar *chars;
@@ -4330,7 +4407,7 @@ JS::Compile(JSContext *cx, HandleObject obj, CompileOptions options,
 }
 
 JSScript *
-JS::Compile(JSContext *cx, HandleObject obj, CompileOptions options, FILE *fp)
+JS::Compile(JSContext *cx, HandleObject obj, const ReadOnlyCompileOptions &options, FILE *fp)
 {
     FileContents buffer(cx);
     if (!ReadCompleteFile(cx, fp, buffer))
@@ -4341,18 +4418,19 @@ JS::Compile(JSContext *cx, HandleObject obj, CompileOptions options, FILE *fp)
 }
 
 JSScript *
-JS::Compile(JSContext *cx, HandleObject obj, CompileOptions options, const char *filename)
+JS::Compile(JSContext *cx, HandleObject obj, const ReadOnlyCompileOptions &optionsArg, const char *filename)
 {
     AutoFile file;
     if (!file.open(cx, filename))
         return nullptr;
+    CompileOptions options(cx, optionsArg);
     options.setFileAndLine(filename, 1);
     JSScript *script = Compile(cx, obj, options, file.fp());
     return script;
 }
 
 JS_PUBLIC_API(bool)
-JS::CanCompileOffThread(JSContext *cx, const CompileOptions &options)
+JS::CanCompileOffThread(JSContext *cx, const ReadOnlyCompileOptions &options)
 {
 #ifdef JS_WORKER_THREADS
     if (!cx->runtime()->useHelperThreads() || !cx->runtime()->helperThreadCount())
@@ -4375,7 +4453,7 @@ JS::CanCompileOffThread(JSContext *cx, const CompileOptions &options)
 }
 
 JS_PUBLIC_API(bool)
-JS::CompileOffThread(JSContext *cx, Handle<JSObject*> obj, CompileOptions options,
+JS::CompileOffThread(JSContext *cx, Handle<JSObject*> obj, const ReadOnlyCompileOptions &options,
                      const jschar *chars, size_t length,
                      OffThreadCompileCallback callback, void *callbackData)
 {
@@ -4503,7 +4581,7 @@ JS_GetGlobalFromScript(JSScript *script)
 }
 
 JS_PUBLIC_API(JSFunction *)
-JS::CompileFunction(JSContext *cx, HandleObject obj, CompileOptions options,
+JS::CompileFunction(JSContext *cx, HandleObject obj, const ReadOnlyCompileOptions &options,
                     const char *name, unsigned nargs, const char *const *argnames,
                     const jschar *chars, size_t length)
 {
@@ -4547,7 +4625,7 @@ JS::CompileFunction(JSContext *cx, HandleObject obj, CompileOptions options,
 }
 
 JS_PUBLIC_API(JSFunction *)
-JS::CompileFunction(JSContext *cx, HandleObject obj, CompileOptions options,
+JS::CompileFunction(JSContext *cx, HandleObject obj, const ReadOnlyCompileOptions &options,
                     const char *name, unsigned nargs, const char *const *argnames,
                     const char *bytes, size_t length)
 {
@@ -4688,9 +4766,10 @@ JS_ExecuteScriptVersion(JSContext *cx, JSObject *objArg, JSScript *script, jsval
 static const unsigned LARGE_SCRIPT_LENGTH = 500*1024;
 
 extern JS_PUBLIC_API(bool)
-JS::Evaluate(JSContext *cx, HandleObject obj, CompileOptions options,
+JS::Evaluate(JSContext *cx, HandleObject obj, const ReadOnlyCompileOptions &optionsArg,
              const jschar *chars, size_t length, jsval *rval)
 {
+    CompileOptions options(cx, optionsArg);
     JS_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
@@ -4729,7 +4808,7 @@ JS::Evaluate(JSContext *cx, HandleObject obj, CompileOptions options,
 }
 
 extern JS_PUBLIC_API(bool)
-JS::Evaluate(JSContext *cx, HandleObject obj, CompileOptions options,
+JS::Evaluate(JSContext *cx, HandleObject obj, const ReadOnlyCompileOptions &options,
              const char *bytes, size_t length, jsval *rval)
 {
     jschar *chars;
@@ -4746,7 +4825,7 @@ JS::Evaluate(JSContext *cx, HandleObject obj, CompileOptions options,
 }
 
 extern JS_PUBLIC_API(bool)
-JS::Evaluate(JSContext *cx, HandleObject obj, CompileOptions options,
+JS::Evaluate(JSContext *cx, HandleObject obj, const ReadOnlyCompileOptions &optionsArg,
              const char *filename, jsval *rval)
 {
     FileContents buffer(cx);
@@ -4756,6 +4835,7 @@ JS::Evaluate(JSContext *cx, HandleObject obj, CompileOptions options,
             return false;
     }
 
+    CompileOptions options(cx, optionsArg);
     options.setFileAndLine(filename, 1);
     return Evaluate(cx, obj, options, buffer.begin(), buffer.length(), rval);
 }
@@ -5087,7 +5167,7 @@ JS_InternJSString(JSContext *cx, HandleString str)
 {
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
-    JSAtom *atom = AtomizeString<CanGC>(cx, str, InternAtom);
+    JSAtom *atom = AtomizeString(cx, str, InternAtom);
     JS_ASSERT_IF(atom, JS_StringHasBeenInterned(cx, atom));
     return atom;
 }
@@ -5139,7 +5219,7 @@ JS_InternUCStringN(JSContext *cx, const jschar *s, size_t length)
 {
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
-    JSAtom *atom = AtomizeChars<CanGC>(cx, s, length, InternAtom);
+    JSAtom *atom = AtomizeChars(cx, s, length, InternAtom);
     JS_ASSERT_IF(atom, JS_StringHasBeenInterned(cx, atom));
     return atom;
 }
@@ -5987,13 +6067,13 @@ BOOL WINAPI DllMain (HINSTANCE hDLL, DWORD dwReason, LPVOID lpReserved)
 JS_PUBLIC_API(bool)
 JS_IndexToId(JSContext *cx, uint32_t index, MutableHandleId id)
 {
-    return IndexToId(cx, index, id);
+    return IndexToId(cx, index, id.address());
 }
 
 JS_PUBLIC_API(bool)
 JS_CharsToId(JSContext* cx, JS::TwoByteChars chars, MutableHandleId idp)
 {
-    RootedAtom atom(cx, AtomizeChars<CanGC>(cx, chars.start().get(), chars.length()));
+    RootedAtom atom(cx, AtomizeChars(cx, chars.start().get(), chars.length()));
     if (!atom)
         return false;
 #ifdef DEBUG
