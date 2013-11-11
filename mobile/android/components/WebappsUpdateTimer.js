@@ -14,7 +14,7 @@ const Cu = Components.utils;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/WebappsUpdater.jsm");
+Cu.import("resource://gre/modules/WebappManager.jsm");
 
 function dump(a) {
   Services.console.logStringMessage(a);
@@ -35,7 +35,7 @@ WebappsUpdateTimer.prototype = {
       return;
     }
 
-    WebappsUpdater.updateApps();
+    WebappManager.checkForUpdates();
   },
 
   observe: function(aSubject, aTopic, aData) {
@@ -45,7 +45,7 @@ WebappsUpdateTimer.prototype = {
 
     dump("Network is online. Checking for webapp updates.");
     Services.obs.removeObserver(this, "network:offline-status-changed");
-    WebappsUpdater.updateApps();
+    WebappManager.checkForUpdates();
   }
 };
 

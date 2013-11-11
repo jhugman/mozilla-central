@@ -4,7 +4,7 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["WebappsUpdater"];
+this.EXPORTED_SYMBOLS = ["WebappManager"];
 
 const Cc = Components.classes;
 const Cu = Components.utils;
@@ -16,7 +16,7 @@ function dump(a) {
   Services.console.logStringMessage(a);
 }
 
-this.WebappsUpdater = {
+this.WebappManager = {
   _checkingForUpdates: false,
 
   _updateApps: function(aApps) {
