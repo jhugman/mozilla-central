@@ -112,7 +112,7 @@ class RemoteAutomation(Automation):
             print "%s not found" % traces
 
     def checkForCrashes(self, directory, symbolsPath):
-        self.checkForANRs()
+        # self.checkForANRs()
 
         logcat = self._devicemanager.getLogcat(filterOutRegexps=fennecLogcatFilters)
         javaException = mozcrash.check_for_java_exception(logcat)
