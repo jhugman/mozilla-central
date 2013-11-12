@@ -793,4 +793,4 @@ pref("dom.mozApps.installSynthesizedApk", true);
 // jhugman's public server:
 pref("dom.mozApps.apkGeneratorEndpoint", "http://107.22.148.17:8080/application.apk");
 // mhaigh's private server:
-// pref("dom.mozApps.apkGeneratorEndpoint", "http://10.246.38.116:8080/application.apk");
+//pref("dom.mozApps.apkGeneratorEndpoint", "http://192.168.11.33:8080/application.apk");
