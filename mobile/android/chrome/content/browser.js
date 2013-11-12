@@ -6931,6 +6931,7 @@ var WebappsUI = {
     Services.obs.addObserver(this, "webapps-launch", false);
     Services.obs.addObserver(this, "webapps-uninstall", false);
     Services.obs.addObserver(this, "webapps-install-error", false);
+    Services.obs.addObserver(this, "Webapps:AppInstalled", false);
   },
 
   uninit: function unint() {
@@ -6939,6 +6940,7 @@ var WebappsUI = {
     Services.obs.removeObserver(this, "webapps-launch");
     Services.obs.removeObserver(this, "webapps-uninstall");
     Services.obs.removeObserver(this, "webapps-install-error");
+    Services.obs.removeObserver(this, "Webapps:AppInstalled");
   },
 
   DEFAULT_PREFS_FILENAME: "default-prefs.js",
@@ -6950,6 +6952,12 @@ var WebappsUI = {
       data.mm = aSubject;
     } catch(ex) { }
     switch (aTopic) {
+      case "Webapps:AppInstalled":
+        console.log(JSON.stringify(data));
+        debugger;
+        //data.
+        DOMApplicationRegistry.confirmInstall(data);
+        break;
       case "webapps-install-error":
         let msg = "";
         switch (aData) {
@@ -7020,13 +7028,14 @@ var WebappsUI = {
   },
 
   downloadApk: function downloadApk(aData) {
-    console.log("Downloading apk from " + aData.generatorUrl);
+    console.log("Downloading APK from " + aData.generatorUrl);
     
     let filePath = sendMessageToJava({
       type: "WebApps:GetTempFilePath",
-      fileName: aData.generatorUrl.replace(/['`~!@#$%^&*()_|+-=?;:'",.<>\{\}\[\]\\\/]/gi, "")
+      fileName: aData.app.manifestURL.replace(/[^a-zA-Z0-9]/gi, "")
     });
-    console.log("FileName : " + filePath);
+
+    console.log("Saving to : " + filePath);
 
     let uri = NetUtil.newURI(aData.generatorUrl);
 
@@ -7053,7 +7062,7 @@ var WebappsUI = {
             }
           });
          } else {
-           console.log("can't download");
+           console.log("can't download - status returned: " + aStatus);
          }
       } catch (e) {
         console.log("Error in fetch - " + e);
