@@ -681,16 +681,18 @@ static void RecordFrameMetrics(nsIFrame* aForFrame,
 
   metrics.mScrollId = aScrollId;
 
+  // Only the root scrollable frame for a given presShell should pick up
+  // the presShell's resolution. All the other frames are 1.0.
   nsIPresShell* presShell = presContext->GetPresShell();
-  if (metrics.mScrollId == FrameMetrics::ROOT_SCROLL_ID) {
+  if (aScrollFrame == presShell->GetRootScrollFrame()) {
     metrics.mResolution = ParentLayerToLayerScale(presShell->GetXResolution(),
                                                   presShell->GetYResolution());
   } else {
-    // Only the root scrollable frame for a given presShell should pick up
-    // the presShell's resolution. All the other subframes are 1.0.
     metrics.mResolution = ParentLayerToLayerScale(1.0f);
   }
 
+  // For the cumulateive resolution, multiply the resolutions of all the
+  // presShells back up to the root
   metrics.mCumulativeResolution = LayoutDeviceToLayerScale(1.0f);
   nsIPresShell* curPresShell = presShell;
   while (curPresShell != nullptr) {
@@ -700,15 +702,6 @@ static void RecordFrameMetrics(nsIFrame* aForFrame,
     nsPresContext* parentContext = curPresShell->GetPresContext()->GetParentPresContext();
     curPresShell = parentContext ? parentContext->GetPresShell() : nullptr;
   }
-#ifdef MOZ_WIDGET_ANDROID
-  if (presContext->IsRootContentDocument() && aScrollFrame == presShell->GetRootScrollFrame()) {
-    // On Android we set the resolution on a different presshell (bug 732971) so we
-    // need some special handling here to make things work properly. Once bug 732971 is
-    // fixed we should remove this ifdef block, and adjust any other pieces that need
-    // adjusting to make this work properly.
-    metrics.mResolution.scale = metrics.mCumulativeResolution.scale;
-  }
-#endif
 
   metrics.mDevPixelsPerCSSPixel = CSSToLayoutDeviceScale(
     (float)nsPresContext::AppUnitsPerCSSPixel() / auPerDevPixel);
@@ -4075,7 +4068,6 @@ nsDisplayTransform::FrameTransformProperties::FrameTransformProperties(const nsI
   : mFrame(aFrame)
   , mTransformList(aFrame->StyleDisplay()->mSpecifiedTransform)
   , mToTransformOrigin(GetDeltaToTransformOrigin(aFrame, aAppUnitsPerPixel, aBoundsOverride))
-  , mToPerspectiveOrigin(GetDeltaToPerspectiveOrigin(aFrame, aAppUnitsPerPixel))
   , mChildPerspective(0)
 {
   const nsStyleDisplay* parentDisp = nullptr;
@@ -4085,6 +4077,9 @@ nsDisplayTransform::FrameTransformProperties::FrameTransformProperties(const nsI
   }
   if (parentDisp && parentDisp->mChildPerspective.GetUnit() == eStyleUnit_Coord) {
     mChildPerspective = parentDisp->mChildPerspective.GetCoordValue();
+    if (mChildPerspective > 0.0) {
+      mToPerspectiveOrigin = GetDeltaToPerspectiveOrigin(aFrame, aAppUnitsPerPixel);
+    }
   }
 }
 
@@ -4184,7 +4179,7 @@ nsDisplayTransform::GetResultingTransformMatrixInternal(const FrameTransformProp
     /* At the point when perspective is applied, we have been translated to the transform origin.
      * The translation to the perspective origin is the difference between these values.
      */
-    result = result * nsLayoutUtils::ChangeMatrixBasis(aProperties.mToPerspectiveOrigin - aProperties.mToTransformOrigin, perspective);
+    result = result * nsLayoutUtils::ChangeMatrixBasis(aProperties.GetToPerspectiveOrigin() - aProperties.mToTransformOrigin, perspective);
   }
 
   gfxPoint3D rounded(hasSVGTransforms ? newOrigin.x : NS_round(newOrigin.x),

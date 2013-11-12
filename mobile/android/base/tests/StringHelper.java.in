@@ -40,9 +40,11 @@ class StringHelper {
         "Bookmark Link"
     };
 
-    public static final String[] BOOKMARKS_OPTIONS_CONTEXTMENU_ITEMS = new String[] {
+    public static final String[] BOOKMARK_CONTEXT_MENU_ITEMS = new String[] {
+        "Open in New Tab",
+        "Open in Private Tab",
         "Edit",
-        "Add to Home Screen"
+        "Remove"
     };
 
     public static final String TITLE_PLACE_HOLDER = "Enter Search or Address";

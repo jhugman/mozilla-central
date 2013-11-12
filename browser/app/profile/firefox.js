@@ -244,6 +244,7 @@ pref("lightweightThemes.update.enabled", true);
 
 // UI tour experience.
 pref("browser.uitour.enabled", true);
+pref("browser.uitour.requireSecure", true);
 pref("browser.uitour.themeOrigin", "https://addons.mozilla.org/%LOCALE%/firefox/themes/");
 pref("browser.uitour.pinnedTabUrl", "https://support.mozilla.org/%LOCALE%/kb/pinned-tabs-keep-favorite-websites-open");
 pref("browser.uitour.whitelist.add.260", "www.mozilla.org,support.mozilla.org");
@@ -351,18 +352,8 @@ pref("browser.download.debug", false);
 pref("browser.download.saveLinkAsFilenameTimeout", 4000);
 
 pref("browser.download.useDownloadDir", true);
-
 pref("browser.download.folderList", 1);
-pref("browser.download.manager.showAlertOnComplete", true);
-pref("browser.download.manager.showAlertInterval", 2000);
-pref("browser.download.manager.retention", 2);
-pref("browser.download.manager.showWhenStarting", true);
-pref("browser.download.manager.closeWhenDone", false);
-pref("browser.download.manager.focusWhenStarting", false);
-pref("browser.download.manager.flashCount", 2);
 pref("browser.download.manager.addToRecentDocs", true);
-pref("browser.download.manager.quitBehavior", 0);
-pref("browser.download.manager.scanWhenDone", true);
 pref("browser.download.manager.resumeOnWakeDelay", 10000);
 
 // This allows disabling the animated notifications shown by
@@ -371,10 +362,6 @@ pref("browser.download.animateNotifications", true);
 
 // This records whether or not the panel has been shown at least once.
 pref("browser.download.panel.shown", false);
-
-// This records whether or not at least one session with the Downloads Panel
-// enabled has been completed already.
-pref("browser.download.panel.firstSessionCompleted", false);
 
 #ifndef XP_MACOSX
 pref("browser.helperApps.deleteTempFileOnExit", true);
@@ -588,7 +575,11 @@ pref("browser.gesture.twist.left", "cmd_gestureRotateLeft");
 pref("browser.gesture.twist.end", "cmd_gestureRotateEnd");
 pref("browser.gesture.tap", "cmd_fullZoomReset");
 
+#ifndef RELEASE_BUILD
+pref("browser.snapshots.limit", 5);
+#else
 pref("browser.snapshots.limit", 0);
+#endif
 
 // 0: Nothing happens
 // 1: Scrolling contents
@@ -1019,10 +1010,6 @@ pref("services.sync.prefs.sync.addons.ignoreUserEnabledChanges", true);
 // source, and this would propagate automatically to other,
 // uncompromised Sync-connected devices.
 pref("services.sync.prefs.sync.app.update.mode", true);
-pref("services.sync.prefs.sync.browser.download.manager.closeWhenDone", true);
-pref("services.sync.prefs.sync.browser.download.manager.retention", true);
-pref("services.sync.prefs.sync.browser.download.manager.scanWhenDone", true);
-pref("services.sync.prefs.sync.browser.download.manager.showWhenStarting", true);
 pref("services.sync.prefs.sync.browser.formfill.enable", true);
 pref("services.sync.prefs.sync.browser.link.open_newwindow", true);
 pref("services.sync.prefs.sync.browser.offline-apps.notify", true);
@@ -1312,6 +1299,8 @@ pref("social.manifest.facebook", "{\"origin\":\"https://www.facebook.com\",\"nam
 
 pref("social.sidebar.open", true);
 pref("social.sidebar.unload_timeout_ms", 10000);
+
+pref("social.allowMultipleWorkers", true);
 
 pref("dom.identity.enabled", false);
 

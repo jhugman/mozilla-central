@@ -728,6 +728,7 @@ BaselineCompiler::emitBody()
 
     bool lastOpUnreachable = false;
     uint32_t emittedOps = 0;
+    mozilla::DebugOnly<jsbytecode *> prevpc = pc;
 
     while (true) {
         JSOp op = JSOp(*pc);
@@ -738,10 +739,13 @@ BaselineCompiler::emitBody()
 
         // Skip unreachable ops.
         if (!info) {
-            if (op == JSOP_STOP)
-                break;
+            // Test if last instructions and stop emitting in that case.
             pc += GetBytecodeLength(pc);
+            if (pc >= script->code + script->length)
+                break;
+
             lastOpUnreachable = true;
+            prevpc = pc;
             continue;
         }
 
@@ -791,15 +795,19 @@ OPCODE_LIST(EMIT_OP)
 #undef EMIT_OP
         }
 
-        if (op == JSOP_STOP)
+        // Test if last instructions and stop emitting in that case.
+        pc += GetBytecodeLength(pc);
+        if (pc >= script->code + script->length)
             break;
 
-        pc += GetBytecodeLength(pc);
         emittedOps++;
         lastOpUnreachable = false;
+#ifdef DEBUG
+        prevpc = pc;
+#endif
     }
 
-    JS_ASSERT(JSOp(*pc) == JSOP_STOP);
+    JS_ASSERT(JSOp(*prevpc) == JSOP_RETRVAL);
     return Method_Compiled;
 }
 
@@ -1899,7 +1907,7 @@ Address
 BaselineCompiler::getScopeCoordinateAddressFromObject(Register objReg, Register reg)
 {
     ScopeCoordinate sc(pc);
-    Shape *shape = ScopeCoordinateToStaticScopeShape(cx, script, pc);
+    Shape *shape = ScopeCoordinateToStaticScopeShape(script, pc);
 
     Address addr;
     if (shape->numFixedSlots() <= sc.slot) {
@@ -1942,7 +1950,7 @@ BaselineCompiler::emit_JSOP_CALLALIASEDVAR()
 bool
 BaselineCompiler::emit_JSOP_SETALIASEDVAR()
 {
-    JSScript *outerScript = ScopeCoordinateFunctionScript(cx, script, pc);
+    JSScript *outerScript = ScopeCoordinateFunctionScript(script, pc);
     if (outerScript && outerScript->treatAsRunOnce) {
         // Type updates for this operation might need to be tracked, so treat
         // this as a SETPROP.
@@ -2692,11 +2700,11 @@ BaselineCompiler::emitReturn()
         masm.loadValue(frame.addressOfReturnValue(), JSReturnOperand);
     }
 
-    if (JSOp(*pc) != JSOP_STOP) {
-        // JSOP_STOP is immediately followed by the return label, so we don't
-        // need a jump.
+    // Only emit the jump if this JSOP_RETRVAL is not the last instruction.
+    // Not needed for last instruction, because last instruction flows
+    // into return label.
+    if (pc + GetBytecodeLength(pc) < script->code + script->length)
         masm.jump(&return_);
-    }
 
     return true;
 }
@@ -2711,7 +2719,7 @@ BaselineCompiler::emit_JSOP_RETURN()
 }
 
 bool
-BaselineCompiler::emit_JSOP_STOP()
+BaselineCompiler::emit_JSOP_RETRVAL()
 {
     JS_ASSERT(frame.stackDepth() == 0);
 
@@ -2727,12 +2735,6 @@ BaselineCompiler::emit_JSOP_STOP()
     }
 
     return emitReturn();
-}
-
-bool
-BaselineCompiler::emit_JSOP_RETRVAL()
-{
-    return emit_JSOP_STOP();
 }
 
 typedef bool (*ToIdFn)(JSContext *, HandleScript, jsbytecode *, HandleValue, HandleValue,
@@ -2849,12 +2851,6 @@ BaselineCompiler::emit_JSOP_CALLEE()
     return true;
 }
 
-bool
-BaselineCompiler::emit_JSOP_POPV()
-{
-    return emit_JSOP_SETRVAL();
-}
-
 typedef bool (*NewArgumentsObjectFn)(JSContext *, BaselineFrame *, MutableHandleValue);
 static const VMFunction NewArgumentsObjectInfo =
     FunctionInfo<NewArgumentsObjectFn>(jit::NewArgumentsObject);
@@ -2912,38 +2908,22 @@ BaselineCompiler::emit_JSOP_RUNONCE()
     return callVM(RunOnceScriptPrologueInfo);
 }
 
-static bool
-DoCreateRestParameter(JSContext *cx, BaselineFrame *frame, MutableHandleValue res)
-{
-    unsigned numFormals = frame->numFormalArgs() - 1;
-    unsigned numActuals = frame->numActualArgs();
-    unsigned numRest = numActuals > numFormals ? numActuals - numFormals : 0;
-    Value *rest = frame->argv() + numFormals;
-
-    JSObject *obj = NewDenseCopiedArray(cx, numRest, rest, nullptr);
-    if (!obj)
-        return false;
-    types::FixRestArgumentsType(cx, obj);
-    res.setObject(*obj);
-    return true;
-}
-
-typedef bool(*DoCreateRestParameterFn)(JSContext *cx, BaselineFrame *, MutableHandleValue);
-static const VMFunction DoCreateRestParameterInfo =
-    FunctionInfo<DoCreateRestParameterFn>(DoCreateRestParameter);
-
 bool
 BaselineCompiler::emit_JSOP_REST()
 {
     frame.syncStack(0);
 
-    prepareVMCall();
-    masm.loadBaselineFramePtr(BaselineFrameReg, R0.scratchReg());
-    pushArg(R0.scratchReg());
+    JSObject *templateObject = NewDenseUnallocatedArray(cx, 0, nullptr, TenuredObject);
+    if (!templateObject)
+        return false;
+    types::FixRestArgumentsType(cx, templateObject);
 
-    if (!callVM(DoCreateRestParameterInfo))
+    // Call IC.
+    ICRest_Fallback::Compiler compiler(cx, templateObject);
+    if (!emitOpIC(compiler.getStub(&stubSpace_)))
         return false;
 
+    // Mark R0 as pushed stack value.
     frame.push(R0);
     return true;
 }

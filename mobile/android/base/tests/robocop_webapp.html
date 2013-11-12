@@ -1,0 +1,19 @@
+<html>
+<meta charset="utf-8">
+<title>Webapp</title>
+<script>
+  function onLoad() {
+    // let url = window.location.origin + 
+    //           window.location.pathname.substring(0, str.lastIndexOf("/")) + 
+    //           "/" + "robocop_webapp.apk";
+    var url = "http://wfwalker.github.io/opensun/online.webapp";
+    navigator.mozApps.install(url, null).onsuccess = function onInstall() {
+      var app = this.result;
+      alert(JSON.stringify(app));
+    };
+  }
+</script>
+<body onload="onLoad()">
+<p>Webapp</p>
+</body>
+</html>

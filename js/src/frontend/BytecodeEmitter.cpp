@@ -38,6 +38,7 @@
 
 #include "frontend/ParseMaps-inl.h"
 #include "frontend/ParseNode-inl.h"
+#include "vm/ScopeObject-inl.h"
 
 using namespace js;
 using namespace js::gc;
@@ -1165,9 +1166,9 @@ TryConvertFreeName(BytecodeEmitter *bce, ParseNode *pn)
         if (bce->script->directlyInsideEval)
             return false;
         RootedObject outerScope(bce->sc->context, bce->script->enclosingStaticScope());
-        for (StaticScopeIter ssi(bce->sc->context, outerScope); !ssi.done(); ssi++) {
-            if (ssi.type() != StaticScopeIter::FUNCTION) {
-                if (ssi.type() == StaticScopeIter::BLOCK) {
+        for (StaticScopeIter<CanGC> ssi(bce->sc->context, outerScope); !ssi.done(); ssi++) {
+            if (ssi.type() != StaticScopeIter<CanGC>::FUNCTION) {
+                if (ssi.type() == StaticScopeIter<CanGC>::BLOCK) {
                     // Use generic ops if a catch block is encountered.
                     return false;
                 }
@@ -1731,10 +1732,7 @@ BytecodeEmitter::needsImplicitThis()
     if (!script->compileAndGo)
         return true;
 
-    if (sc->isModuleBox()) {
-        /* Modules can never occur inside a with-statement */
-        return false;
-    } if (sc->isFunctionBox()) {
+    if (sc->isFunctionBox()) {
         if (sc->asFunctionBox()->inWith)
             return true;
     } else {
@@ -2700,10 +2698,10 @@ frontend::EmitFunctionScript(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNo
     }
 
     /*
-     * Always end the script with a JSOP_STOP. Some other parts of the codebase
+     * Always end the script with a JSOP_RETRVAL. Some other parts of the codebase
      * depend on this opcode, e.g. js_InternalInterpret.
      */
-    if (Emit1(cx, bce, JSOP_STOP) < 0)
+    if (Emit1(cx, bce, JSOP_RETRVAL) < 0)
         return false;
 
     if (!JSScript::fullyInitFromEmitter(cx, bce->script, bce))
@@ -3162,7 +3160,7 @@ MaybeEmitGroupAssignment(ExclusiveContext *cx, BytecodeEmitter *bce, JSOp prolog
 {
     JS_ASSERT(pn->isKind(PNK_ASSIGN));
     JS_ASSERT(pn->isOp(JSOP_NOP));
-    JS_ASSERT(*pop == JSOP_POP || *pop == JSOP_POPV);
+    JS_ASSERT(*pop == JSOP_POP || *pop == JSOP_SETRVAL);
 
     ParseNode *lhs = pn->pn_left;
     ParseNode *rhs = pn->pn_right;
@@ -3194,7 +3192,7 @@ MaybeEmitLetGroupDecl(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *pn,
 {
     JS_ASSERT(pn->isKind(PNK_ASSIGN));
     JS_ASSERT(pn->isOp(JSOP_NOP));
-    JS_ASSERT(*pop == JSOP_POP || *pop == JSOP_POPV);
+    JS_ASSERT(*pop == JSOP_POP || *pop == JSOP_SETRVAL);
 
     ParseNode *lhs = pn->pn_left;
     ParseNode *rhs = pn->pn_right;
@@ -5309,7 +5307,7 @@ EmitStatement(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *pn)
      * that it appears useless to the compiler.
      *
      * API users may also set the JSOPTION_NO_SCRIPT_RVAL option when
-     * calling JS_Compile* to suppress JSOP_POPV.
+     * calling JS_Compile* to suppress JSOP_SETRVAL.
      */
     bool wantval = false;
     bool useful = false;
@@ -5339,7 +5337,7 @@ EmitStatement(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *pn)
     }
 
     if (useful) {
-        JSOp op = wantval ? JSOP_POPV : JSOP_POP;
+        JSOp op = wantval ? JSOP_SETRVAL : JSOP_POP;
         JS_ASSERT_IF(pn2->isKind(PNK_ASSIGN), pn2->isOp(JSOP_NOP));
 #if JS_HAS_DESTRUCTURING
         if (!wantval &&
@@ -6449,6 +6447,11 @@ frontend::EmitTree(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *pn)
              : EmitVariables(cx, bce, pn, InitializeVars);
         break;
 
+      case PNK_IMPORT:
+       // TODO: Implement emitter support for modules
+       bce->reportError(nullptr, JSMSG_MODULES_NOT_IMPLEMENTED);
+       return false;
+
       case PNK_ARRAYPUSH: {
         int slot;
 
@@ -6518,11 +6521,6 @@ frontend::EmitTree(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *pn)
       case PNK_NOP:
         JS_ASSERT(pn->getArity() == PN_NULLARY);
         break;
-
-      case PNK_MODULE:
-        // TODO: Add emitter support for modules
-        bce->reportError(nullptr, JSMSG_SYNTAX_ERROR);
-        return false;
 
       default:
         JS_ASSERT(0);
@@ -6895,48 +6893,19 @@ CGConstList::finish(ConstArray *array)
 /*
  * We should try to get rid of offsetBias (always 0 or 1, where 1 is
  * JSOP_{NOP,POP}_LENGTH), which is used only by SRC_FOR.
- *
- * FIXME: Generate this using a higher-order macro.  Bug 922070.
  */
 const JSSrcNoteSpec js_SrcNoteSpec[] = {
-/*  0 */ {"null",           0},
-
-/*  1 */ {"if",             0},
-/*  2 */ {"if-else",        1},
-/*  3 */ {"cond",           1},
-
-/*  4 */ {"for",            3},
-
-/*  5 */ {"while",          1},
-/*  6 */ {"for-in",         1},
-/*  7 */ {"for-of",         1},
-/*  8 */ {"continue",       0},
-/*  9 */ {"break",          0},
-/* 10 */ {"break2label",    0},
-/* 11 */ {"switchbreak",    0},
-
-/* 12 */ {"tableswitch",    1},
-/* 13 */ {"condswitch",     2},
-
-/* 14 */ {"nextcase",       1},
-
-/* 15 */ {"assignop",       0},
-
-/* 16 */ {"hidden",         0},
-
-/* 17 */ {"catch",          0},
-
-/* 18 */ {"try",            1},
-
-/* 19 */ {"colspan",        1},
-/* 20 */ {"newline",        0},
-/* 21 */ {"setline",        1},
-
-/* 22 */ {"unused22",       0},
-/* 23 */ {"unused23",       0},
-
-/* 24 */ {"xdelta",         0},
+#define DEFINE_SRC_NOTE_SPEC(sym, name, arity) { name, arity },
+    FOR_EACH_SRC_NOTE_TYPE(DEFINE_SRC_NOTE_SPEC)
+#undef DEFINE_SRC_NOTE_SPEC
 };
+
+static int
+SrcNoteArity(jssrcnote *sn)
+{
+    JS_ASSERT(SN_TYPE(sn) < SRC_LAST);
+    return js_SrcNoteSpec[SN_TYPE(sn)].arity;
+}
 
 JS_FRIEND_API(unsigned)
 js_SrcNoteLength(jssrcnote *sn)
@@ -6944,7 +6913,7 @@ js_SrcNoteLength(jssrcnote *sn)
     unsigned arity;
     jssrcnote *base;
 
-    arity = (int)js_SrcNoteSpec[SN_TYPE(sn)].arity;
+    arity = SrcNoteArity(sn);
     for (base = sn++; arity; sn++, arity--) {
         if (*sn & SN_3BYTE_OFFSET_FLAG)
             sn += 2;
@@ -6957,7 +6926,7 @@ js_GetSrcNoteOffset(jssrcnote *sn, unsigned which)
 {
     /* Find the offset numbered which (i.e., skip exactly which offsets). */
     JS_ASSERT(SN_TYPE(sn) != SRC_XDELTA);
-    JS_ASSERT((int) which < js_SrcNoteSpec[SN_TYPE(sn)].arity);
+    JS_ASSERT((int) which < SrcNoteArity(sn));
     for (sn++; which; sn++, which--) {
         if (*sn & SN_3BYTE_OFFSET_FLAG)
             sn += 2;

@@ -1027,6 +1027,13 @@ js_FinishGC(JSRuntime *rt)
     rt->gcChunkPool.expireAndFree(rt, true);
 
     rt->gcRootsHash.clear();
+
+    rt->functionPersistentRooteds.clear();
+    rt->idPersistentRooteds.clear();
+    rt->objectPersistentRooteds.clear();
+    rt->scriptPersistentRooteds.clear();
+    rt->stringPersistentRooteds.clear();
+    rt->valuePersistentRooteds.clear();
 }
 
 template <typename T> struct BarrierOwner {};
@@ -1104,11 +1111,11 @@ js_AddObjectRoot(JSRuntime *rt, JSObject **objp)
 extern JS_FRIEND_API(void)
 js_RemoveObjectRoot(JSRuntime *rt, JSObject **objp)
 {
-    js_RemoveRoot(rt, objp);
+    RemoveRoot(rt, objp);
 }
 
-JS_FRIEND_API(void)
-js_RemoveRoot(JSRuntime *rt, void *rp)
+void
+js::RemoveRoot(JSRuntime *rt, void *rp)
 {
     rt->gcRootsHash.remove(rp);
     rt->gcPoke = true;
@@ -2607,6 +2614,7 @@ static void
 SweepZones(FreeOp *fop, bool lastGC)
 {
     JSRuntime *rt = fop->runtime();
+    JSZoneCallback callback = rt->destroyZoneCallback;
 
     /* Skip the atomsCompartment zone. */
     Zone **read = rt->zones.begin() + 1;
@@ -2621,6 +2629,8 @@ SweepZones(FreeOp *fop, bool lastGC)
         if (!zone->hold && zone->wasGCStarted()) {
             if (zone->allocator.arenas.arenaListsAreEmpty() || lastGC) {
                 zone->allocator.arenas.checkEmptyFreeLists();
+                if (callback)
+                    callback(zone);
                 SweepCompartments(fop, zone, false, lastGC);
                 JS_ASSERT(zone->compartments.empty());
                 fop->delete_(zone);
@@ -3707,6 +3717,9 @@ BeginSweepingZoneGroup(JSRuntime *rt)
 
         if (rt->isAtomsZone(zone))
             sweepingAtoms = true;
+
+        if (rt->sweepZoneCallback)
+            rt->sweepZoneCallback(zone);
     }
 
     ValidateIncrementalMarking(rt);

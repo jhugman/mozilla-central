@@ -24,7 +24,7 @@ const DISABLE_MMS_GROUPING_FOR_RECEIVING = true;
 
 
 const DB_NAME = "sms";
-const DB_VERSION = 16;
+const DB_VERSION = 18;
 const MESSAGE_STORE_NAME = "sms";
 const THREAD_STORE_NAME = "thread";
 const PARTICIPANT_STORE_NAME = "participant";
@@ -65,6 +65,9 @@ const COLLECT_TIMESTAMP_UNUSED = 0;
 XPCOMUtils.defineLazyServiceGetter(this, "gMobileMessageService",
                                    "@mozilla.org/mobilemessage/mobilemessageservice;1",
                                    "nsIMobileMessageService");
+XPCOMUtils.defineLazyServiceGetter(this, "gMMSService",
+                                   "@mozilla.org/mms/rilmmsservice;1",
+                                   "nsIMmsService");
 
 /**
  * MobileMessageDatabaseService
@@ -230,10 +233,18 @@ MobileMessageDatabaseService.prototype = {
             self.upgradeSchema14(event.target.transaction, next);
             break;
           case 15:
-            if (DEBUG) debug("Upgrade to version 15. Add ICC ID for each message.");
+            if (DEBUG) debug("Upgrade to version 16. Add ICC ID for each message.");
             self.upgradeSchema15(event.target.transaction, next);
             break;
           case 16:
+            if (DEBUG) debug("Upgrade to version 17. Add isReadReportSent for incoming MMS.");
+            self.upgradeSchema16(event.target.transaction, next);
+            break;
+          case 17:
+            if (DEBUG) debug("Upgrade to version 18. Add last message subject into threadRecord.");
+            self.upgradeSchema17(event.target.transaction, next);
+            break;
+          case 18:
             // This will need to be moved for each new version
             if (DEBUG) debug("Upgrade finished.");
             break;
@@ -1072,6 +1083,67 @@ MobileMessageDatabaseService.prototype = {
     };
   },
 
+  /**
+   * Add isReadReportSent for incoming MMS.
+   */
+  upgradeSchema16: function upgradeSchema16(transaction, next) {
+    let messageStore = transaction.objectStore(MESSAGE_STORE_NAME);
+
+    // Update type attributes.
+    messageStore.openCursor().onsuccess = function(event) {
+      let cursor = event.target.result;
+      if (!cursor) {
+        next();
+        return;
+      }
+
+      let messageRecord = cursor.value;
+      if (messageRecord.type == "mms") {
+        messageRecord.isReadReportSent = false;
+        cursor.update(messageRecord);
+      }
+      cursor.continue();
+    };
+  },
+
+  upgradeSchema17: function upgradeSchema17(transaction, next) {
+    let threadStore = transaction.objectStore(THREAD_STORE_NAME);
+    let messageStore = transaction.objectStore(MESSAGE_STORE_NAME);
+
+    // Add 'lastMessageSubject' to each thread record.
+    threadStore.openCursor().onsuccess = function(event) {
+      let cursor = event.target.result;
+      if (!cursor) {
+        next();
+        return;
+      }
+
+      let threadRecord = cursor.value;
+      // We have defined 'threadRecord.subject' in upgradeSchema7(), but it
+      // actually means 'threadRecord.body'.  Swap the two values first.
+      threadRecord.body = threadRecord.subject;
+      delete threadRecord.subject;
+
+      // Only MMS supports subject so assign null for non-MMS one.
+      if (threadRecord.lastMessageType != "mms") {
+        threadRecord.lastMessageSubject = null;
+        cursor.update(threadRecord);
+
+        cursor.continue();
+	return;
+      }
+
+      messageStore.get(threadRecord.lastMessageId).onsuccess = function(event) {
+        let messageRecord = event.target.result;
+        let subject = messageRecord.headers.subject;
+        threadRecord.lastMessageSubject = subject || null;
+        cursor.update(threadRecord);
+
+        cursor.continue();
+      };
+    };
+  },
+
   matchParsedPhoneNumbers: function matchParsedPhoneNumbers(addr1, parsedAddr1,
                                                             addr2, parsedAddr2) {
     if ((parsedAddr1.internationalNumber &&
@@ -1181,6 +1253,7 @@ MobileMessageDatabaseService.prototype = {
       if (headers["x-mms-expiry"] != undefined) {
         expiryDate = aMessageRecord.timestamp + headers["x-mms-expiry"] * 1000;
       }
+      let isReadReportRequested = headers["x-mms-read-report"] || false;
       return gMobileMessageService.createMmsMessage(aMessageRecord.id,
                                                     aMessageRecord.threadId,
                                                     aMessageRecord.iccId,
@@ -1193,7 +1266,8 @@ MobileMessageDatabaseService.prototype = {
                                                     subject,
                                                     smil,
                                                     attachments,
-                                                    expiryDate);
+                                                    expiryDate,
+                                                    isReadReportRequested);
     }
   },
 
@@ -1456,8 +1530,13 @@ MobileMessageDatabaseService.prototype = {
           let needsUpdate = false;
 
           if (threadRecord.lastTimestamp <= timestamp) {
+            let lastMessageSubject;
+            if (aMessageRecord.type == "mms") {
+              lastMessageSubject = aMessageRecord.headers.subject;
+            }
+            threadRecord.lastMessageSubject = lastMessageSubject || null;
             threadRecord.lastTimestamp = timestamp;
-            threadRecord.subject = aMessageRecord.body;
+            threadRecord.body = aMessageRecord.body;
             threadRecord.lastMessageId = aMessageRecord.id;
             threadRecord.lastMessageType = aMessageRecord.type;
             needsUpdate = true;
@@ -1476,11 +1555,16 @@ MobileMessageDatabaseService.prototype = {
           return;
         }
 
+        let lastMessageSubject;
+        if (aMessageRecord.type == "mms") {
+          lastMessageSubject = aMessageRecord.headers.subject;
+        }
         threadStore.add({participantIds: participantIds,
                          participantAddresses: aAddresses,
                          lastMessageId: aMessageRecord.id,
                          lastTimestamp: timestamp,
-                         subject: aMessageRecord.body,
+                         lastMessageSubject: lastMessageSubject || null,
+                         body: aMessageRecord.body,
                          unreadCount: aMessageRecord.read ? 0 : 1,
                          lastMessageType: aMessageRecord.type})
                    .onsuccess = function (event) {
@@ -1556,7 +1640,7 @@ MobileMessageDatabaseService.prototype = {
             if (messageRecord.deliveryStatus != deliveryStatus) {
               messageRecord.deliveryStatus = deliveryStatus;
 
-              // Update the delivery timestamp if it's successfully delivered.
+              // Update |deliveryTimestamp| if it's successfully delivered.
               if (deliveryStatus == DELIVERY_STATUS_SUCCESS) {
                 messageRecord.deliveryTimestamp = Date.now();
               }
@@ -1569,6 +1653,12 @@ MobileMessageDatabaseService.prototype = {
               for (let i = 0; i < deliveryInfo.length; i++) {
                 if (deliveryInfo[i].deliveryStatus != deliveryStatus) {
                   deliveryInfo[i].deliveryStatus = deliveryStatus;
+
+                  // Update |deliveryTimestamp| if it's successfully delivered.
+                  if (deliveryStatus == DELIVERY_STATUS_SUCCESS) {
+                    deliveryInfo[i].deliveryTimestamp = Date.now();
+                  }
+
                   isRecordUpdated = true;
                 }
               }
@@ -1623,6 +1713,12 @@ MobileMessageDatabaseService.prototype = {
                   }
                   if (deliveryInfo[j].deliveryStatus != deliveryStatus) {
                     deliveryInfo[j].deliveryStatus = deliveryStatus;
+
+                    // Update |deliveryTimestamp| if it's successfully delivered.
+                    if (deliveryStatus == DELIVERY_STATUS_SUCCESS) {
+                      deliveryInfo[j].deliveryTimestamp = Date.now();
+                    }
+
                     isRecordUpdated = true;
                   }
                 }
@@ -1700,6 +1796,63 @@ MobileMessageDatabaseService.prototype = {
     threadParticipants = threadParticipants.concat(slicedReceivers);
   },
 
+  updateThreadByMessageChange: function updateThreadByMessageChange(messageStore,
+                                                                    threadStore,
+                                                                    threadId,
+                                                                    messageId,
+                                                                    messageRead) {
+    threadStore.get(threadId).onsuccess = function(event) {
+      // This must exist.
+      let threadRecord = event.target.result;
+      if (DEBUG) debug("Updating thread record " + JSON.stringify(threadRecord));
+
+      if (!messageRead) {
+        threadRecord.unreadCount--;
+      }
+
+      if (threadRecord.lastMessageId == messageId) {
+        // Check most recent sender/receiver.
+        let range = IDBKeyRange.bound([threadId, 0], [threadId, ""]);
+        let request = messageStore.index("threadId")
+                                  .openCursor(range, PREV);
+        request.onsuccess = function(event) {
+          let cursor = event.target.result;
+          if (!cursor) {
+            if (DEBUG) {
+              debug("Deleting mru entry for thread id " + threadId);
+            }
+            threadStore.delete(threadId);
+            return;
+          }
+
+          let nextMsg = cursor.value;
+          let lastMessageSubject;
+          if (nextMsg.type == "mms") {
+            lastMessageSubject = nextMsg.headers.subject;
+          }
+          threadRecord.lastMessageSubject = lastMessageSubject || null;
+          threadRecord.lastMessageId = nextMsg.id;
+          threadRecord.lastTimestamp = nextMsg.timestamp;
+          threadRecord.body = nextMsg.body;
+          threadRecord.lastMessageType = nextMsg.type;
+          if (DEBUG) {
+            debug("Updating mru entry: " +
+                  JSON.stringify(threadRecord));
+          }
+          threadStore.put(threadRecord);
+        };
+      } else if (!messageRead) {
+        // Shortcut, just update the unread count.
+        if (DEBUG) {
+          debug("Updating unread count for thread id " + threadId + ": " +
+                (threadRecord.unreadCount + 1) + " -> " +
+                threadRecord.unreadCount);
+        }
+        threadStore.put(threadRecord);
+      }
+    };
+  },
+
   /**
    * nsIRilMobileMessageDatabaseService API
    */
@@ -1732,6 +1885,15 @@ MobileMessageDatabaseService.prototype = {
 
     if (aMessage.type == "mms") {
       aMessage.transactionIdIndex = aMessage.transactionId;
+      aMessage.isReadReportSent = false;
+
+      // If |deliveryTimestamp| is not specified, use 0 as default.
+      let deliveryInfo = aMessage.deliveryInfo;
+      for (let i = 0; i < deliveryInfo.length; i++) {
+        if (deliveryInfo[i].deliveryTimestamp == undefined) {
+          deliveryInfo[i].deliveryTimestamp = 0;
+        }
+      }
     }
 
     if (aMessage.type == "sms") {
@@ -1785,7 +1947,9 @@ MobileMessageDatabaseService.prototype = {
       aMessage.deliveryInfo = [];
       for (let i = 0; i < receivers.length; i++) {
         aMessage.deliveryInfo.push({
-          receiver: receivers[i], deliveryStatus: deliveryStatus });
+          receiver: receivers[i],
+          deliveryStatus: deliveryStatus,
+          deliveryTimestamp: 0 });
       }
     }
 
@@ -1926,58 +2090,6 @@ MobileMessageDatabaseService.prototype = {
     this.getMessageRecordById(aMessageId, notifyCallback);
   },
 
-  updateThreadByMessageChange: function updateThreadByMessageChange(messageStore,
-                                                                    threadStore,
-                                                                    threadId,
-                                                                    messageId,
-                                                                    messageRead) {
-    threadStore.get(threadId).onsuccess = function(event) {
-      // This must exist.
-      let threadRecord = event.target.result;
-      if (DEBUG) debug("Updating thread record " + JSON.stringify(threadRecord));
-
-      if (!messageRead) {
-        threadRecord.unreadCount--;
-      }
-
-      if (threadRecord.lastMessageId == messageId) {
-        // Check most recent sender/receiver.
-        let range = IDBKeyRange.bound([threadId, 0], [threadId, ""]);
-        let request = messageStore.index("threadId")
-                                  .openCursor(range, PREV);
-        request.onsuccess = function(event) {
-          let cursor = event.target.result;
-          if (!cursor) {
-            if (DEBUG) {
-              debug("Deleting mru entry for thread id " + threadId);
-            }
-            threadStore.delete(threadId);
-            return;
-          }
-
-          let nextMsg = cursor.value;
-          threadRecord.lastMessageId = nextMsg.id;
-          threadRecord.lastTimestamp = nextMsg.timestamp;
-          threadRecord.subject = nextMsg.body;
-          threadRecord.lastMessageType = nextMsg.type;
-          if (DEBUG) {
-            debug("Updating mru entry: " +
-                  JSON.stringify(threadRecord));
-          }
-          threadStore.put(threadRecord);
-        };
-      } else if (!messageRead) {
-        // Shortcut, just update the unread count.
-        if (DEBUG) {
-          debug("Updating unread count for thread id " + threadId + ": " +
-                (threadRecord.unreadCount + 1) + " -> " +
-                threadRecord.unreadCount);
-        }
-        threadStore.put(threadRecord);
-      }
-    };
-  },
-
   deleteMessage: function deleteMessage(messageIds, length, aRequest) {
     if (DEBUG) debug("deleteMessage: message ids " + JSON.stringify(messageIds));
     let deleted = [];
@@ -2059,7 +2171,7 @@ MobileMessageDatabaseService.prototype = {
     return cursor;
   },
 
-  markMessageRead: function markMessageRead(messageId, value, aRequest) {
+  markMessageRead: function markMessageRead(messageId, value, aSendReadReport, aRequest) {
     if (DEBUG) debug("Setting message " + messageId + " read to " + value);
     this.newTxn(READ_WRITE, function (error, txn, stores) {
       if (error) {
@@ -2067,10 +2179,12 @@ MobileMessageDatabaseService.prototype = {
         aRequest.notifyMarkMessageReadFailed(Ci.nsIMobileMessageCallback.INTERNAL_ERROR);
         return;
       }
+
       txn.onerror = function onerror(event) {
         if (DEBUG) debug("Caught error on transaction ", event.target.errorCode);
         aRequest.notifyMarkMessageReadFailed(Ci.nsIMobileMessageCallback.INTERNAL_ERROR);
       };
+
       let messageStore = stores[0];
       let threadStore = stores[1];
       messageStore.get(messageId).onsuccess = function onsuccess(event) {
@@ -2080,6 +2194,7 @@ MobileMessageDatabaseService.prototype = {
           aRequest.notifyMarkMessageReadFailed(Ci.nsIMobileMessageCallback.NOT_FOUND_ERROR);
           return;
         }
+
         if (messageRecord.id != messageId) {
           if (DEBUG) {
             debug("Retrieve message ID (" + messageId + ") is " +
@@ -2088,6 +2203,7 @@ MobileMessageDatabaseService.prototype = {
           aRequest.notifyMarkMessageReadFailed(Ci.nsIMobileMessageCallback.UNKNOWN_ERROR);
           return;
         }
+
         // If the value to be set is the same as the current message `read`
         // value, we just notify successfully.
         if (messageRecord.read == value) {
@@ -2095,8 +2211,22 @@ MobileMessageDatabaseService.prototype = {
           aRequest.notifyMessageMarkedRead(messageRecord.read);
           return;
         }
+
         messageRecord.read = value ? FILTER_READ_READ : FILTER_READ_UNREAD;
         messageRecord.readIndex = [messageRecord.read, messageRecord.timestamp];
+        let readReportMessageId, readReportTo;
+        if (aSendReadReport &&
+            messageRecord.type == "mms" &&
+            messageRecord.delivery == DELIVERY_RECEIVED &&
+            messageRecord.read == FILTER_READ_READ &&
+            !messageRecord.isReadReportSent) {
+          messageRecord.isReadReportSent = true;
+
+          let from = messageRecord.headers["from"];
+          readReportTo = from && from.address;
+          readReportMessageId = messageRecord.headers["message-id"];
+        }
+
         if (DEBUG) debug("Message.read set to: " + value);
         messageStore.put(messageRecord).onsuccess = function onsuccess(event) {
           if (DEBUG) {
@@ -2118,6 +2248,11 @@ MobileMessageDatabaseService.prototype = {
                      " -> " + threadRecord.unreadCount);
             }
             threadStore.put(threadRecord).onsuccess = function(event) {
+              if(readReportMessageId && readReportTo) {
+                gMMSService.sendReadReport(readReportMessageId,
+                                           readReportTo,
+                                           messageRecord.iccId);
+              }
               aRequest.notifyMessageMarkedRead(messageRecord.read);
             };
           };
@@ -2759,7 +2894,8 @@ GetThreadsCursor.prototype = {
         gMobileMessageService.createThread(threadRecord.id,
                                            threadRecord.participantAddresses,
                                            threadRecord.lastTimestamp,
-                                           threadRecord.subject,
+                                           threadRecord.lastMessageSubject || "",
+                                           threadRecord.body,
                                            threadRecord.unreadCount,
                                            threadRecord.lastMessageType);
       self.callback.notifyCursorResult(thread);

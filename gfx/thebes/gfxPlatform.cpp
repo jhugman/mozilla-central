@@ -15,7 +15,14 @@
 
 #include "gfxPlatform.h"
 
+#ifdef XP_WIN
+#include <process.h>
+#define getpid _getpid
+#endif
+
 #include "nsXULAppAPI.h"
+#include "nsDirectoryServiceUtils.h"
+#include "nsDirectoryServiceDefs.h"
 
 #if defined(XP_WIN)
 #include "gfxWindowsPlatform.h"
@@ -297,7 +304,8 @@ gfxPlatform::gfxPlatform()
 
     uint32_t canvasMask = (1 << BACKEND_CAIRO) | (1 << BACKEND_SKIA);
     uint32_t contentMask = 1 << BACKEND_CAIRO;
-    InitBackendPrefs(canvasMask, contentMask);
+    InitBackendPrefs(canvasMask, BACKEND_CAIRO,
+                     contentMask, BACKEND_CAIRO);
 }
 
 gfxPlatform*
@@ -318,10 +326,23 @@ int RecordingPrefChanged(const char *aPrefName, void *aClosure)
     if (prefFileName) {
       fileName.Append(NS_ConvertUTF16toUTF8(prefFileName));
     } else {
-      fileName.AssignLiteral("browserrecording.aer");
+      nsCOMPtr<nsIFile> tmpFile;
+      if (NS_FAILED(NS_GetSpecialDirectory(NS_OS_TEMP_DIR, getter_AddRefs(tmpFile)))) {
+        return 0;
+      }
+      fileName.AppendPrintf("moz2drec_%i_%i.aer", XRE_GetProcessType(), getpid());
+
+      nsresult rv = tmpFile->AppendNative(fileName);
+      if (NS_FAILED(rv))
+        return 0;
+
+      rv = tmpFile->GetNativePath(fileName);
+      if (NS_FAILED(rv))
+        return 0;
     }
 
     gPlatform->mRecorder = Factory::CreateEventRecorderForFile(fileName.BeginReading());
+    printf_stderr("Recording to %s\n", fileName.get());
     Factory::SetGlobalEventRecorder(gPlatform->mRecorder);
   } else {
     Factory::SetGlobalEventRecorder(nullptr);
@@ -917,7 +938,7 @@ gfxPlatform::GetThebesSurfaceForDrawTarget(DrawTarget *aTarget)
   }
 
   IntSize size = data->GetSize();
-  gfxImageFormat format = OptimalFormatForContent(ContentForFormat(data->GetFormat()));
+  gfxImageFormat format = SurfaceFormatToImageFormat(data->GetFormat());
 
 
   nsRefPtr<gfxASurface> surf =
@@ -1470,39 +1491,38 @@ gfxPlatform::AppendPrefLang(eFontPrefLang aPrefLangs[], uint32_t& aLen, eFontPre
 }
 
 void
-gfxPlatform::InitBackendPrefs(uint32_t aCanvasBitmask, uint32_t aContentBitmask)
+gfxPlatform::InitBackendPrefs(uint32_t aCanvasBitmask, BackendType aCanvasDefault,
+                              uint32_t aContentBitmask, BackendType aContentDefault)
 {
     mPreferredCanvasBackend = GetCanvasBackendPref(aCanvasBitmask);
     if (!mPreferredCanvasBackend) {
-      mPreferredCanvasBackend = BACKEND_CAIRO;
+        mPreferredCanvasBackend = aCanvasDefault;
     }
-    mFallbackCanvasBackend = GetCanvasBackendPref(aCanvasBitmask & ~(1 << mPreferredCanvasBackend));
+    mFallbackCanvasBackend =
+        GetCanvasBackendPref(aCanvasBitmask & ~(1 << mPreferredCanvasBackend));
 
     mContentBackendBitmask = aContentBitmask;
     mContentBackend = GetContentBackendPref(mContentBackendBitmask);
+    if (!mContentBackend) {
+        mContentBackend = aContentDefault;
+    }
 }
 
 /* static */ BackendType
 gfxPlatform::GetCanvasBackendPref(uint32_t aBackendBitmask)
 {
-    return GetBackendPref(nullptr, "gfx.canvas.azure.backends", aBackendBitmask);
+    return GetBackendPref("gfx.canvas.azure.backends", aBackendBitmask);
 }
 
 /* static */ BackendType
 gfxPlatform::GetContentBackendPref(uint32_t &aBackendBitmask)
 {
-    return GetBackendPref("gfx.content.azure.enabled", "gfx.content.azure.backends", aBackendBitmask);
+    return GetBackendPref("gfx.content.azure.backends", aBackendBitmask);
 }
 
 /* static */ BackendType
-gfxPlatform::GetBackendPref(const char* aEnabledPrefName, const char* aBackendPrefName, uint32_t &aBackendBitmask)
+gfxPlatform::GetBackendPref(const char* aBackendPrefName, uint32_t &aBackendBitmask)
 {
-    if (aEnabledPrefName &&
-        !Preferences::GetBool(aEnabledPrefName, false)) {
-        aBackendBitmask = 0;
-        return BACKEND_NONE;
-    }
-
     nsTArray<nsCString> backendList;
     nsCString prefString;
     if (NS_SUCCEEDED(Preferences::GetCString(aBackendPrefName, &prefString))) {
@@ -1573,22 +1593,6 @@ gfxPlatform::GetLowPrecisionResolution()
     }
 
     return sLowPrecisionResolution;
-}
-
-bool
-gfxPlatform::UseReusableTileStore()
-{
-    static bool sUseReusableTileStore;
-    static bool sUseReusableTileStorePrefCached = false;
-
-    if (!sUseReusableTileStorePrefCached) {
-        sUseReusableTileStorePrefCached = true;
-        mozilla::Preferences::AddBoolVarCache(&sUseReusableTileStore,
-                                              "layers.reuse-invalid-tiles",
-                                              false);
-    }
-
-    return sUseReusableTileStore;
 }
 
 bool

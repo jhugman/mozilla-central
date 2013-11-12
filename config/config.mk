@@ -195,9 +195,8 @@ MOZ_PSEUDO_DERECURSE :=
 endif
 endif
 
-# Disable MOZ_PSEUDO_DERECURSE on the second PGO pass until it's widely
-# tested.
-ifdef MOZ_PROFILE_USE
+# Disable MOZ_PSEUDO_DERECURSE on PGO builds until it's fixed.
+ifneq (,$(MOZ_PROFILE_USE)$(MOZ_PROFILE_GENERATE))
 MOZ_PSEUDO_DERECURSE :=
 endif
 
@@ -623,8 +622,13 @@ endif
 endif
 
 # Default location of include files
+ifndef LIBXUL_SDK
 IDL_PARSER_DIR = $(topsrcdir)/xpcom/idl-parser
 IDL_PARSER_CACHE_DIR = $(DEPTH)/xpcom/idl-parser
+else
+IDL_PARSER_DIR = $(LIBXUL_SDK)/sdk/bin
+IDL_PARSER_CACHE_DIR = $(LIBXUL_SDK)/sdk/bin
+endif
 
 SDK_LIB_DIR = $(DIST)/sdk/lib
 SDK_BIN_DIR = $(DIST)/sdk/bin
