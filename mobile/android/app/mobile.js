@@ -789,7 +789,6 @@ pref("browser.ui.linkify.phone", false);
 // Enables/disables Spatial Navigation
 pref("snav.enabled", true);
 
-pref("dom.mozApps.installSynthesizedApk", true);
 // jhugman's public server:
 pref("dom.mozApps.apkGeneratorEndpoint", "http://107.22.148.17:8080/application.apk");
 // mhaigh's private server:

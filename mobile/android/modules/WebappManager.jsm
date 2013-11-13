@@ -27,15 +27,9 @@ this.WebappManager = {
                                          Ci.nsISupportsWeakReference]),
 
   observe: function(aSubject, aTopic, aData) {
-    let data = {};
-    try {
-      data = JSON.parse(aData);
-      data.mm = aSubject;
-    } catch(ex) {}
-
     switch (aTopic) {
       case "webapps-download-apk":
-        this._downloadApk(data);
+        this._downloadApk(aData);
         break;
     }
   },
@@ -92,18 +86,32 @@ this.WebappManager = {
     }).bind(this);
   },
 
-  _downloadApk: function(aData) {
-    dump("Downloading apk from " + aData.generatorUrl);
+  _downloadApk: function(aManifestUrl) {
+    dump("_downloadApk for " + aManifestUrl);
+
+    // Get the endpoint URL and convert it to an nsIURI/nsIURL object.
+    const GENERATOR_URL_PREF = "dom.mozApps.apkGeneratorEndpoint";
+    const GENERATOR_URL_BASE = Services.prefs.getCharPref(GENERATOR_URL_PREF);
+    let generatorUrl = NetUtil.newURI(GENERATOR_URL_BASE).
+                       QueryInterface(Ci.nsIURL);
+
+    // Populate the query part of the URL with the manifest URL parameter.
+    let params = {
+      manifestUrl: aManifestUrl,
+    };
+    generatorUrl.query =
+      [p + "=" + encodeURIComponent(params[p]) for (p in params)].join("&");
+
+    // Trigger the download.
+    debug("downloading APK from " + generatorUrl.spec);
 
     let filePath = sendMessageToJava({
       type: "WebApps:GetTempFilePath",
-      fileName: aData.app.manifestURL.replace(/[^a-zA-Z0-9]/gi, "")
+      fileName: aManifestUrl.replace(/[^a-zA-Z0-9]/gi, "")
     });
-    dump("FileName : " + filePath);
+    dump("saving APK to " + filePath);
 
-    let uri = NetUtil.newURI(aData.generatorUrl);
-
-    NetUtil.asyncFetch(uri, function(aInputStream, aStatus) {
+    NetUtil.asyncFetch(generatorUrl, function(aInputStream, aStatus) {
       try {
         if (Components.isSuccessCode(aStatus)) {
           //let channel = aRequest.QueryInterface(Ci.nsIChannel);

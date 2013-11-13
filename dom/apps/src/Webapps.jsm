@@ -899,6 +899,7 @@ this.DOMApplicationRegistry = {
           ppmm.removeMessageListener(msgName, this);
         }).bind(this));
         Services.obs.removeObserver(this, "xpcom-shutdown");
+        Services.obs.removeObserver(this, "Webapps:AutoInstall");
         cpmm = null;
         ppmm = null;
         break;
@@ -954,36 +955,6 @@ this.DOMApplicationRegistry = {
     }
 
 
-  },
-
-  _downloadApk: function (aData, aMm) {
-
-    function getStringPref(pref, def) {
-      try {
-        return Services.prefs.getComplexValue(pref, Ci.nsISupportsString).data;
-      } catch (ex) {
-        return def;
-      }
-    }
-
-    // Get the endpoint URL and convert it to an nsIURI/nsIURL object.
-    let prefName = "dom.mozApps.apkGeneratorEndpoint";
-    let generatorUrl =
-      Services.io.newURI(getStringPref(prefName, null), null, null)
-              .QueryInterface(Ci.nsIURL);
-
-    // Populate the query part of the URL with the manifest URL parameter.
-    let params = {
-      manifestUrl: aData.app.manifestURL,
-    };
-    generatorUrl.query =
-      [p + "=" + encodeURIComponent(params[p]) for (p in params)].join("&");
-
-    // Trigger the download.
-    debug("_downloadApk from " + generatorUrl.spec);
-    aData.generatorUrl = generatorUrl.spec;
-    Services.obs.notifyObservers(aMm, "webapps-download-apk",
-                                 JSON.stringify(aData));
   },
 
 #endif
@@ -1140,12 +1111,11 @@ this.DOMApplicationRegistry = {
 
     switch (aMessage.name) {
       case "Webapps:Install": {
-        let prefName = "dom.mozApps.installSynthesizedApk";
-        if (!Services.prefs.prefHasUserValue(prefName) || Services.prefs.getBoolPref(prefName, true)) {
-          this._downloadApk(msg, mm);
-        } else {
-          this.doInstall(msg, mm);
-        }
+#ifdef MOZ_ANDROID_SYNTHAPKS
+        Services.obs.notifyObservers(null, "webapps-download-apk", msg.app.manifestURL);
+#else
+        this.doInstall(msg, mm);
+#endif
         break;
       }
       case "Webapps:GetSelf":
@@ -1170,13 +1140,11 @@ this.DOMApplicationRegistry = {
         this.doGetAll(msg, mm);
         break;
       case "Webapps:InstallPackage": {
-        let prefName = "dom.mozApps.installSynthesizedApk";
-        if (!Services.prefs.prefHasUserValue(prefName) || Services.prefs.getBoolPref(prefName, true)) {
-          msg.isPackage = true;
-          this._downloadApk(msg, mm);
-        } else {
-          this.doInstallPackage(msg, mm);
-        }
+#ifdef MOZ_ANDROID_SYNTHAPKS
+        Services.obs.notifyObservers(null, "webapps-download-apk", msg.app.manifestURL);
+#else
+        this.doInstallPackage(msg, mm);
+#endif
         break;
       }
       case "Webapps:RegisterForMessages":
