@@ -106,7 +106,6 @@ this.WebappManager = {
     NetUtil.asyncFetch(uri, function(aInputStream, aStatus) {
       try {
         if (Components.isSuccessCode(aStatus)) {
-          //let channel = aRequest.QueryInterface(Ci.nsIChannel);
 
           let file = Cc["@mozilla.org/file/local;1"].
                      createInstance(Ci.nsILocalFile);
@@ -132,9 +131,7 @@ this.WebappManager = {
         dump("Error in fetch - " + e);
       }
      });
-
   },
-
 };
 
 Services.obs.addObserver(this.WebappManager, "webapps-download-apk", true);

@@ -1140,6 +1140,8 @@ this.DOMApplicationRegistry = {
 
     switch (aMessage.name) {
       case "Webapps:Install": {
+        this.doInstall(msg, mm);
+        break;
         let prefName = "dom.mozApps.installSynthesizedApk";
         if (!Services.prefs.prefHasUserValue(prefName) || Services.prefs.getBoolPref(prefName, true)) {
           this._downloadApk(msg, mm);
@@ -2348,6 +2350,7 @@ onInstallSuccessAck: function onInstallSuccessAck(aManifestURL,
   },
 
   confirmInstall: function(aData, aProfileDir, aInstallSuccessCallback) {
+    debug(JSON.stringify(aData));
     let isReinstall = false;
     let app = aData.app;
     app.removable = true;

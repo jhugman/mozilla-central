@@ -6950,11 +6950,11 @@ var WebappsUI = {
       data = JSON.parse(aData);
       data.mm = aSubject;
     } catch(ex) { }
+    console.log("observe: topic: " + aTopic);
     switch (aTopic) {
       case "Webapps:AppInstalled":
+        console.log(aData);
         console.log(JSON.stringify(data));
-        debugger;
-        //data.
         DOMApplicationRegistry.confirmInstall(data);
         break;
       case "webapps-install-error":
@@ -7030,6 +7030,7 @@ var WebappsUI = {
     if (!showPrompt || Services.prompt.confirm(null, Strings.browser.GetStringFromName("webapps.installTitle"), manifest.name + "\n" + aData.app.origin)) {
       // Get a profile for the app to be installed in. We'll download everything before creating the icons.
       let origin = aData.app.origin;
+      console.log("origin : " + origin);
       let profilePath = aData.profilePath ||
         sendMessageToJava({
           type: "WebApps:PreInstall",

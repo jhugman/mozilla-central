@@ -29,7 +29,6 @@ public class InstallListener extends BroadcastReceiver {
     private static String LOGTAG = "GeckoInstallListener";
 
     public void onReceive(Context context, Intent intent) {
-        Log.i(LOGTAG, "No package name defined in intent");
         String packageName = intent.getData().getSchemeSpecificPart();
 
         if (TextUtils.isEmpty(packageName)) {
@@ -64,8 +63,9 @@ public class InstallListener extends BroadcastReceiver {
             Log.i(LOGTAG, "miniContent = " + miniContent);
 
             GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent(
-                        "Webapps:AppInstalled", "{\"manifestUrl\":\"" + manifestUrl + "\"," +
-                                                  "\"packageName\":\"" + packageName + "\"}"));
+                        "Webapps:AppInstalled", "{\"app\": {\"manifestURL\":\"" + manifestUrl + "\"," +
+                                                "\"packageName\":\"" + packageName + "\"," + 
+                                                "\"manifest\": " + manifestContent + "}}"));
         } 
     }
 
@@ -80,7 +80,7 @@ public class InstallListener extends BroadcastReceiver {
               fileContent.append(line);
           }
         } catch (FileNotFoundException e) {
-            Log.e(LOGTAG, "file note found: " + resourceName);
+            Log.e(LOGTAG, String.format("file not found: \"%s\"", resourceName));
         } catch (IOException e) {
             Log.e(LOGTAG, "couldn't read file: " + resourceName);
         }  
