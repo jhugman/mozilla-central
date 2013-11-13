@@ -7,16 +7,39 @@
 this.EXPORTED_SYMBOLS = ["WebappManager"];
 
 const Cc = Components.classes;
+const Ci = Components.interfaces;
 const Cu = Components.utils;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/NetUtil.jsm");
+Cu.import("resource://gre/modules/FileUtils.jsm");
 
 function dump(a) {
   Services.console.logStringMessage(a);
 }
 
+function sendMessageToJava(aMessage) {
+  return Services.androidBridge.handleGeckoMessage(JSON.stringify(aMessage));
+}
 this.WebappManager = {
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver,
+                                         Ci.nsISupportsWeakReference]),
+
+  observe: function(aSubject, aTopic, aData) {
+    let data = {};
+    try {
+      data = JSON.parse(aData);
+      data.mm = aSubject;
+    } catch(ex) {}
+
+    switch (aTopic) {
+      case "webapps-download-apk":
+        this._downloadApk(data);
+        break;
+    }
+  },
+
   _checkingForUpdates: false,
 
   _updateApps: function(aApps) {
@@ -67,5 +90,51 @@ this.WebappManager = {
       // Could not get the app list, just notify to update nothing.
       this._updateApps([]);
     }).bind(this);
-  }
+  },
+
+  _downloadApk: function(aData) {
+    dump("Downloading apk from " + aData.generatorUrl);
+
+    let filePath = sendMessageToJava({
+      type: "WebApps:GetTempFilePath",
+      fileName: aData.app.manifestURL.replace(/[^a-zA-Z0-9]/gi, "")
+    });
+    dump("FileName : " + filePath);
+
+    let uri = NetUtil.newURI(aData.generatorUrl);
+
+    NetUtil.asyncFetch(uri, function(aInputStream, aStatus) {
+      try {
+        if (Components.isSuccessCode(aStatus)) {
+          //let channel = aRequest.QueryInterface(Ci.nsIChannel);
+
+          let file = Cc["@mozilla.org/file/local;1"].
+                     createInstance(Ci.nsILocalFile);
+          file.initWithPath(filePath);
+
+          let outputStream = FileUtils.openSafeFileOutputStream(file);
+
+          NetUtil.asyncCopy(aInputStream, outputStream, function(aResult) {
+            if (!Components.isSuccessCode(aResult)) {
+              dump("Downloading failed")
+            } else {
+              dump("Downloaded successfully");
+              sendMessageToJava({
+                type: "WebApps:InstallApk",
+                filePath: filePath
+              });
+            }
+          });
+         } else {
+           dump("can't download - status returned: " + aStatus);
+         }
+      } catch (e) {
+        dump("Error in fetch - " + e);
+      }
+     });
+
+  },
+
 };
+
+Services.obs.addObserver(this.WebappManager, "webapps-download-apk", true);

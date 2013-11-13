@@ -1,7 +1,6 @@
-#filter substitution
-package @ANDROID_PACKAGE_NAME@.tests;
+package org.mozilla.gecko.tests;
 
-import @ANDROID_PACKAGE_NAME@.*;
+import org.mozilla.gecko.*;
 
 import com.jayway.android.robotium.solo.Condition;
 
@@ -34,7 +33,8 @@ public class testWebapp extends BaseTest {
             public boolean isSatisfied() {
                 return false;
             }
-        }, MAX_WAIT_ENABLED_TEXT_MS);
+        // }, MAX_WAIT_ENABLED_TEXT_MS);
+        }, 30000);
     }
 
     protected final void setPref() {
@@ -60,7 +60,7 @@ public class testWebapp extends BaseTest {
                 requestId = data.getInt("requestId");
             }
             eventExpecter.unregisterListener();
-        } catch (Exception ex) { 
+        } catch (Exception ex) {
             mAsserter.ok(false, "exception in testWebapp", ex.toString());
         }
     }
