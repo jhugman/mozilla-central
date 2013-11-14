@@ -18,7 +18,7 @@ public class testWebapp extends BaseTest {
     }
 
     public void testWebapp() {
-        String url = getAbsoluteUrl("/robocop/robocop_webapp.html");
+        String url = getAbsoluteUrl("/robocop/robocop_webapp_installer.html");
 
         blockForGeckoReady();
         setPref();
