@@ -125,7 +125,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 abstract public class GeckoApp
-                extends GeckoActivity 
+                extends GeckoActivity
     implements GeckoEventListener, SensorEventListener, LocationListener,
                            Tabs.OnTabsChangedListener, GeckoEventResponder,
                            GeckoMenu.Callback, GeckoMenu.MenuPresenter,
@@ -387,9 +387,9 @@ abstract public class GeckoApp
                 onPreparePanel(featureId, mMenuPanel, mMenu);
             }
 
-            return mMenuPanel; 
+            return mMenuPanel;
         }
-  
+
         return super.onCreatePanelView(featureId);
     }
 
@@ -464,7 +464,7 @@ abstract public class GeckoApp
             mMenuPanel.addView((GeckoMenu) mMenu);
         }
     }
- 
+
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         // Handle hardware menu key presses separately so that we can show a custom menu in some cases.
@@ -631,6 +631,7 @@ abstract public class GeckoApp
                     return;
                 startActivity(intent);
             } else if (event.equals("WebApps:Install")) {
+                // TODO delete this message. It's not used.
                 String name = message.getString("name");
                 String manifestURL = message.getString("manifestURL");
                 String iconURL = message.getString("iconURL");
@@ -640,6 +641,7 @@ abstract public class GeckoApp
                 mCurrentResponse = GeckoAppShell.preInstallWebApp(name, manifestURL, packageName).toString();
                 GeckoAppShell.postInstallWebApp(name, manifestURL, packageName, iconURL, origin);
             } else if (event.equals("WebApps:PreInstall")) {
+                // is any of this needed now?
                 String name = message.getString("name");
                 String manifestURL = message.getString("manifestURL");
                 String origin = message.getString("origin");
@@ -687,19 +689,19 @@ abstract public class GeckoApp
                 } else {
                     mPrivateBrowsingSession = message.getString("session");
                 }
-            } else if (event.equals("Contact:Add")) {                
+            } else if (event.equals("Contact:Add")) {
                 if (!message.isNull("email")) {
-                    Uri contactUri = Uri.parse(message.getString("email"));       
+                    Uri contactUri = Uri.parse(message.getString("email"));
                     Intent i = new Intent(ContactsContract.Intents.SHOW_OR_CREATE_CONTACT, contactUri);
                     startActivity(i);
                 } else if (!message.isNull("phone")) {
-                    Uri contactUri = Uri.parse(message.getString("phone"));       
+                    Uri contactUri = Uri.parse(message.getString("phone"));
                     Intent i = new Intent(ContactsContract.Intents.SHOW_OR_CREATE_CONTACT, contactUri);
                     startActivity(i);
                 } else {
                     // something went wrong.
                     Log.e(LOGTAG, "Received Contact:Add message with no email nor phone number");
-                }                
+                }
             } else if (event.equals("Intent:GetHandlers")) {
                 Intent intent = GeckoAppShell.getOpenURIIntent(sAppContext, message.optString("url"),
                     message.optString("mime"), message.optString("action"), message.optString("title"));
@@ -1072,7 +1074,7 @@ abstract public class GeckoApp
     public void requestRender() {
         mLayerView.requestRender();
     }
-    
+
     public void hidePlugins(Tab tab) {
         for (Layer layer : tab.getPluginLayers()) {
             if (layer instanceof PluginLayer) {
@@ -1505,6 +1507,8 @@ abstract public class GeckoApp
         registerEventListener("Accessibility:Ready");
         registerEventListener("Shortcut:Remove");
         registerEventListener("WebApps:Open");
+
+        // TODO move install related things into WebAppImpl
         registerEventListener("WebApps:PreInstall");
         registerEventListener("WebApps:PostInstall");
         registerEventListener("WebApps:Install");
@@ -1866,6 +1870,7 @@ abstract public class GeckoApp
                                             Tabs.LOADURL_USER_ENTERED |
                                             Tabs.LOADURL_EXTERNAL);
         } else if (action != null && action.startsWith(ACTION_WEBAPP_PREFIX)) {
+            // TODO make sure that this works with synthapks.
             String uri = getURIFromIntent(intent);
             GeckoAppShell.sendEventToGecko(GeckoEvent.createWebappLoadEvent(uri));
         } else if (ACTION_BOOKMARK.equals(action)) {
