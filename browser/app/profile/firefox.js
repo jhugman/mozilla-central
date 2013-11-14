@@ -818,6 +818,9 @@ pref("urlclassifier.gethashnoise", 4);
 // a gethash request will be forced to check that the result is still in
 // the database.
 pref("urlclassifier.max-complete-age", 2700);
+// Tables for application reputation.
+pref("urlclassifier.download_block_table", "goog-badbinurl-shavar");
+pref("urlclassifier.download_allow_table", "goog-downloadwhite-digest256");
 #endif
 
 pref("browser.geolocation.warning.infoURL", "https://www.mozilla.org/%LOCALE%/firefox/geolocation/");
@@ -1078,7 +1081,7 @@ pref("devtools.commands.dir", "");
 
 // Enable the app manager
 pref("devtools.appmanager.enabled", true);
-pref("devtools.appmanager.lastTab", "help");
+pref("devtools.appmanager.firstrun", true);
 pref("devtools.appmanager.manifestEditor.enabled", false);
 
 // Toolbox preferences
@@ -1206,6 +1209,11 @@ pref("devtools.webconsole.fontSize", 0);
 // logged messages after reloading the page, |false| if you want the output to
 // be cleared each time page navigation happens.
 pref("devtools.webconsole.persistlog", false);
+
+// Web Console timestamp: |true| if you want the logs and instructions
+// in the Web Console to display a timestamp, or |false| to not display
+// any timestamps.
+pref("devtools.webconsole.timestampMessages", false);
 
 // The number of lines that are displayed in the web console for the Net,
 // CSS, JS and Web Developer categories.

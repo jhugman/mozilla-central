@@ -6,11 +6,13 @@
 package org.mozilla.gecko;
 
 import java.io.File;
+import java.net.MalformedURLException;
 import java.net.URL;
 
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.mozilla.gecko.webapp.InstallHelper;
+import org.mozilla.gecko.webapp.InstallHelper.InstallCallback;
 
 import android.content.Context;
 import android.content.Intent;
@@ -30,7 +32,7 @@ import android.view.animation.AnimationUtils;
 import android.widget.ImageView;
 import android.widget.TextView;
 
-public class WebAppImpl extends GeckoApp {
+public class WebAppImpl extends GeckoApp implements InstallCallback {
     private static final String LOGTAG = "GeckoWebAppImpl";
 
     private static final String[] INSTALL_EVENT_NAMES = new String[] {"WebApps:PostInstall"};
@@ -50,23 +52,33 @@ public class WebAppImpl extends GeckoApp {
     public boolean hasTabsSideBar() { return false; }
 
     @Override
-    public void onCreate(Bundle extras)
+    public void onCreate(Bundle savedInstance)
     {
-        super.onCreate(extras);
+        super.onCreate(savedInstance);
 
         String action = getIntent().getAction();
-        extras = null;
+        Bundle extras = getIntent().getExtras();
         if (extras == null) {
-            extras = getIntent().getExtras();
+            extras = savedInstance;
+        }
+
+        if (extras == null) {
+            extras = new Bundle();
         }
 
         boolean isInstalled = extras.getBoolean("isInstalled", false);
 
+
+        mTitlebarText = (TextView)findViewById(R.id.webapp_title);
+        mTitlebar = findViewById(R.id.webapp_titlebar);
         mSplashscreen = findViewById(R.id.splashscreen);
+
         if (!GeckoThread.checkLaunchState(GeckoThread.LaunchState.GeckoRunning) || !isInstalled) {
             // Show the splash screen if we need to start Gecko, or we need to install this.
             overridePendingTransition(R.anim.grow_fade_in_center, android.R.anim.fade_out);
             showSplash(isInstalled);
+        } else {
+            mSplashscreen.setVisibility(View.GONE);
         }
 
         if (!isInstalled) {
@@ -76,9 +88,6 @@ public class WebAppImpl extends GeckoApp {
 
         String title = extras != null ? extras.getString(Intent.EXTRA_SHORTCUT_NAME) : null;
         setTitle(title != null ? title : "Web App");
-
-        mTitlebarText = (TextView)findViewById(R.id.webapp_title);
-        mTitlebar = findViewById(R.id.webapp_titlebar);
 
         // Try to use the origin stored in the WebAppAllocator first
         String origin = WebAppAllocator.getInstance(this).getAppForIndex(getIndex());
@@ -117,6 +126,8 @@ public class WebAppImpl extends GeckoApp {
     @Override
     protected void loadStartupTab(String uri) {
         String action = getIntent().getAction();
+
+        // This is almost certainly redundant.
         if (GeckoApp.ACTION_WEBAPP_PREFIX.equals(action)) {
             // This action assumes the uri is not an installed WebApp. We will
             // use the WebAppAllocator to register the uri with an Android
@@ -241,22 +252,10 @@ public class WebAppImpl extends GeckoApp {
                         mTitlebar.setVisibility(View.VISIBLE);
                     }
                 }
+                hideSplash();
                 break;
             case LOADED:
-                if (mSplashscreen != null && mSplashscreen.getVisibility() == View.VISIBLE) {
-                    Animation fadeout = AnimationUtils.loadAnimation(this, android.R.anim.fade_out);
-                    fadeout.setAnimationListener(new Animation.AnimationListener() {
-                        @Override
-                        public void onAnimationEnd(Animation animation) {
-                          mSplashscreen.setVisibility(View.GONE);
-                        }
-                        @Override
-                        public void onAnimationRepeat(Animation animation) { }
-                        @Override
-                        public void onAnimationStart(Animation animation) { }
-                    });
-                    mSplashscreen.startAnimation(fadeout);
-                }
+                hideSplash();
                 break;
             case START:
                 if (mSplashscreen != null && mSplashscreen.getVisibility() == View.VISIBLE) {
@@ -271,8 +270,25 @@ public class WebAppImpl extends GeckoApp {
         super.onTabChanged(tab, msg, data);
     }
 
+    protected void hideSplash() {
+                if (mSplashscreen != null && mSplashscreen.getVisibility() == View.VISIBLE) {
+                    Animation fadeout = AnimationUtils.loadAnimation(this, android.R.anim.fade_out);
+                    fadeout.setAnimationListener(new Animation.AnimationListener() {
+                        @Override
+                        public void onAnimationEnd(Animation animation) {
+                          mSplashscreen.setVisibility(View.GONE);
+                        }
+                        @Override
+                        public void onAnimationRepeat(Animation animation) { }
+                        @Override
+                        public void onAnimationStart(Animation animation) { }
+                    });
+                    mSplashscreen.startAnimation(fadeout);
+                }
+    }
+
     protected void startInstall(Bundle extras) {
-        InstallHelper installHelper = new InstallHelper(this.getApplicationContext());
+        InstallHelper installHelper = new InstallHelper(this.getApplicationContext(), this);
         JSONObject message = installHelper.createInstallMessage(extras);
 
         if (message == null) {
@@ -286,18 +302,40 @@ public class WebAppImpl extends GeckoApp {
             // NOP
         }
 
-        Log.i(LOGTAG, "Installing app: \n" + message.toString());
-
         for (String eventName : INSTALL_EVENT_NAMES) {
             GeckoAppShell.registerEventListener(eventName, installHelper);
         }
         GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Webapps:AutoInstall", message.toString()));
     }
 
-    public void installCompleted(InstallHelper installHelper) {
+    @Override
+    public void installCompleted(InstallHelper installHelper, String event, JSONObject message) {
 
         for (String eventName : INSTALL_EVENT_NAMES) {
             GeckoAppShell.unregisterEventListener(eventName, installHelper);
+        }
+
+        if (event == null) {
+            return;
+        }
+
+
+        if (event.equals("WebApps:PostInstall")) {
+            try {
+                mOrigin = new URL(message.optString("origin"));
+            } catch (MalformedURLException e) {
+                Log.e(LOGTAG, "Cannot decode origin", e);
+            }
+            JSONObject launchObject = new JSONObject();
+            try {
+                launchObject.putOpt("url", message.optString("manifestURL"));
+                launchObject.putOpt("name", message.optString("name", "WebApp"));
+            } catch (JSONException e) {
+                Log.e(LOGTAG, "Error populating launch message", e);
+            }
+
+            Log.i(LOGTAG, "Trying to launch: " + launchObject);
+            GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Webapps:LaunchFromJava", launchObject.toString()));
         }
 
     }

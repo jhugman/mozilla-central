@@ -296,6 +296,7 @@ var BrowserApp = {
     Services.obs.addObserver(this, "FormHistory:Init", false);
     Services.obs.addObserver(this, "gather-telemetry", false);
     Services.obs.addObserver(this, "keyword-search", false);
+    Services.obs.addObserver(this, "Webapps:LaunchFromJava", false);
 
     Services.obs.addObserver(this, "sessionstore-state-purge-complete", false);
 
@@ -841,6 +842,15 @@ var BrowserApp = {
       tabID: aTab.id
     };
     sendMessageToJava(message);
+  },
+
+  _launchWebAppFromJava: function (aMessage) {
+    let url = aMessage.url;
+
+    WebAppRT.init(status, url, function(aUrl) {
+      BrowserApp.manifestUrl = url;
+      BrowserApp.addTab(aUrl, { title: aMessage.name });
+    });
   },
 
   // Calling this will update the state in BrowserApp after a tab has been
@@ -1500,6 +1510,10 @@ var BrowserApp = {
 
       case "nsPref:changed":
         this.notifyPrefObservers(aData);
+        break;
+
+      case "Webapps:LaunchFromJava":
+        this._launchWebAppFromJava(JSON.parse(aData));
         break;
 
       default:
@@ -7075,8 +7089,7 @@ var WebappsUI = {
                     name: localeManifest.name,
                     manifestURL: aData.app.manifestURL,
                     originalOrigin: origin,
-                    origin: aData.app.origin,
-                    iconURL: fullsizeIcon
+                    origin: aData.app.origin
                   });
                   if (!!aData.isPackage) {
                     // For packaged apps, put a notification in the notification bar.

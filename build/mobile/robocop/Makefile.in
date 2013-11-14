@@ -60,6 +60,7 @@ MOCHITEST_ROBOCOP_FILES := \
   $(wildcard $(TESTPATH)/test*.js) \
   $(wildcard $(TESTPATH)/robocop*.js) \
   $(wildcard $(TESTPATH)/*.xml) \
+  $(wildcard $(TESTPATH)/*.apk) \
   $(NULL)
 
 GARBAGE += \
