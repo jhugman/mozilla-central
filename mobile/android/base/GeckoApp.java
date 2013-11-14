@@ -649,7 +649,7 @@ abstract public class GeckoApp
             } else if (event.equals("WebApps:PostInstall")) {
                 String name = message.getString("name");
                 String manifestURL = message.getString("manifestURL");
-                String iconURL = message.getString("iconURL");
+                String iconURL = message.optString("iconURL");
                 String originalOrigin = message.getString("originalOrigin");
                 String origin = message.getString("origin");
                 String packageName = message.getString("packageName");
