@@ -18,8 +18,15 @@ public class InstallHelper implements GeckoEventListener {
 
     private final Context mContext;
 
-    public InstallHelper(Context context) {
+    private final InstallCallback mCallback;
+
+    public static interface InstallCallback {
+        void installCompleted(InstallHelper installHelper, String event, JSONObject message);
+    }
+
+    public InstallHelper(Context context, InstallCallback cb) {
         mContext = context;
+        mCallback = cb;
     }
 
     public JSONObject createInstallMessage(Bundle extras) {
@@ -38,30 +45,28 @@ public class InstallHelper implements GeckoEventListener {
 
     private JSONObject getInstallMessageFromPackage(String packageName) throws NameNotFoundException, MalformedURLException, JSONException {
 
-        Bundle metadata = getPackageMetadata(packageName);
+        ApplicationInfo app = mContext.getPackageManager()
+                .getApplicationInfo(packageName,
+                        PackageManager.GET_META_DATA);
+
+        Bundle metadata = app.metaData;
         String urlString = metadata.getString("manifestUrl");
 
         JSONObject messageObject = new JSONObject();
         messageObject.putOpt("manifestUrl", urlString);
         messageObject.putOpt("type", metadata.getString("webapp"));
         messageObject.putOpt("packageName", packageName);
-
+        messageObject.putOpt("title", app.name);
         return messageObject;
-    }
-
-    protected Bundle getPackageMetadata(String packageName)
-            throws NameNotFoundException {
-        ApplicationInfo app = mContext.getPackageManager()
-                .getApplicationInfo(packageName,
-                        PackageManager.GET_META_DATA);
-
-        Bundle metadata = app.metaData;
-        return metadata;
     }
 
     @Override
     public void handleMessage(String event, JSONObject message) {
         Log.i(LOGTAG, "Install complete: " + event + "\n" + message);
+
+        mCallback.installCompleted(this, event, message);
+
+
     }
 
 }

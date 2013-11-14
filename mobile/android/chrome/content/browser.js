@@ -296,6 +296,7 @@ var BrowserApp = {
     Services.obs.addObserver(this, "FormHistory:Init", false);
     Services.obs.addObserver(this, "gather-telemetry", false);
     Services.obs.addObserver(this, "keyword-search", false);
+    Services.obs.addObserver(this, "Webapps:LaunchFromJava", false);
 
     Services.obs.addObserver(this, "sessionstore-state-purge-complete", false);
 
@@ -841,6 +842,15 @@ var BrowserApp = {
       tabID: aTab.id
     };
     sendMessageToJava(message);
+  },
+
+  _launchWebAppFromJava: function (aMessage) {
+    let url = aMessage.url;
+
+    WebAppRT.init(status, url, function(aUrl) {
+      BrowserApp.manifestUrl = url;
+      BrowserApp.addTab(aUrl, { title: aMessage.name });
+    });
   },
 
   // Calling this will update the state in BrowserApp after a tab has been
@@ -1500,6 +1510,10 @@ var BrowserApp = {
 
       case "nsPref:changed":
         this.notifyPrefObservers(aData);
+        break;
+
+      case "Webapps:LaunchFromJava":
+        this._launchWebAppFromJava(JSON.parse(aData));
         break;
 
       default:
@@ -6950,12 +6964,16 @@ var WebappsUI = {
       data = JSON.parse(aData);
       data.mm = aSubject;
     } catch(ex) { }
+    console.log("observe: topic: " + aTopic);
     switch (aTopic) {
       case "Webapps:AppInstalled":
-        console.log(JSON.stringify(data));
-        debugger;
-        //data.
-        DOMApplicationRegistry.confirmInstall(data);
+        console.log("aData:" + aData);
+        DOMApplicationRegistry.confirmInstall(data, null, function() {
+          // ooh - what to put here?
+          // we currently don't have the profile path as it's not been installed yet.  
+          // we prob just need to inform the system that we've installed so that the ui can update
+        });
+        console.log("END OF APP INSTALLED");
         break;
       case "webapps-install-error":
         let msg = "";
@@ -7030,6 +7048,7 @@ var WebappsUI = {
     if (!showPrompt || Services.prompt.confirm(null, Strings.browser.GetStringFromName("webapps.installTitle"), manifest.name + "\n" + aData.app.origin)) {
       // Get a profile for the app to be installed in. We'll download everything before creating the icons.
       let origin = aData.app.origin;
+      console.log("origin : " + origin);
       let profilePath = aData.profilePath ||
         sendMessageToJava({
           type: "WebApps:PreInstall",
@@ -7070,8 +7089,7 @@ var WebappsUI = {
                     name: localeManifest.name,
                     manifestURL: aData.app.manifestURL,
                     originalOrigin: origin,
-                    origin: aData.app.origin,
-                    iconURL: fullsizeIcon
+                    origin: aData.app.origin
                   });
                   if (!!aData.isPackage) {
                     // For packaged apps, put a notification in the notification bar.
