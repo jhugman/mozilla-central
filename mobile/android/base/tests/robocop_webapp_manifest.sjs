@@ -1,7 +1,7 @@
 let manifest = {
-  "name": "Android Test",
-  "launch_path": "/robocop/robocop_webapp_main.html",
-  "installs_allowed_from": ["*"],
+  name: "Android Test",
+  launch_path: "/robocop/robocop_webapp_main.html",
+  installs_allowed_from: ["*"],
 };
 
 function handleRequest(request, response) {
