@@ -194,6 +194,11 @@ static NS_DEFINE_CID(kAppShellCID, NS_APPSHELL_CID);
 #define DEBUG_PAGE_CACHE
 #endif
 
+#ifdef XP_WIN
+#include <process.h>
+#define getpid _getpid
+#endif
+
 using namespace mozilla;
 using namespace mozilla::dom;
 
@@ -644,6 +649,7 @@ ConvertLoadTypeToNavigationType(uint32_t aLoadType)
     case LOAD_NORMAL_BYPASS_PROXY:
     case LOAD_NORMAL_BYPASS_PROXY_AND_CACHE:
     case LOAD_NORMAL_REPLACE:
+    case LOAD_NORMAL_ALLOW_MIXED_CONTENT:
     case LOAD_LINK:
     case LOAD_STOP_CONTENT:
     case LOAD_REPLACE_BYPASS_CACHE:
@@ -755,6 +761,7 @@ nsDocShell::nsDocShell():
     mIsAppTab(false),
     mUseGlobalHistory(false),
     mInPrivateBrowsing(false),
+    mDeviceSizeIsPageSize(false),
     mFiredUnloadEvent(false),
     mEODForCurrentDocument(false),
     mURIResultedInDocument(false),
@@ -795,8 +802,11 @@ nsDocShell::nsDocShell():
   // We're counting the number of |nsDocShells| to help find leaks
   ++gNumberOfDocShells;
   if (!PR_GetEnv("MOZ_QUIET")) {
-      printf("++DOCSHELL %p == %ld [id = %llu]\n", (void*) this,
-             gNumberOfDocShells, SafeCast<unsigned long long>(mHistoryID));
+      printf_stderr("++DOCSHELL %p == %ld [pid = %d] [id = %llu]\n",
+                    (void*) this,
+                    gNumberOfDocShells,
+                    getpid(),
+                    SafeCast<unsigned long long>(mHistoryID));
   }
 #endif
 }
@@ -824,8 +834,11 @@ nsDocShell::~nsDocShell()
     // We're counting the number of |nsDocShells| to help find leaks
     --gNumberOfDocShells;
     if (!PR_GetEnv("MOZ_QUIET")) {
-        printf("--DOCSHELL %p == %ld [id = %llu]\n", (void*) this,
-               gNumberOfDocShells, SafeCast<unsigned long long>(mHistoryID));
+        printf_stderr("--DOCSHELL %p == %ld [pid = %d] [id = %llu]\n",
+                      (void*) this,
+                      gNumberOfDocShells,
+                      getpid(),
+                      SafeCast<unsigned long long>(mHistoryID));
     }
 #endif
 }
@@ -897,7 +910,6 @@ NS_INTERFACE_MAP_BEGIN(nsDocShell)
     NS_INTERFACE_MAP_ENTRY(nsIScrollable)
     NS_INTERFACE_MAP_ENTRY(nsITextScroll)
     NS_INTERFACE_MAP_ENTRY(nsIDocCharset)
-    NS_INTERFACE_MAP_ENTRY(nsIScriptGlobalObjectOwner)
     NS_INTERFACE_MAP_ENTRY(nsIRefreshURI)
     NS_INTERFACE_MAP_ENTRY(nsIWebProgressListener)
     NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
@@ -1100,6 +1112,9 @@ ConvertDocShellLoadInfoToLoadType(nsDocShellInfoLoadType aDocShellLoadType)
     case nsIDocShellLoadInfo::loadNormalBypassProxyAndCache:
         loadType = LOAD_NORMAL_BYPASS_PROXY_AND_CACHE;
         break;
+    case nsIDocShellLoadInfo::loadNormalAllowMixedContent:
+        loadType = LOAD_NORMAL_ALLOW_MIXED_CONTENT;
+        break;
     case nsIDocShellLoadInfo::loadReloadNormal:
         loadType = LOAD_RELOAD_NORMAL;
         break;
@@ -1136,7 +1151,7 @@ ConvertDocShellLoadInfoToLoadType(nsDocShellInfoLoadType aDocShellLoadType)
     case nsIDocShellLoadInfo::loadReplaceBypassCache:
         loadType = LOAD_REPLACE_BYPASS_CACHE;
         break;
-    case nsIDocShellLoadInfo::loadMixedContent:
+    case nsIDocShellLoadInfo::loadReloadMixedContent:
         loadType = LOAD_RELOAD_ALLOW_MIXED_CONTENT;
         break;
     default:
@@ -1169,6 +1184,9 @@ nsDocShell::ConvertLoadTypeToDocShellLoadInfo(uint32_t aLoadType)
         break;
     case LOAD_NORMAL_BYPASS_PROXY_AND_CACHE:
         docShellLoadType = nsIDocShellLoadInfo::loadNormalBypassProxyAndCache;
+        break;
+    case LOAD_NORMAL_ALLOW_MIXED_CONTENT:
+        docShellLoadType = nsIDocShellLoadInfo::loadNormalAllowMixedContent;
         break;
     case LOAD_HISTORY:
         docShellLoadType = nsIDocShellLoadInfo::loadHistory;
@@ -1211,7 +1229,7 @@ nsDocShell::ConvertLoadTypeToDocShellLoadInfo(uint32_t aLoadType)
         docShellLoadType = nsIDocShellLoadInfo::loadReplaceBypassCache;
         break;
     case LOAD_RELOAD_ALLOW_MIXED_CONTENT:
-        docShellLoadType = nsIDocShellLoadInfo::loadMixedContent;
+        docShellLoadType = nsIDocShellLoadInfo::loadReloadMixedContent;
         break;
     default:
         NS_NOTREACHED("Unexpected load type value");
@@ -3920,6 +3938,34 @@ nsDocShell::GetCurrentSHEntry(nsISHEntry** aEntry, bool* aOSHE)
     return NS_OK;
 }
 
+nsIScriptGlobalObject*
+nsDocShell::GetScriptGlobalObject()
+{
+    NS_ENSURE_SUCCESS(EnsureScriptEnvironment(), nullptr);
+    return mScriptGlobal;
+}
+
+NS_IMETHODIMP
+nsDocShell::SetDeviceSizeIsPageSize(bool aValue)
+{
+    if (mDeviceSizeIsPageSize != aValue) {
+      mDeviceSizeIsPageSize = aValue;
+      nsRefPtr<nsPresContext> presContext;
+      GetPresContext(getter_AddRefs(presContext));
+      if (presContext) {
+          presContext->MediaFeatureValuesChanged(presContext->eAlwaysRebuildStyle);
+      }
+    }
+    return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShell::GetDeviceSizeIsPageSize(bool* aValue)
+{
+    *aValue = mDeviceSizeIsPageSize;
+    return NS_OK;
+}
+
 void
 nsDocShell::ClearFrameHistory(nsISHEntry* aEntry)
 {
@@ -4135,8 +4181,18 @@ nsDocShell::LoadURI(const PRUnichar * aURI,
     nsCOMPtr<nsIDocShellLoadInfo> loadInfo;
     rv = CreateLoadInfo(getter_AddRefs(loadInfo));
     if (NS_FAILED(rv)) return rv;
-    
-    uint32_t loadType = MAKE_LOAD_TYPE(LOAD_NORMAL, aLoadFlags);
+
+    /*
+     * If the user "Disables Protection on This Page", we have to make sure to
+     * remember the users decision when opening links in child tabs [Bug 906190]
+     */
+    uint32_t loadType;
+    if (aLoadFlags & LOAD_FLAGS_ALLOW_MIXED_CONTENT) {
+      loadType = MAKE_LOAD_TYPE(LOAD_NORMAL_ALLOW_MIXED_CONTENT, aLoadFlags);
+    } else {
+      loadType = MAKE_LOAD_TYPE(LOAD_NORMAL, aLoadFlags);
+    }
+
     loadInfo->SetLoadType(ConvertLoadTypeToDocShellLoadInfo(loadType));
     loadInfo->SetPostDataStream(postStream);
     loadInfo->SetReferrer(aReferringURI);
@@ -4928,6 +4984,10 @@ nsDocShell::Create()
                                      mUseErrorPages);
         gAddedPreferencesVarCache = true;
     }
+
+    mDeviceSizeIsPageSize =
+        Preferences::GetBool("docshell.device_size_is_page_size",
+                             mDeviceSizeIsPageSize);
 
     nsCOMPtr<nsIObserverService> serv = services::GetObserverService();
     if (serv) {
@@ -5816,17 +5876,6 @@ nsDocShell::ScrollByPages(int32_t numPages)
     sf->ScrollBy(nsIntPoint(0, numPages), nsIScrollableFrame::PAGES,
                  nsIScrollableFrame::SMOOTH);
     return NS_OK;
-}
-
-//*****************************************************************************
-// nsDocShell::nsIScriptGlobalObjectOwner
-//*****************************************************************************   
-
-nsIScriptGlobalObject*
-nsDocShell::GetScriptGlobalObject()
-{
-    NS_ENSURE_SUCCESS(EnsureScriptEnvironment(), nullptr);
-    return mScriptGlobal;
 }
 
 //*****************************************************************************
@@ -9632,7 +9681,8 @@ nsDocShell::DoURILoad(nsIURI * aURI,
         }
     }
 
-    if (mLoadType == LOAD_RELOAD_ALLOW_MIXED_CONTENT) {
+    if (mLoadType == LOAD_NORMAL_ALLOW_MIXED_CONTENT ||
+        mLoadType == LOAD_RELOAD_ALLOW_MIXED_CONTENT) {
           rv = SetMixedContentChannel(channel);
           NS_ENSURE_SUCCESS(rv, rv);
     } else if (mMixedContentChannel) {
@@ -9914,6 +9964,7 @@ nsresult nsDocShell::DoChannelLoad(nsIChannel * aChannel,
     case LOAD_NORMAL_BYPASS_CACHE:
     case LOAD_NORMAL_BYPASS_PROXY:
     case LOAD_NORMAL_BYPASS_PROXY_AND_CACHE:
+    case LOAD_NORMAL_ALLOW_MIXED_CONTENT:
     case LOAD_RELOAD_BYPASS_CACHE:
     case LOAD_RELOAD_BYPASS_PROXY:
     case LOAD_RELOAD_BYPASS_PROXY_AND_CACHE:

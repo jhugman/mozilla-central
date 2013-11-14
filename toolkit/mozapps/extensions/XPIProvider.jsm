@@ -1198,59 +1198,57 @@ function saveStreamAsync(aPath, aStream, aFile) {
 function extractFilesAsync(aZipFile, aDir) {
   let zipReader = Cc["@mozilla.org/libjar/zip-reader;1"].
                   createInstance(Ci.nsIZipReader);
-  zipReader.open(aZipFile);
 
-  let promises = [];
-
-  // Get all of the entries in the zip and sort them so we create directories
-  // before files
-  let entries = zipReader.findEntries(null);
-  let names = [];
-  while (entries.hasMore())
-    names.push(entries.getNext());
-  names.sort();
-
-  for (let name of names) {
-    let entryName = name;
-    let zipentry = zipReader.getEntry(name);
-    let path = OS.Path.join(aDir.path, ...name.split("/"));
-
-    if (zipentry.isDirectory) {
-      promises.push(OS.File.makeDir(path).then(null, function(e) {
-        ERROR("extractFilesAsync: failed to create directory " + path, e);
-        throw e;
-      }));
-    }
-    else {
-      let options = { unixMode: zipentry.permissions | FileUtils.PERMS_FILE };
-      let promise = OS.File.open(path, { truncate: true }, options).then(function(file) {
-        if (zipentry.realSize == 0)
-          return file.close();
-
-        return saveStreamAsync(path, zipReader.getInputStream(entryName), file);
-      });
-
-      promises.push(promise.then(null, function(e) {
-        ERROR("extractFilesAsync: failed to extract file " + path, e);
-        throw e;
-      }));
-    }
+  try {
+    zipReader.open(aZipFile);
+  }
+  catch (e) {
+    return Promise.reject(e);
   }
 
-  // Will be rejected if any of the promises are rejected and resolved otherwise
-  let result = Promise.defer();
+  return Task.spawn(function() {
+    // Get all of the entries in the zip and sort them so we create directories
+    // before files
+    let entries = zipReader.findEntries(null);
+    let names = [];
+    while (entries.hasMore())
+      names.push(entries.getNext());
+    names.sort();
 
-  // If any promise is rejected then result is rejected, the resulting array of
-  // promises are all resolved though
-  promises = promises.map(p => p.then(null, result.reject));
+    for (let name of names) {
+      let entryName = name;
+      let zipentry = zipReader.getEntry(name);
+      let path = OS.Path.join(aDir.path, ...name.split("/"));
 
-  // Wait for all of the promises to be resolved
-  return Promise.all(promises).then(function() {
-    // Resolve the result if it hasn't already been rejected
-    result.resolve();
+      if (zipentry.isDirectory) {
+        try {
+          yield OS.File.makeDir(path);
+        }
+        catch (e) {
+          ERROR("extractFilesAsync: failed to create directory " + path, e);
+          throw e;
+        }
+      }
+      else {
+        let options = { unixMode: zipentry.permissions | FileUtils.PERMS_FILE };
+        try {
+          let file = yield OS.File.open(path, { truncate: true }, options);
+          if (zipentry.realSize == 0)
+            yield file.close();
+          else
+            yield saveStreamAsync(path, zipReader.getInputStream(entryName), file);
+        }
+        catch (e) {
+          ERROR("extractFilesAsync: failed to extract file " + path, e);
+          throw e;
+        }
+      }
+    }
 
     zipReader.close();
-    return result.promise;
+  }).then(null, (e) => {
+    zipReader.close();
+    throw e;
   });
 }
 
@@ -1388,41 +1386,19 @@ function escapeAddonURI(aAddon, aUri, aUpdateType, aAppVersion)
   return uri;
 }
 
-function recursiveRemoveAsync(aFile) {
+function removeAsync(aFile) {
   return Task.spawn(function () {
     let info = null;
     try {
       info = yield OS.File.stat(aFile.path);
+      if (info.isDir)
+        yield OS.File.removeDir(aFile.path);
+      else
+        yield OS.File.remove(aFile.path);
     }
     catch (e if e instanceof OS.File.Error && e.becauseNoSuchFile) {
       // The file has already gone away
       return;
-    }
-
-    setFilePermissions(aFile, info.isDir ? FileUtils.PERMS_DIRECTORY
-                                         : FileUtils.PERMS_FILE);
-
-    // OS.File means we have to recurse into directories
-    if (info.isDir) {
-      let iterator = new OS.File.DirectoryIterator(aFile.path);
-      yield iterator.forEach(function(entry) {
-        let nextFile = aFile.clone();
-        nextFile.append(entry.name);
-        return recursiveRemoveAsync(nextFile);
-      });
-      yield iterator.close();
-    }
-
-    try {
-      yield info.isDir ? OS.File.removeEmptyDir(aFile.path)
-                       : OS.File.remove(aFile.path);
-    }
-    catch (e if e instanceof OS.File.Error && e.becauseNoSuchFile) {
-      // The file has already gone away
-    }
-    catch (e) {
-      ERROR("Failed to remove file " + aFile.path, e);
-      throw e;
     }
   });
 }
@@ -5426,7 +5402,7 @@ AddonInstall.prototype = {
         LOG("Addon " + this.addon.id + " will be installed as " +
             "an unpacked directory");
         stagedAddon.append(this.addon.id);
-        yield recursiveRemoveAsync(stagedAddon);
+        yield removeAsync(stagedAddon);
         yield OS.File.makeDir(stagedAddon.path);
         yield extractFilesAsync(this.file, stagedAddon);
         installedUnpacked = 1;
@@ -5435,7 +5411,7 @@ AddonInstall.prototype = {
         LOG("Addon " + this.addon.id + " will be installed as " +
             "a packed xpi");
         stagedAddon.append(this.addon.id + ".xpi");
-        yield recursiveRemoveAsync(stagedAddon);
+        yield removeAsync(stagedAddon);
         yield OS.File.copy(this.file.path, stagedAddon.path);
       }
 
@@ -5584,6 +5560,8 @@ AddonInstall.prototype = {
       this.state = AddonManager.STATE_INSTALL_FAILED;
       this.error = AddonManager.ERROR_FILE_ACCESS;
       XPIProvider.removeActiveInstall(this);
+      AddonManagerPrivate.callAddonListeners("onOperationCancelled",
+                                             createWrapper(this.addon));
       AddonManagerPrivate.callInstallListeners("onInstallFailed",
                                                this.listeners,
                                                this.wrapper);

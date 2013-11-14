@@ -291,7 +291,7 @@ GetLine(FILE *file, const char * prompt)
         }
         if (len + 1 == size) {
             size = size * 2;
-            char *tmp = (char *) realloc(buffer, size);
+            char *tmp = (char *) js_realloc(buffer, size);
             if (!tmp) {
                 free(buffer);
                 return nullptr;
@@ -336,7 +336,7 @@ NewContextData()
         return nullptr;
 
     JSShellContextData *data = (JSShellContextData *)
-                               calloc(sizeof(JSShellContextData), 1);
+                               js_calloc(sizeof(JSShellContextData), 1);
     if (!data)
         return nullptr;
     data->startTime = PRMJ_Now();
@@ -458,10 +458,9 @@ EvalAndPrint(JSContext *cx, Handle<JSObject*> global, const char *bytes, size_t 
 {
     // Eval.
     JS::CompileOptions options(cx);
-    options.utf8 = true;
-    options.compileAndGo = true;
-    options.filename = "typein";
-    options.lineno = lineno;
+    options.setUTF8(true)
+           .setCompileAndGo(true)
+           .setFileAndLine("typein", lineno);
     RootedScript script(cx);
     script = JS::Compile(cx, global, options, bytes, length);
     if (!script)
@@ -3599,6 +3598,14 @@ EscapeForShell(AutoCStringVector &argv)
 }
 #endif
 
+Vector<const char*, 4, js::SystemAllocPolicy> sPropagatedFlags;
+
+static bool
+PropagateFlagToNestedShells(const char *flag)
+{
+    return sPropagatedFlags.append(flag);
+}
+
 static bool
 NestedShell(JSContext *cx, unsigned argc, jsval *vp)
 {
@@ -3614,6 +3621,13 @@ NestedShell(JSContext *cx, unsigned argc, jsval *vp)
     }
     if (!argv.append(strdup(sArgv[0])))
         return false;
+
+    // Propagate selected flags from the current shell
+    for (unsigned i = 0; i < sPropagatedFlags.length(); i++) {
+        char *cstr = strdup(sPropagatedFlags[i]);
+        if (!cstr || !argv.append(cstr))
+            return false;
+    }
 
     // The arguments to nestedShell are stringified and append to argv.
     RootedString str(cx);
@@ -5169,12 +5183,12 @@ ShellCloseAsmJSCacheEntryForWrite(HandleObject global, size_t serializedSize, ui
 }
 
 static bool
-ShellBuildId(mozilla::Vector<char> *buildId)
+ShellBuildId(js::Vector<char> *buildId)
 {
     // The browser embeds the date into the buildid and the buildid is embedded
     // in the binary, so every 'make' necessarily builds a new firefox binary.
     // Fortunately, the actual firefox executable is tiny -- all the code is in
-    // libxul.so and other shared modules -- so this isn't a big deal. No so
+    // libxul.so and other shared modules -- so this isn't a big deal. Not so
     // for the statically-linked JS shell. To avoid recompmiling js.cpp and
     // re-linking 'js' on every 'make', we use a constant buildid and rely on
     // the shell user to manually clear the cache (deleting the dir passed to
@@ -5782,6 +5796,10 @@ main(int argc, char **argv, char **envp)
                             "(default: 10)", -1)
         || !op.addBoolOption('\0', "no-fpu", "Pretend CPU does not support floating-point operations "
                              "to test JIT codegen (no-op on platforms other than x86).")
+        || !op.addBoolOption('\0', "no-sse3", "Pretend CPU does not support SSE3 instructions and above "
+                             "to test JIT codegen (no-op on platforms other than x86 and x64).")
+        || !op.addBoolOption('\0', "no-sse4", "Pretend CPU does not support SSE4 instructions"
+                             "to test JIT codegen (no-op on platforms other than x86 and x64).")
         || !op.addBoolOption('\0', "fuzzing-safe", "Don't expose functions that aren't safe for "
                              "fuzzers to call")
 #ifdef DEBUG
@@ -5825,6 +5843,17 @@ main(int argc, char **argv, char **envp)
 #if defined(JS_CPU_X86) && defined(JS_ION)
     if (op.getBoolOption("no-fpu"))
         JSC::MacroAssembler::SetFloatingPointDisabled();
+#endif
+
+#if (defined(JS_CPU_X86) || defined(JS_CPU_X64)) && defined(JS_ION)
+    if (op.getBoolOption("no-sse3")) {
+        JSC::MacroAssembler::SetSSE3Disabled();
+        PropagateFlagToNestedShells("--no-sse3");
+    }
+    if (op.getBoolOption("no-sse4")) {
+        JSC::MacroAssembler::SetSSE4Disabled();
+        PropagateFlagToNestedShells("--no-sse4");
+    }
 #endif
 #endif
 

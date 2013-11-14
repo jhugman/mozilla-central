@@ -606,10 +606,11 @@ JitRuntime::getVMWrapper(const VMFunction &f)
     return p->value;
 }
 
+template <AllowGC allowGC>
 IonCode *
 IonCode::New(JSContext *cx, uint8_t *code, uint32_t bufferSize, JSC::ExecutablePool *pool)
 {
-    IonCode *codeObj = gc::NewGCThing<IonCode, CanGC>(cx, gc::FINALIZE_IONCODE, sizeof(IonCode), gc::DefaultHeap);
+    IonCode *codeObj = gc::NewGCThing<IonCode, allowGC>(cx, gc::FINALIZE_IONCODE, sizeof(IonCode), gc::DefaultHeap);
     if (!codeObj) {
         pool->release();
         return nullptr;
@@ -618,6 +619,14 @@ IonCode::New(JSContext *cx, uint8_t *code, uint32_t bufferSize, JSC::ExecutableP
     new (codeObj) IonCode(code, bufferSize, pool);
     return codeObj;
 }
+
+template
+IonCode *
+IonCode::New<CanGC>(JSContext *cx, uint8_t *code, uint32_t bufferSize, JSC::ExecutablePool *pool);
+
+template
+IonCode *
+IonCode::New<NoGC>(JSContext *cx, uint8_t *code, uint32_t bufferSize, JSC::ExecutablePool *pool);
 
 void
 IonCode::copyFrom(MacroAssembler &masm)
@@ -1568,7 +1577,7 @@ TrackPropertiesForSingletonScopes(JSContext *cx, JSScript *script, BaselineFrame
     // could access are tracked. These are generally accessed through
     // ALIASEDVAR operations in baseline and will not be tracked even if they
     // have been accessed in baseline code.
-    JSObject *environment = script->function() ? script->function()->environment() : NULL;
+    JSObject *environment = script->function() ? script->function()->environment() : nullptr;
 
     while (environment && !environment->is<GlobalObject>()) {
         if (environment->is<CallObject>() && environment->hasSingletonType())
@@ -1635,7 +1644,7 @@ IonCompile(JSContext *cx, JSScript *script,
     if (!constraints)
         return AbortReason_Alloc;
 
-    IonBuilder *builder = alloc->new_<IonBuilder>(cx, temp, graph, constraints,
+    IonBuilder *builder = alloc->new_<IonBuilder>((JSContext *) nullptr, cx->compartment(), temp, graph, constraints,
                                                   &inspector, info, baselineFrame);
     if (!builder)
         return AbortReason_Alloc;
@@ -2345,15 +2354,20 @@ InvalidateActivation(FreeOp *fop, uint8_t *ionTop, bool invalidateAll)
     IonSpew(IonSpew_Invalidate, "END invalidating activation");
 }
 
-void
-jit::InvalidateAll(FreeOp *fop, Zone *zone)
+static inline void
+StopOffThreadCompilation(JSCompartment *comp)
 {
-    for (CompartmentsInZoneIter comp(zone); !comp.done(); comp.next()) {
-        if (!comp->jitCompartment())
-            continue;
+    if (comp->jitCompartment()) {
         CancelOffThreadIonCompile(comp, nullptr);
         FinishAllOffThreadCompilations(comp->jitCompartment());
     }
+}
+
+void
+jit::InvalidateAll(FreeOp *fop, Zone *zone)
+{
+    for (CompartmentsInZoneIter comp(zone); !comp.done(); comp.next())
+        StopOffThreadCompilation(comp);
 
     for (JitActivationIterator iter(fop->runtime()); !iter.done(); ++iter) {
         if (iter.activation()->compartment()->zone() == zone) {
@@ -2510,6 +2524,16 @@ jit::FinishInvalidation(FreeOp *fop, JSScript *script)
 
     if (script->hasParallelIonScript())
         FinishInvalidationOf(fop, script, script->parallelIonScript(), true);
+}
+
+void
+jit::FinishDiscardJitCode(FreeOp *fop, JSCompartment *comp)
+{
+    // Free optimized baseline stubs.
+    if (comp->jitCompartment())
+        comp->jitCompartment()->optimizedStubSpace()->free();
+
+    comp->types.clearCompilerOutputs(fop);
 }
 
 void
@@ -2699,4 +2723,64 @@ jit::TraceIonScripts(JSTracer* trc, JSScript *script)
 
     if (script->hasBaselineScript())
         jit::BaselineScript::Trace(trc, script->baselineScript());
+}
+
+AutoDebugModeInvalidation::~AutoDebugModeInvalidation()
+{
+    MOZ_ASSERT(!!comp_ != !!zone_);
+
+    if (needInvalidation_ == NoNeed)
+        return;
+
+    // Invalidate the stack if any compartments toggled from on->off, because
+    // we allow scripts to be on stack when turning off debug mode.
+    bool invalidateStack = needInvalidation_ == ToggledOff;
+    Zone *zone = zone_ ? zone_ : comp_->zone();
+    JSRuntime *rt = zone->runtimeFromMainThread();
+    FreeOp *fop = rt->defaultFreeOp();
+
+    if (comp_) {
+        StopOffThreadCompilation(comp_);
+    } else {
+        for (CompartmentsInZoneIter comp(zone_); !comp.done(); comp.next())
+            StopOffThreadCompilation(comp);
+    }
+
+    if (invalidateStack) {
+        jit::MarkActiveBaselineScripts(zone);
+
+        for (JitActivationIterator iter(rt); !iter.done(); ++iter) {
+            JSCompartment *comp = iter.activation()->compartment();
+            if ((comp_ && comp_ == comp) ||
+                (zone_ && zone_ == comp->zone() && comp->principals))
+            {
+                IonContext ictx(rt);
+                AutoFlushCache afc("AutoDebugModeInvalidation", rt->jitRuntime());
+                IonSpew(IonSpew_Invalidate, "Invalidating frames for debug mode toggle");
+                InvalidateActivation(fop, iter.jitTop(), true);
+            }
+        }
+    }
+
+    for (gc::CellIter i(zone, gc::FINALIZE_SCRIPT); !i.done(); i.next()) {
+        JSScript *script = i.get<JSScript>();
+        if ((comp_ && script->compartment() == comp_) ||
+            (zone_ && script->compartment()->principals))
+        {
+            FinishInvalidation(fop, script);
+            FinishDiscardBaselineScript(fop, script);
+            script->clearAnalysis();
+            script->resetUseCount();
+        } else {
+            if (script->hasBaselineScript())
+                script->baselineScript()->resetActive();
+        }
+    }
+
+    if (comp_) {
+        FinishDiscardJitCode(fop, comp_);
+    } else {
+        for (CompartmentsInZoneIter comp(zone_); !comp.done(); comp.next())
+            FinishDiscardJitCode(fop, comp);
+    }
 }

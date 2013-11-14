@@ -21,6 +21,7 @@ Cu.import("resource://gre/modules/PermissionPromptHelper.jsm");
 Cu.import("resource://gre/modules/ContactService.jsm");
 Cu.import("resource://gre/modules/NotificationDB.jsm");
 Cu.import("resource://gre/modules/SpatialNavigation.jsm");
+Cu.import("resource://gre/modules/WebappManager.jsm");
 
 #ifdef ACCESSIBILITY
 Cu.import("resource://gre/modules/accessibility/AccessFu.jsm");
@@ -6941,18 +6942,18 @@ var WebappsUI = {
     DOMApplicationRegistry.allAppsLaunchable = true;
 
     Services.obs.addObserver(this, "webapps-ask-install", false);
-    Services.obs.addObserver(this, "webapps-download-apk", false);
     Services.obs.addObserver(this, "webapps-launch", false);
     Services.obs.addObserver(this, "webapps-uninstall", false);
     Services.obs.addObserver(this, "webapps-install-error", false);
+    Services.obs.addObserver(this, "Webapps:AppInstalled", false);
   },
 
   uninit: function unint() {
     Services.obs.removeObserver(this, "webapps-ask-install");
-    Services.obs.removeObserver(this, "webapps-download-apk");
     Services.obs.removeObserver(this, "webapps-launch");
     Services.obs.removeObserver(this, "webapps-uninstall");
     Services.obs.removeObserver(this, "webapps-install-error");
+    Services.obs.removeObserver(this, "Webapps:AppInstalled");
   },
 
   DEFAULT_PREFS_FILENAME: "default-prefs.js",
@@ -6964,6 +6965,12 @@ var WebappsUI = {
       data.mm = aSubject;
     } catch(ex) { }
     switch (aTopic) {
+      case "Webapps:AppInstalled":
+        console.log(JSON.stringify(data));
+        debugger;
+        //data.
+        DOMApplicationRegistry.confirmInstall(data);
+        break;
       case "webapps-install-error":
         let msg = "";
         switch (aData) {
@@ -6983,9 +6990,6 @@ var WebappsUI = {
         break;
       case "webapps-ask-install":
         this.doInstall(data);
-        break;
-      case "webapps-download-apk":
-        this.downloadApk(data);
         break;
       case "webapps-launch":
         this.openURL(data.manifestURL, data.origin);
@@ -7031,49 +7035,6 @@ var WebappsUI = {
     }
 
     return iconURI ? iconURI.spec : DEFAULT_ICON;
-  },
-
-  downloadApk: function downloadApk(aData) {
-    console.log("Downloading apk from " + aData.generatorUrl);
-    
-    let filePath = sendMessageToJava({
-      type: "WebApps:GetTempFilePath",
-      fileName: aData.generatorUrl.replace(/['`~!@#$%^&*()_|+-=?;:'",.<>\{\}\[\]\\\/]/gi, "")
-    });
-    console.log("FileName : " + filePath);
-
-    let uri = NetUtil.newURI(aData.generatorUrl);
-
-    NetUtil.asyncFetch(uri, function read_asyncFetch(aInputStream, aStatus) {
-      try {
-        if (Components.isSuccessCode(aStatus)) {
-          //let channel = aRequest.QueryInterface(Ci.nsIChannel);
-
-          let file = Components.classes["@mozilla.org/file/local;1"]
-                       .createInstance(Components.interfaces.nsILocalFile);
-          file.initWithPath(filePath);
-
-          let outputStream = FileUtils.openSafeFileOutputStream(file);
-
-          NetUtil.asyncCopy(aInputStream, outputStream, function(aResult) {
-            if (!Components.isSuccessCode(aResult)) {
-              console.log("Downloading failed")
-            } else {
-              console.log("Downloaded successfully"); 
-              sendMessageToJava({
-                type: "WebApps:InstallApk",
-                filePath: filePath
-              });
-            }
-          });
-         } else {
-           console.log("can't download");
-         }
-      } catch (e) {
-        console.log("Error in fetch - " + e);
-      }
-     });
-
   },
 
   doInstall: function doInstall(aData) {

@@ -250,7 +250,16 @@ struct Zone : public JS::shadow::Zone,
      * gcMaxMallocBytes down to zero. This counter should be used only when it's
      * not possible to know the size of a free.
      */
-    ptrdiff_t                    gcMallocBytes;
+    mozilla::Atomic<ptrdiff_t, mozilla::ReleaseAcquire> gcMallocBytes;
+
+    /*
+     * Whether a GC has been triggered as a result of gcMallocBytes falling
+     * below zero.
+     *
+     * This should be a bool, but Atomic only supports 32-bit and pointer-sized
+     * types.
+     */
+    mozilla::Atomic<uint32_t, mozilla::ReleaseAcquire> gcMallocGCTriggered;
 
     /* This compartment's gray roots. */
     js::Vector<js::GrayRoot, 0, js::SystemAllocPolicy> gcGrayRoots;
@@ -278,10 +287,8 @@ struct Zone : public JS::shadow::Zone,
          * Note: this code may be run from worker threads.  We
          * tolerate any thread races when updating gcMallocBytes.
          */
-        ptrdiff_t oldCount = gcMallocBytes;
-        ptrdiff_t newCount = oldCount - ptrdiff_t(nbytes);
-        gcMallocBytes = newCount;
-        if (JS_UNLIKELY(newCount <= 0 && oldCount > 0))
+        gcMallocBytes -= ptrdiff_t(nbytes);
+        if (JS_UNLIKELY(isTooMuchMalloc()))
             onTooMuchMalloc();
     }
 
@@ -312,21 +319,39 @@ struct Zone : public JS::shadow::Zone,
 
 namespace js {
 
+/*
+ * Using the atoms zone without holding the exclusive access lock is dangerous
+ * because worker threads may be using it simultaneously. Therefore, it's
+ * better to skip the atoms zone when iterating over zones. If you need to
+ * iterate over the atoms zone, consider taking the exclusive access lock first.
+ */
+enum ZoneSelector {
+    WithAtoms,
+    SkipAtoms
+};
+
 class ZonesIter {
   private:
     JS::Zone **it, **end;
 
   public:
-    ZonesIter(JSRuntime *rt) {
+    ZonesIter(JSRuntime *rt, ZoneSelector selector) {
         it = rt->zones.begin();
         end = rt->zones.end();
+
+        if (selector == SkipAtoms) {
+            JS_ASSERT(rt->isAtomsZone(*it));
+            it++;
+        }
     }
 
     bool done() const { return it == end; }
 
     void next() {
         JS_ASSERT(!done());
-        it++;
+        do {
+            it++;
+        } while (!done() && (*it)->usedByExclusiveThread);
     }
 
     JS::Zone *get() const {
@@ -376,8 +401,15 @@ class CompartmentsIterT
     CompartmentsIterT(JSRuntime *rt)
       : zone(rt)
     {
-        JS_ASSERT(!zone.done());
-        comp.construct(zone);
+        if (!zone.done())
+            comp.construct(zone);
+    }
+
+    CompartmentsIterT(JSRuntime *rt, ZoneSelector selector)
+      : zone(rt, selector)
+    {
+        if (!zone.done())
+            comp.construct(zone);
     }
 
     bool done() const { return zone.done(); }

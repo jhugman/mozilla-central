@@ -137,7 +137,7 @@ static bool
 DoubleIndexToId(JSContext *cx, double index, MutableHandleId id)
 {
     if (index == uint32_t(index))
-        return IndexToId(cx, uint32_t(index), id);
+        return IndexToId(cx, uint32_t(index), id.address());
 
     Value tmp = DoubleValue(index);
     return ValueToId<CanGC>(cx, HandleValue::fromMarkedLocation(&tmp), id);
@@ -286,7 +286,7 @@ SetArrayElement(JSContext *cx, HandleObject obj, double index, HandleValue v)
                 break;
             if (idx >= arr->length())
                 arr->setLengthInt32(idx + 1);
-            JSObject::setDenseElementWithType(cx, arr, idx, v);
+            arr->setDenseElementWithType(cx, idx, v);
             return true;
         } while (false);
 
@@ -677,14 +677,12 @@ js::ArraySetLength(typename ExecutionModeTraits<mode>::ContextType cxArg,
 
     RootedValue v(cxArg, NumberValue(newLen));
     if (mode == ParallelExecution) {
-        // Adding the property type or overflowing int32 requires changing TI
-        // state.
-        if (!HasTypePropertyId(arr, id, v) || newLen > INT32_MAX)
+        // Overflowing int32 requires changing TI state.
+        if (newLen > INT32_MAX)
             return false;
         arr->setLengthInt32(newLen);
     } else {
         JSContext *cx = cxArg->asJSContext();
-        AddTypePropertyId(cx, arr, id, v);
         ArrayObject::setLength(cx, arr, newLen);
     }
 
@@ -718,7 +716,7 @@ js::ArraySetLength(typename ExecutionModeTraits<mode>::ContextType cxArg,
         // returned from the function before step 15 above.
         JSContext *cx = cxArg->asJSContext();
         RootedId elementId(cx);
-        if (!IndexToId(cx, newLen - 1, &elementId))
+        if (!IndexToId(cx, newLen - 1, elementId.address()))
             return false;
         return arr->reportNotConfigurable(cx, elementId);
     }
@@ -2022,7 +2020,7 @@ NewbornArrayPushImpl(JSContext *cx, HandleObject obj, const Value &v)
 
     arr->setDenseInitializedLength(length + 1);
     arr->setLengthInt32(length + 1);
-    JSObject::initDenseElementWithType(cx, arr, length, v);
+    arr->initDenseElementWithType(cx, length, v);
     return true;
 }
 
@@ -2066,7 +2064,7 @@ js::array_push(JSContext *cx, unsigned argc, Value *vp)
 
         if (result == JSObject::ED_OK) {
             for (uint32_t i = 0, index = length; i < argCount; index++, i++)
-                JSObject::setDenseElementWithType(cx, obj, index, args[i]);
+                obj->setDenseElementWithType(cx, index, args[i]);
             uint32_t newlength = length + argCount;
             args.rval().setNumber(newlength);
             if (obj->is<ArrayObject>()) {

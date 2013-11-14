@@ -105,6 +105,7 @@
     _(SqrtD)                        \
     _(SqrtF)                        \
     _(Atan2D)                       \
+    _(Hypot)                        \
     _(PowI)                         \
     _(PowD)                         \
     _(Random)                       \
@@ -162,6 +163,7 @@
     _(StoreSlotT)                   \
     _(GuardShape)                   \
     _(GuardObjectType)              \
+    _(GuardObjectIdentity)          \
     _(GuardClass)                   \
     _(GuardThreadLocalObject)       \
     _(TypeBarrierV)                 \

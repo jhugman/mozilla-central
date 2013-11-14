@@ -26,7 +26,7 @@ docShell.setFullscreenAllowed(infos.fullscreenAllowed);
 if (!('BrowserElementIsPreloaded' in this)) {
   try {
     if (Services.prefs.getBoolPref("dom.mozInputMethod.enabled")) {
-      Services.scriptloader.loadSubScript("chrome://global/content/forms.js", global);
+      Services.scriptloader.loadSubScript("chrome://global/content/forms.js");
     }
   } catch (e) {
   }

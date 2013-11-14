@@ -101,6 +101,7 @@ class CodeGenerator : public CodeGeneratorSpecific
     bool visitElements(LElements *lir);
     bool visitConvertElementsToDoubles(LConvertElementsToDoubles *lir);
     bool visitMaybeToDoubleElement(LMaybeToDoubleElement *lir);
+    bool visitGuardObjectIdentity(LGuardObjectIdentity *guard);
     bool visitTypeBarrierV(LTypeBarrierV *lir);
     bool visitTypeBarrierO(LTypeBarrierO *lir);
     bool visitMonitorTypes(LMonitorTypes *lir);
@@ -179,6 +180,7 @@ class CodeGenerator : public CodeGeneratorSpecific
     bool visitSetPropertyPolymorphicT(LSetPropertyPolymorphicT *ins);
     bool visitAbsI(LAbsI *lir);
     bool visitAtan2D(LAtan2D *lir);
+    bool visitHypot(LHypot *lir);
     bool visitPowI(LPowI *lir);
     bool visitPowD(LPowD *lir);
     bool visitRandom(LRandom *lir);

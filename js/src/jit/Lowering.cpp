@@ -1222,6 +1222,19 @@ LIRGenerator::visitAtan2(MAtan2 *ins)
 }
 
 bool
+LIRGenerator::visitHypot(MHypot *ins)
+{
+    MDefinition *x = ins->x();
+    JS_ASSERT(x->type() == MIRType_Double);
+
+    MDefinition *y = ins->y();
+    JS_ASSERT(y->type() == MIRType_Double);
+
+    LHypot *lir = new LHypot(useRegisterAtStart(x), useRegisterAtStart(y), tempFixed(CallTempReg0));
+    return defineReturn(lir, ins);
+}
+
+bool
 LIRGenerator::visitPow(MPow *ins)
 {
     MDefinition *input = ins->input();
@@ -2815,6 +2828,13 @@ LIRGenerator::visitBindNameCache(MBindNameCache *ins)
 
     LBindNameCache *lir = new LBindNameCache(useRegister(ins->scopeChain()));
     return define(lir, ins) && assignSafepoint(lir, ins);
+}
+
+bool
+LIRGenerator::visitGuardObjectIdentity(MGuardObjectIdentity *ins)
+{
+    LGuardObjectIdentity *guard = new LGuardObjectIdentity(useRegister(ins->obj()));
+    return assignSnapshot(guard) && add(guard, ins) && redefine(ins, ins->obj());
 }
 
 bool

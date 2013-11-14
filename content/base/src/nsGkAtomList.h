@@ -608,6 +608,7 @@ GK_ATOM(nodeSet, "node-set")
 GK_ATOM(noembed, "noembed")
 GK_ATOM(noframes, "noframes")
 GK_ATOM(nohref, "nohref")
+GK_ATOM(nonce, "nonce")
 GK_ATOM(none, "none")
 GK_ATOM(noresize, "noresize")
 GK_ATOM(normal, "normal")
@@ -2000,6 +2001,7 @@ GK_ATOM(DisplayPort, "_displayport")
 GK_ATOM(CriticalDisplayPort, "_critical_displayport")
 
 // Names for system metrics
+GK_ATOM(color_picker_available, "color-picker-available")
 GK_ATOM(scrollbar_start_backward, "scrollbar-start-backward")
 GK_ATOM(scrollbar_start_forward, "scrollbar-start-forward")
 GK_ATOM(scrollbar_end_backward, "scrollbar-end-backward")
@@ -2037,6 +2039,7 @@ GK_ATOM(windows_version_win7, "windows-version-win7")
 GK_ATOM(windows_version_win8, "windows-version-win8")
 
 // And the same again, as media query keywords.
+GK_ATOM(_moz_color_picker_available, "-moz-color-picker-available")
 GK_ATOM(_moz_scrollbar_start_backward, "-moz-scrollbar-start-backward")
 GK_ATOM(_moz_scrollbar_start_forward, "-moz-scrollbar-start-forward")
 GK_ATOM(_moz_scrollbar_end_backward, "-moz-scrollbar-end-backward")

@@ -450,8 +450,6 @@ nsEventStatus AsyncPanZoomController::OnTouchStart(const MultiTouchInput& aEvent
       // this touchstart is just a tap that doesn't end up triggering a redraw.
       {
         ReentrantMonitorAutoEnter lock(mMonitor);
-        // Bring the resolution back in sync with the zoom.
-        SetZoomAndResolution(mFrameMetrics.mZoom);
         RequestContentRepaint();
         ScheduleComposite();
       }
@@ -676,9 +674,15 @@ nsEventStatus AsyncPanZoomController::OnScale(const PinchGestureInput& aEvent) {
 
 nsEventStatus AsyncPanZoomController::OnScaleEnd(const PinchGestureInput& aEvent) {
   APZC_LOG("%p got a scale-end in state %d\n", this, mState);
-  SetState(PANNING);
-  mX.StartTouch(aEvent.mFocusPoint.x);
-  mY.StartTouch(aEvent.mFocusPoint.y);
+  // When a pinch ends, it might either turn into a pan (if only one finger
+  // was lifted) or not (if both fingers were lifted). GestureEventListener
+  // sets mCurrentSpan to a negative value in the latter case, and sets
+  // mFocusPoint to the remaining touch point in the former case.
+  if (aEvent.mCurrentSpan >= 0) {
+    SetState(PANNING);
+    mX.StartTouch(aEvent.mFocusPoint.x);
+    mY.StartTouch(aEvent.mFocusPoint.y);
+  }
   {
     ReentrantMonitorAutoEnter lock(mMonitor);
     ScheduleComposite();
@@ -917,9 +921,6 @@ bool AsyncPanZoomController::DoFling(const TimeDuration& aDelta) {
        shouldContinueFlingY = mY.FlingApplyFrictionOrCancel(aDelta);
   // If we shouldn't continue the fling, let's just stop and repaint.
   if (!shouldContinueFlingX && !shouldContinueFlingY) {
-    // Bring the resolution back in sync with the zoom, in case we scaled down
-    // the zoom while accelerating.
-    SetZoomAndResolution(mFrameMetrics.mZoom);
     SendAsyncScrollEvent();
     RequestContentRepaint();
     mState = NOTHING;
@@ -960,7 +961,7 @@ void AsyncPanZoomController::ScrollBy(const CSSPoint& aOffset) {
 
 void AsyncPanZoomController::ScaleWithFocus(float aScale,
                                             const CSSPoint& aFocus) {
-  SetZoomAndResolution(CSSToScreenScale(mFrameMetrics.mZoom.scale * aScale));
+  mFrameMetrics.mZoom.scale *= aScale;
   // We want to adjust the scroll offset such that the CSS point represented by aFocus remains
   // at the same position on the screen before and after the change in zoom. The below code
   // accomplishes this; see https://bugzilla.mozilla.org/show_bug.cgi?id=923431#c6 for an
@@ -1113,7 +1114,7 @@ void AsyncPanZoomController::RequestContentRepaint() {
             mFrameMetrics.mScrollOffset.x) < EPSILON &&
       fabsf(mLastPaintRequestMetrics.mScrollOffset.y -
             mFrameMetrics.mScrollOffset.y) < EPSILON &&
-      mFrameMetrics.mCumulativeResolution == mLastPaintRequestMetrics.mCumulativeResolution) {
+      mFrameMetrics.mZoom == mLastPaintRequestMetrics.mZoom) {
     return;
   }
 
@@ -1202,8 +1203,6 @@ bool AsyncPanZoomController::SampleContentTransformForFrame(const TimeStamp& aSa
       requestAnimationFrame = true;
 
       if (aSampleTime - mAnimationStartTime >= ZOOM_TO_DURATION) {
-        // Bring the resolution in sync with the zoom.
-        SetZoomAndResolution(mFrameMetrics.mZoom);
         mState = NOTHING;
         SendAsyncScrollEvent();
         RequestContentRepaint();
@@ -1269,6 +1268,13 @@ ViewTransform AsyncPanZoomController::GetCurrentAsyncTransform() {
                      / mFrameMetrics.GetParentResolution());
 }
 
+gfx3DMatrix AsyncPanZoomController::GetNontransientAsyncTransform() {
+  ReentrantMonitorAutoEnter lock(mMonitor);
+  return gfx3DMatrix::ScalingMatrix(mLastContentPaintMetrics.mResolution.scale,
+                                    mLastContentPaintMetrics.mResolution.scale,
+                                    1.0f);
+}
+
 void AsyncPanZoomController::NotifyLayersUpdated(const FrameMetrics& aLayerMetrics, bool aIsFirstPaint) {
   ReentrantMonitorAutoEnter lock(mMonitor);
 
@@ -1302,8 +1308,17 @@ void AsyncPanZoomController::NotifyLayersUpdated(const FrameMetrics& aLayerMetri
 
     mFrameMetrics = aLayerMetrics;
     mState = NOTHING;
-  } else if (!mFrameMetrics.mScrollableRect.IsEqualEdges(aLayerMetrics.mScrollableRect)) {
+  } else {
+    // If we're not taking the aLayerMetrics wholesale we still need to pull
+    // in some things into our local mFrameMetrics because these things are
+    // determined by Gecko and our copy in mFrameMetrics may be stale.
     mFrameMetrics.mScrollableRect = aLayerMetrics.mScrollableRect;
+    mFrameMetrics.mCompositionBounds = aLayerMetrics.mCompositionBounds;
+    float parentResolutionChange = aLayerMetrics.GetParentResolution().scale
+                                 / mFrameMetrics.GetParentResolution().scale;
+    mFrameMetrics.mZoom.scale *= parentResolutionChange;
+    mFrameMetrics.mResolution = aLayerMetrics.mResolution;
+    mFrameMetrics.mCumulativeResolution = aLayerMetrics.mCumulativeResolution;
   }
 
   if (needContentRepaint) {
@@ -1329,7 +1344,7 @@ void AsyncPanZoomController::UpdateCompositionBounds(const ScreenIntRect& aCompo
   if (aCompositionBounds.width && aCompositionBounds.height &&
       oldCompositionBounds.width && oldCompositionBounds.height) {
     float adjustmentFactor = float(aCompositionBounds.width) / float(oldCompositionBounds.width);
-    SetZoomAndResolution(CSSToScreenScale(mFrameMetrics.mZoom.scale * adjustmentFactor));
+    mFrameMetrics.mZoom.scale *= adjustmentFactor;
 
     // Repaint on a rotation so that our new resolution gets properly updated.
     RequestContentRepaint();
@@ -1479,18 +1494,6 @@ void AsyncPanZoomController::TimeoutTouchListeners() {
   ContentReceivedTouch(false);
 }
 
-void AsyncPanZoomController::SetZoomAndResolution(const CSSToScreenScale& aZoom) {
-  mMonitor.AssertCurrentThreadIn();
-  LayoutDeviceToParentLayerScale parentResolution = mFrameMetrics.GetParentResolution();
-  mFrameMetrics.mZoom = aZoom;
-  // We use ScreenToLayerScale(1) below in order to ask gecko to render
-  // what's currently visible on the screen. This is effectively turning
-  // the async zoom amount into the gecko zoom amount.
-  mFrameMetrics.mCumulativeResolution = aZoom / mFrameMetrics.mDevPixelsPerCSSPixel * ScreenToLayerScale(1);
-  // The parent resolution will not have changed.
-  mFrameMetrics.mResolution = mFrameMetrics.mCumulativeResolution / parentResolution;
-}
-
 void AsyncPanZoomController::UpdateZoomConstraints(bool aAllowZoom,
                                                    const CSSToScreenScale& aMinZoom,
                                                    const CSSToScreenScale& aMaxZoom) {
@@ -1545,6 +1548,16 @@ bool AsyncPanZoomController::Matches(const ScrollableLayerGuid& aGuid)
   // TODO: also check the presShellId, once that is fully propagated
   // everywhere in RenderFrameParent and AndroidJNI.
   return aGuid.mLayersId == mLayersId && aGuid.mScrollId == mFrameMetrics.mScrollId;
+}
+
+void AsyncPanZoomController::GetGuid(ScrollableLayerGuid* aGuidOut)
+{
+  if (!aGuidOut) {
+    return;
+  }
+  aGuidOut->mLayersId = mLayersId;
+  aGuidOut->mScrollId = mFrameMetrics.mScrollId;
+  aGuidOut->mPresShellId = mFrameMetrics.mPresShellId;
 }
 
 }

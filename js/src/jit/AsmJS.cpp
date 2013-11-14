@@ -1323,7 +1323,7 @@ class MOZ_STACK_CLASS ModuleCompiler
         JS_ASSERT(errorOffset_ == UINT32_MAX);
         JS_ASSERT(str);
         errorOffset_ = offset;
-        errorString_ = strdup(str);
+        errorString_ = js_strdup(cx_, str);
         return false;
     }
 
@@ -6537,7 +6537,7 @@ js::IsAsmJSCompilationAvailable(JSContext *cx, unsigned argc, Value *vp)
     bool available = JSC::MacroAssembler::supportsFloatingPoint() &&
                      cx->gcSystemPageSize() == AsmJSPageSize &&
                      !cx->compartment()->debugMode() &&
-                     cx->options().asmJS();
+                     cx->compartment()->options().asmJS(cx);
 
     args.rval().set(BooleanValue(available));
     return true;
