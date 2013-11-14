@@ -44,29 +44,41 @@ public class InstallListener extends BroadcastReceiver {
         }
 
         Bundle metadata = app.metaData;
-        if (metadata != null) {
-            String manifestUrl = metadata.getString("manifestUrl");
-            String manifestUrlFilename = manifestUrl.replaceAll("[^a-zA-Z0-9]", "");
-            Log.i(LOGTAG, "ManifestURL: " + (TextUtils.isEmpty(manifestUrl) ? "nothing" : manifestUrl));
-            Log.i(LOGTAG, "ManifestURL FileName: " + (TextUtils.isEmpty(manifestUrlFilename) ? "nothing" : manifestUrlFilename));
+        if(metadata == null) {
+          Log.i(LOGTAG, "No metadata found.");
+          return;
+        }
 
-            File apkFile = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), manifestUrlFilename + ".apk");
-            if(apkFile.exists()) {
-              apkFile.delete();
-              Log.i(LOGTAG, "Downloaded APK file deleted");
-            }
+        String manifestUrl = metadata.getString("manifestUrl");
+        if(TextUtils.isEmpty(manifestUrl)) {
+            Log.i(LOGTAG, "No manifest URL present in metadata");
+            return;
+        }
 
-            String manifestContent = readResource(context, packageName, "manifest");
-            String miniContent = readResource(context, packageName, "mini");
+        String manifestUrlFilename = manifestUrl.replaceAll("[^a-zA-Z0-9]", "");
+        Log.i(LOGTAG, "ManifestURL: " + (TextUtils.isEmpty(manifestUrl) ? "nothing" : manifestUrl));
+        Log.i(LOGTAG, "ManifestURL FileName: " + (TextUtils.isEmpty(manifestUrlFilename) ? "nothing" : manifestUrlFilename));
 
-            Log.i(LOGTAG, "manifestContent = " + manifestContent);
-            Log.i(LOGTAG, "miniContent = " + miniContent);
+        File apkFile = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), manifestUrlFilename + ".apk");
+        if(apkFile.exists()) {
+          apkFile.delete();
+          Log.i(LOGTAG, "Downloaded APK file deleted");
+        }
 
-            GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent(
-                        "Webapps:AppInstalled", "{\"app\": {\"manifestURL\":\"" + manifestUrl + "\"," +
-                                                "\"packageName\":\"" + packageName + "\"," + 
-                                                "\"manifest\": " + manifestContent + "}}"));
-        } 
+        String manifestContent = readResource(context, packageName, "manifest");
+
+        Uri manifestUri = Uri.parse(manifestUrl);
+
+        String origin = manifestUri.getScheme() + "://" + manifestUri.getAuthority();
+
+        Log.i(LOGTAG, "manifestContent = " + manifestContent);
+
+        GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent(
+                    "Webapps:AppInstalled", "{\"app\": {\"manifestURL\":\"" + manifestUrl + "\"," +
+                                            "\"origin\":\"" + origin + "\"," + 
+                                            "\"packageName\":\"" + packageName + "\"," + 
+                                            "\"manifest\": " + manifestContent + "}}"));
+        
     }
 
     private String readResource(Context context, String packageName, String resourceName) {

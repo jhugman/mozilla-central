@@ -6953,9 +6953,13 @@ var WebappsUI = {
     console.log("observe: topic: " + aTopic);
     switch (aTopic) {
       case "Webapps:AppInstalled":
-        console.log(aData);
-        console.log(JSON.stringify(data));
-        DOMApplicationRegistry.confirmInstall(data);
+        console.log("aData:" + aData);
+        DOMApplicationRegistry.confirmInstall(data, null, function() {
+          // ooh - what to put here?
+          // we currently don't have the profile path as it's not been installed yet.  
+          // we prob just need to inform the system that we've installed so that the ui can update
+        });
+        console.log("END OF APP INSTALLED");
         break;
       case "webapps-install-error":
         let msg = "";
