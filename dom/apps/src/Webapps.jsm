@@ -935,7 +935,8 @@ this.DOMApplicationRegistry = {
         app: {
           origin: origin,
           manifestURL: manifestUrl,
-          packageName: data.packageName
+          packageName: data.packageName,
+          manifest: data.manifest
         },
         profilePath: data.profilePath,
         silentInstall: true,
@@ -2065,6 +2066,53 @@ this.DOMApplicationRegistry = {
       return manifestStatus === "web";
     }
 
+    let checkManifest = function checkManifest() {
+      if (!app.manifest) {
+        sendError("MANIFEST_PARSE_ERROR");
+        return;
+      }
+
+      // Disallow multiple hosted apps installations from the same origin for now.
+      // We will remove this code after multiple apps per origin are supported (bug 778277).
+      // This will also disallow reinstalls from the same origin for now.
+      for (let id in this.webapps) {
+        if (this.webapps[id].origin == app.origin &&
+            !this.webapps[id].packageHash &&
+            this._isLaunchable(this.webapps[id])) {
+          sendError("MULTIPLE_APPS_PER_ORIGIN_FORBIDDEN");
+          return;
+        }
+      }
+
+      if (!AppsUtils.checkManifest(app.manifest, app)) {
+        sendError("INVALID_MANIFEST");
+      } else if (!AppsUtils.checkInstallAllowed(app.manifest, app.installOrigin)) {
+        sendError("INSTALL_FROM_DENIED");
+      } else if (!checkAppStatus(app.manifest)) {
+        sendError("INVALID_SECURITY_LEVEL");
+      } else {
+        app.manifestHash = this.computeManifestHash(app.manifest);
+        // We allow bypassing the install confirmation process to facilitate
+        // automation.
+        let prefName = "dom.mozApps.auto_confirm_install";
+        if (Services.prefs.prefHasUserValue(prefName) &&
+            Services.prefs.getBoolPref(prefName)) {
+          this.confirmInstall(aData);
+        } else {
+          Services.obs.notifyObservers(aMm, "webapps-ask-install",
+                                       JSON.stringify(aData));
+        }
+        return true;
+      }
+    }.bind(this);
+
+    // We may already have the manifest (e.g. AutoInstall),
+    // in which case we don't need to load it.
+    if (app.manifest) {
+      checkManifest();
+      return;
+    }
+
     let xhr = Cc["@mozilla.org/xmlextras/xmlhttprequest;1"]
                 .createInstance(Ci.nsIXMLHttpRequest);
     xhr.open("GET", app.manifestURL, true);
@@ -2082,43 +2130,10 @@ this.DOMApplicationRegistry = {
         }
 
         app.manifest = xhr.response;
-        if (!app.manifest) {
-          sendError("MANIFEST_PARSE_ERROR");
-          return;
-        }
-
-        // Disallow multiple hosted apps installations from the same origin for now.
-        // We will remove this code after multiple apps per origin are supported (bug 778277).
-        // This will also disallow reinstalls from the same origin for now.
-        for (let id in this.webapps) {
-          if (this.webapps[id].origin == app.origin &&
-              !this.webapps[id].packageHash &&
-              this._isLaunchable(this.webapps[id])) {
-            sendError("MULTIPLE_APPS_PER_ORIGIN_FORBIDDEN");
-            return;
-          }
-        }
-
-        if (!AppsUtils.checkManifest(app.manifest, app)) {
-          sendError("INVALID_MANIFEST");
-        } else if (!AppsUtils.checkInstallAllowed(app.manifest, app.installOrigin)) {
-          sendError("INSTALL_FROM_DENIED");
-        } else if (!checkAppStatus(app.manifest)) {
-          sendError("INVALID_SECURITY_LEVEL");
-        } else {
+        if (checkManifest()) {
           app.etag = xhr.getResponseHeader("Etag");
-          app.manifestHash = this.computeManifestHash(app.manifest);
-          // We allow bypassing the install confirmation process to facilitate
-          // automation.
-          let prefName = "dom.mozApps.auto_confirm_install";
-          if (Services.prefs.prefHasUserValue(prefName) &&
-              Services.prefs.getBoolPref(prefName)) {
-            this.confirmInstall(aData);
-          } else {
-            Services.obs.notifyObservers(aMm, "webapps-ask-install",
-                                         JSON.stringify(aData));
-          }
         }
+
       } else {
         sendError("MANIFEST_URL_ERROR");
       }

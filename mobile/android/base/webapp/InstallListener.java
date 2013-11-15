@@ -15,12 +15,6 @@ import android.os.Environment;
 import android.net.Uri;
 
 import java.io.File;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.BufferedReader;
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.lang.StringBuilder;
 
 
 
@@ -28,6 +22,7 @@ public class InstallListener extends BroadcastReceiver {
 
     private static String LOGTAG = "GeckoInstallListener";
 
+    @Override
     public void onReceive(Context context, Intent intent) {
         String packageName = intent.getData().getSchemeSpecificPart();
 
@@ -65,7 +60,9 @@ public class InstallListener extends BroadcastReceiver {
           Log.i(LOGTAG, "Downloaded APK file deleted");
         }
 
-        String manifestContent = readResource(context, packageName, "manifest");
+
+        ApkResources res = new ApkResources(packageName);
+        String manifestContent = res.getManifest(context);
 
         Uri manifestUri = Uri.parse(manifestUrl);
 
@@ -75,28 +72,11 @@ public class InstallListener extends BroadcastReceiver {
 
         GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent(
                     "Webapps:AppInstalled", "{\"app\": {\"manifestURL\":\"" + manifestUrl + "\"," +
-                                            "\"origin\":\"" + origin + "\"," + 
-                                            "\"packageName\":\"" + packageName + "\"," + 
+                                            "\"origin\":\"" + origin + "\"," +
+                                            "\"packageName\":\"" + packageName + "\"," +
                                             "\"manifest\": " + manifestContent + "}}"));
-        
+
     }
 
-    private String readResource(Context context, String packageName, String resourceName) {
-        Uri resourceUri = Uri.parse("android.resource://" + packageName + "/raw/" + resourceName);
-        StringBuilder fileContent = new StringBuilder();
-        try {
-          BufferedReader r = new BufferedReader(new InputStreamReader(context.getContentResolver().openInputStream(resourceUri)));
-          String line;
 
-          while ((line = r.readLine()) != null) {
-              fileContent.append(line);
-          }
-        } catch (FileNotFoundException e) {
-            Log.e(LOGTAG, String.format("file not found: \"%s\"", resourceName));
-        } catch (IOException e) {
-            Log.e(LOGTAG, "couldn't read file: " + resourceName);
-        }  
-
-        return fileContent.toString();        
-    }
 }

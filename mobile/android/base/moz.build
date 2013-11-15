@@ -192,6 +192,7 @@ gbjar.sources += [
     'VideoPlayer.java',
     'WebAppAllocator.java',
     'WebAppImpl.java',
+    'webapp/ApkResources.java',
     'webapp/InstallHelper.java',
     'webapp/InstallListener.java',
     'webapp/WebAppDispatcher.java',
