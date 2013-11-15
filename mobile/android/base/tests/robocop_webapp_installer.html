@@ -1,20 +1,20 @@
 <html>
-<meta charset="utf-8">
-<title>Webapp</title>
-<script>
-  function onLoad() {
-    var path = window.location.pathname;
-    var url = window.location.origin +
-              path.substring(0, path.lastIndexOf("/")) +
-              "/robocop_webapp_manifest.sjs";
-    console.log("robocop_webapp_installer: installing app: " + url);
-    navigator.mozApps.install(url, null).onsuccess = function() {
-      var app = this.result;
-      alert(JSON.stringify(app));
-    };
-  }
-</script>
-<body onload="onLoad()">
-<p>Webapp</p>
-</body>
+  <meta charset="utf-8">
+  <title>Webapp Installer</title>
+  <script>
+    function onLoad() {
+      var path = window.location.pathname;
+      var url = window.location.origin +
+                path.substring(0, path.lastIndexOf("/")) +
+                "/robocop_webapp_manifest.sjs";
+      console.log("robocop_webapp_installer: installing app: " + url);
+      navigator.mozApps.install(url, null).onsuccess = function() {
+        var app = this.result;
+        alert(JSON.stringify(app));
+      };
+    }
+  </script>
+  <body onload="onLoad()">
+    <p>Webapp Installer</p>
+  </body>
 </html>

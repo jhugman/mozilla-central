@@ -1,9 +1,7 @@
 package org.mozilla.gecko.tests;
 
 import org.mozilla.gecko.*;
-
 import com.jayway.android.robotium.solo.Condition;
-
 import org.json.JSONObject;
 
 /**
@@ -34,7 +32,7 @@ public class testWebapp extends BaseTest {
                 return false;
             }
         // }, MAX_WAIT_ENABLED_TEXT_MS);
-        }, 30000);
+        }, 120000);
     }
 
     protected final void setPref() {
