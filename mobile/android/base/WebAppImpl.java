@@ -252,7 +252,6 @@ public class WebAppImpl extends GeckoApp implements InstallCallback {
                         mTitlebar.setVisibility(View.VISIBLE);
                     }
                 }
-                hideSplash();
                 break;
             case LOADED:
                 hideSplash();
@@ -295,7 +294,7 @@ public class WebAppImpl extends GeckoApp implements InstallCallback {
             throw new NullPointerException("Cannot find package name in the calling intent to install this app");
         }
 
-        GeckoProfile profile = getProfile(); // GeckoProfile.get(getApplicationContext(), getDefaultProfileName());
+        GeckoProfile profile = getProfile();
         try {
             message.putOpt("profilePath", profile.getDir());
         } catch (JSONException e) {
