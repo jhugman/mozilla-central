@@ -22,7 +22,18 @@ public class testWebapp extends BaseTest {
         setPref();
         inputAndLoadUrl(url);
         verifyUrl(url);
-        waitAwhile();
+
+        // This fails, timing out, because WebApps:PostInstall occurs in
+        // the webapp process rather than the Fennec process.  That seems wrong,
+        // as the Fennec process should be mediating access to the registry.
+        // To fix it, we can have the webapp process fire an intent to register
+        // the app, or we can have Fennec observe APK installation and register
+        // the app at that point.
+        Actions.EventExpecter eventExpecter = mActions.expectGeckoEvent("WebApps:PostInstall");
+        eventExpecter.blockForEvent();
+        eventExpecter.unregisterListener();
+
+        // waitAwhile();
     }
 
     protected final void waitAwhile() {
@@ -31,8 +42,7 @@ public class testWebapp extends BaseTest {
             public boolean isSatisfied() {
                 return false;
             }
-        // }, MAX_WAIT_ENABLED_TEXT_MS);
-        }, 120000);
+        }, MAX_WAIT_ENABLED_TEXT_MS);
     }
 
     protected final void setPref() {
