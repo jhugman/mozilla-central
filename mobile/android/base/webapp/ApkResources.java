@@ -27,6 +27,18 @@ public class ApkResources {
         return readResource(context, "mini");
     }
 
+    public boolean isPackaged(Context context) {
+        boolean applicationFileExists = true;
+        Uri resourceUri = Uri.parse("android.resource://" + mPackageName + "/raw/application");
+        StringBuilder fileContent = new StringBuilder();
+        try {
+          context.getContentResolver().openInputStream(resourceUri);
+        } catch (FileNotFoundException e) {
+            applicationFileExists = false;
+        } 
+        return applicationFileExists;
+    }
+
     private String readResource(Context context, String resourceName) {
         Uri resourceUri = Uri.parse("android.resource://" + mPackageName + "/raw/" + resourceName);
         StringBuilder fileContent = new StringBuilder();
@@ -38,9 +50,9 @@ public class ApkResources {
               fileContent.append(line);
           }
         } catch (FileNotFoundException e) {
-            Log.e(LOGTAG, String.format("file not found: \"%s\"", resourceName));
+            Log.e(LOGTAG, String.format("File not found: \"%s\"", resourceName));
         } catch (IOException e) {
-            Log.e(LOGTAG, "couldn't read file: " + resourceName);
+            Log.e(LOGTAG, String.format("Couldn't read file: \"%s\"", resourceName));
         }
 
         return fileContent.toString();

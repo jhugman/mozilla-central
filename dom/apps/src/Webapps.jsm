@@ -2461,6 +2461,7 @@ onInstallSuccessAck: function onInstallSuccessAck(aManifestURL,
         aInstallSuccessCallback(app.manifest);
       }
     }
+#ifdef MOZ_ANDROID_SYNTHAPKS
     let dontNeedNetwork = false;
     if (manifest.package_path) {
       // If it is a local app then it must been installed from a local file
@@ -2486,6 +2487,7 @@ onInstallSuccessAck: function onInstallSuccessAck(aManifestURL,
       // ack the install.
       this.onInstallSuccessAck(app.manifestURL, dontNeedNetwork);
     }
+#endif
   },
 
   _nextLocalId: function() {

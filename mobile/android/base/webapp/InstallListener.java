@@ -60,8 +60,10 @@ public class InstallListener extends BroadcastReceiver {
           Log.i(LOGTAG, "Downloaded APK file deleted");
         }
 
-
         ApkResources res = new ApkResources(packageName);
+ 
+        boolean isPackaged = res.isPackaged(context);
+
         String manifestContent = res.getManifest(context);
 
         Uri manifestUri = Uri.parse(manifestUrl);
@@ -71,10 +73,10 @@ public class InstallListener extends BroadcastReceiver {
         Log.i(LOGTAG, "manifestContent = " + manifestContent);
 
         GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent(
-                    "Webapps:AppInstalled", "{\"app\": {\"manifestURL\":\"" + manifestUrl + "\"," +
-                                            "\"origin\":\"" + origin + "\"," +
-                                            "\"packageName\":\"" + packageName + "\"," +
-                                            "\"manifest\": " + manifestContent + "}}"));
+                    "Webapps:AppInstalled", String.format("{\"app\": {\"manifestURL\":\"%s\"," +
+                                            "\"origin\":\"%s\", \"isPackaged\":%s," +
+                                            "\"packageName\":\"%s\", \"manifest\": %s}}", 
+                                            manifestUrl, origin, isPackaged, packageName, manifestContent)));
 
     }
 
