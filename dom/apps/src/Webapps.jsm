@@ -2330,6 +2330,25 @@ onInstallSuccessAck: function onInstallSuccessAck(aManifestURL,
     }
   },
 
+  confirmApkInstall: function(aData) { 
+        this.confirmInstall(aData, null, function(aManifest) {
+          console.log("callback:" + JSON.stringify(aData.app.manifestURL));
+          let id = this._appIdForManifestURL(aData.app.manifestURL);
+          this.broadcastMessage("Webapps:AddApp", { id: id, app: aData.app });
+          this.broadcastMessage("Webapps:Install:Return:OK", aData);
+          this.broadcastMessage("Webapps:UpdateState", {
+            app: aData.app,
+            manifest: aManifest,
+            manifestURL: aData.app.manifestURL
+          });
+        });
+        this.broadcastMessage("Webapps:FireEvent", {
+            eventType: ["downloadsuccess", "downloadapplied"],
+            manifestURL: aData.app.manifestURL
+          });
+        console.log("END OF APP INSTALLED");
+  },
+
   confirmInstall: function(aData, aProfileDir, aInstallSuccessCallback) {
     let isReinstall = false;
     let app = aData.app;
