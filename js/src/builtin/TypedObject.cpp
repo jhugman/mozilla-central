@@ -529,6 +529,7 @@ const JSPropertySpec ArrayType::typedObjectProperties[] = {
 const JSFunctionSpec ArrayType::typedObjectMethods[] = {
     JS_FN("subarray", ArrayType::subarray, 2, 0),
     {"forEach", {nullptr, nullptr}, 1, 0, "ArrayForEach"},
+    {"redimension", {nullptr, nullptr}, 1, 0, "TypedArrayRedimension"},
     JS_FS_END
 };
 
@@ -1249,6 +1250,8 @@ js_InitTypedObjectClass(JSContext *cx, HandleObject obj)
 
     RootedObject module(cx, NewObjectWithClassProto(cx, &JSObject::class_,
                                                     objProto, global));
+    if (!module)
+        return nullptr;
 
     // Define TypedObject global.
 
@@ -1294,9 +1297,8 @@ js_InitTypedObjectClass(JSContext *cx, HandleObject obj)
                                   nullptr, nullptr,
                                   0))
         return nullptr;
-    global->setReservedSlot(JSProto_TypedObject, moduleValue);
+    global->setConstructor(JSProto_TypedObject, moduleValue);
     global->setArrayType(arrayType);
-    global->markStandardClassInitializedNoProto(&TypedObjectClass);
 
     //  Handle
 
@@ -2006,7 +2008,7 @@ TypedDatum::obj_deleteElement(JSContext *cx, HandleObject obj, uint32_t index,
                                bool *succeeded)
 {
     RootedId id(cx);
-    if (!IndexToId(cx, index, &id))
+    if (!IndexToId(cx, index, id.address()))
         return false;
 
     if (IsOwnId(cx, obj, id))
@@ -2167,6 +2169,7 @@ const Class TypedObject::class_ = {
         TypedDatum::obj_deleteProperty,
         TypedDatum::obj_deleteElement,
         TypedDatum::obj_deleteSpecial,
+        nullptr, nullptr, // watch/unwatch
         TypedDatum::obj_enumerate,
         nullptr, /* thisObject */
     }
@@ -2257,6 +2260,7 @@ const Class TypedHandle::class_ = {
         TypedDatum::obj_deleteProperty,
         TypedDatum::obj_deleteElement,
         TypedDatum::obj_deleteSpecial,
+        nullptr, nullptr, // watch/unwatch
         TypedDatum::obj_enumerate,
         nullptr, /* thisObject */
     }

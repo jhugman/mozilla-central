@@ -462,7 +462,7 @@ SetProperty(JSContext *cx, HandleObject obj, HandlePropertyName name, HandleValu
         // required for initializing 'const' closure variables.
         Shape *shape = obj->nativeLookup(cx, name);
         JS_ASSERT(shape && shape->hasSlot());
-        JSObject::nativeSetSlotWithType(cx, obj, shape, value);
+        obj->nativeSetSlotWithType(cx, shape, value);
         return true;
     }
 
@@ -617,7 +617,7 @@ GetDynamicName(JSContext *cx, JSObject *scopeChain, JSString *str, Value *vp)
     if (str->isAtom()) {
         atom = &str->asAtom();
     } else {
-        atom = AtomizeString<NoGC>(cx, str);
+        atom = AtomizeString(cx, str);
         if (!atom) {
             vp->setUndefined();
             return;

@@ -62,6 +62,7 @@ struct MarkMessageReadRequest
 {
   int32_t messageId;
   bool value;
+  bool sendReadReport;
 };
 
 struct GetSegmentInfoForTextRequest
@@ -73,6 +74,11 @@ struct CreateThreadCursorRequest
 {
 };
 
+struct GetSmscAddressRequest
+{
+  uint32_t serviceId;
+};
+
 union IPCSmsRequest
 {
   SendMessageRequest;
@@ -81,6 +87,7 @@ union IPCSmsRequest
   DeleteMessageRequest;
   MarkMessageReadRequest;
   GetSegmentInfoForTextRequest;
+  GetSmscAddressRequest;
 };
 
 union IPCMobileMessageCursor
@@ -126,9 +133,6 @@ parent:
    * Sent when the child makes an asynchronous cursor to the parent.
    */
   PMobileMessageCursor(IPCMobileMessageCursor request);
-
-  sync HasSupport()
-      returns (bool aHasSupport);
 
   AddSilentNumber(nsString aNumber);
   RemoveSilentNumber(nsString aNumber);

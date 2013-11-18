@@ -973,57 +973,70 @@ CompositorParent* MetroWidget::NewCompositorParent(int aSurfaceWidth, int aSurfa
 }
 
 void
-MetroWidget::ApzContentConsumingTouch()
+MetroWidget::ApzContentConsumingTouch(const ScrollableLayerGuid& aGuid)
 {
   LogFunction();
-  if (!APZController::sAPZC) {
+  if (!mController) {
     return;
   }
-  APZController::sAPZC->ContentReceivedTouch(mRootLayerTreeId, true);
+  mController->ContentReceivedTouch(aGuid, true);
 }
 
 void
-MetroWidget::ApzContentIgnoringTouch()
+MetroWidget::ApzContentIgnoringTouch(const ScrollableLayerGuid& aGuid)
 {
   LogFunction();
-  if (!APZController::sAPZC) {
+  if (!mController) {
     return;
   }
-  APZController::sAPZC->ContentReceivedTouch(mRootLayerTreeId, false);
+  mController->ContentReceivedTouch(aGuid, false);
 }
 
 bool
-MetroWidget::HitTestAPZC(ScreenPoint& pt)
+MetroWidget::ApzHitTest(ScreenIntPoint& pt)
 {
-  if (!APZController::sAPZC) {
+  if (!mController) {
     return false;
   }
-  return APZController::sAPZC->HitTestAPZC(pt);
+  return mController->HitTestAPZC(pt);
+}
+
+void
+MetroWidget::ApzTransformGeckoCoordinate(const ScreenIntPoint& aPoint,
+                                         LayoutDeviceIntPoint* aRefPointOut)
+{
+  if (!mController) {
+    return;
+  }
+  mController->TransformCoordinateToGecko(aPoint, aRefPointOut);
 }
 
 nsEventStatus
-MetroWidget::ApzReceiveInputEvent(WidgetInputEvent* aEvent)
+MetroWidget::ApzReceiveInputEvent(WidgetInputEvent* aEvent,
+                                  ScrollableLayerGuid* aOutTargetGuid)
 {
   MOZ_ASSERT(aEvent);
 
-  if (!APZController::sAPZC) {
+  if (!mController) {
     return nsEventStatus_eIgnore;
   }
-  return APZController::sAPZC->ReceiveInputEvent(*aEvent->AsInputEvent());
+  return mController->ReceiveInputEvent(aEvent, aOutTargetGuid);
 }
 
 nsEventStatus
 MetroWidget::ApzReceiveInputEvent(WidgetInputEvent* aInEvent,
+                                  ScrollableLayerGuid* aOutTargetGuid,
                                   WidgetInputEvent* aOutEvent)
 {
   MOZ_ASSERT(aInEvent);
   MOZ_ASSERT(aOutEvent);
 
-  if (!APZController::sAPZC) {
+  if (!mController) {
     return nsEventStatus_eIgnore;
   }
-  return APZController::sAPZC->ReceiveInputEvent(*aInEvent->AsInputEvent(),
-                                                 aOutEvent);
+  return mController->ReceiveInputEvent(aInEvent,
+                                        aOutTargetGuid,
+                                        aOutEvent);
 }
 
 LayerManager*
@@ -1351,18 +1364,21 @@ MetroWidget::Move(double aX, double aY)
 NS_IMETHODIMP
 MetroWidget::Resize(double aWidth, double aHeight, bool aRepaint)
 {
+  Resize(0, 0, aHeight, aHeight, aRepaint);
   return NS_OK;
 }
 
 NS_IMETHODIMP
 MetroWidget::Resize(double aX, double aY, double aWidth, double aHeight, bool aRepaint)
 {
+  WinUtils::Log("Resize: %f %f %f %f", aX, aY, aWidth, aHeight);
   if (mAttachedWidgetListener) {
     mAttachedWidgetListener->WindowResized(this, aWidth, aHeight);
   }
   if (mWidgetListener) {
     mWidgetListener->WindowResized(this, aWidth, aHeight);
   }
+  Invalidate();
   return NS_OK;
 }
 

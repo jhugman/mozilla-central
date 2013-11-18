@@ -11,11 +11,8 @@
 #include <stdint.h>
 
 #include "jsalloc.h"
+#include "jslock.h"
 #include "jspubtd.h"
-#ifdef JS_THREADSAFE
-# include "prcvar.h"
-# include "prlock.h"
-#endif
 
 #include "js/Vector.h"
 
@@ -61,9 +58,7 @@ class ThreadPool
     friend class ThreadPoolWorker;
 
     // Initialized at startup only:
-#if defined(JS_THREADSAFE) || defined(DEBUG)
     JSRuntime *const runtime_;
-#endif
     js::Vector<ThreadPoolWorker*, 8, SystemAllocPolicy> workers_;
 
     bool lazyStartWorkers(JSContext *cx);

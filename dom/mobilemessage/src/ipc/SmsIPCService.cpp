@@ -148,22 +148,18 @@ SmsIPCService::GetSmsDefaultServiceId(uint32_t* aServiceId)
 }
 
 NS_IMETHODIMP
-SmsIPCService::HasSupport(bool* aHasSupport)
-{
-  PSmsChild* smsChild = GetSmsChild();
-  NS_ENSURE_TRUE(smsChild, NS_ERROR_FAILURE);
-
-  smsChild->SendHasSupport(aHasSupport);
-
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 SmsIPCService::GetSegmentInfoForText(const nsAString& aText,
                                      nsIMobileMessageCallback* aRequest)
 {
   return SendRequest(GetSegmentInfoForTextRequest(nsString(aText)),
                                                   aRequest);
+}
+
+NS_IMETHODIMP
+SmsIPCService::GetSmscAddress(uint32_t aServiceId,
+                              nsIMobileMessageCallback* aRequest)
+{
+  return SendRequest(GetSmscAddressRequest(aServiceId), aRequest);
 }
 
 NS_IMETHODIMP
@@ -243,9 +239,10 @@ SmsIPCService::CreateMessageCursor(nsIDOMMozSmsFilter* aFilter,
 NS_IMETHODIMP
 SmsIPCService::MarkMessageRead(int32_t aMessageId,
                                bool aValue,
+                               bool aSendReadReport,
                                nsIMobileMessageCallback* aRequest)
 {
-  return SendRequest(MarkMessageReadRequest(aMessageId, aValue), aRequest);
+  return SendRequest(MarkMessageReadRequest(aMessageId, aValue, aSendReadReport), aRequest);
 }
 
 NS_IMETHODIMP
@@ -332,4 +329,13 @@ NS_IMETHODIMP
 SmsIPCService::Retrieve(int32_t aId, nsIMobileMessageCallback *aRequest)
 {
   return SendRequest(RetrieveMessageRequest(aId), aRequest);
+}
+
+NS_IMETHODIMP
+SmsIPCService::SendReadReport(const nsAString & messageID,
+                              const nsAString & toAddress,
+                              const nsAString & iccId)
+{
+  NS_ERROR("We should not be here!");
+  return NS_OK;
 }

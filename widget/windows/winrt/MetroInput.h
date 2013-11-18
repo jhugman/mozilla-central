@@ -12,6 +12,7 @@
 #include "mozwrlbase.h"
 #include "nsDeque.h"
 #include "mozilla/EventForwards.h"
+#include "mozilla/layers/APZCTreeManager.h"
 
 // System headers (alphabetical)
 #include <EventToken.h>     // EventRegistrationToken
@@ -100,6 +101,8 @@ private:
   typedef ABI::Windows::UI::Input::ITappedEventArgs ITappedEventArgs;
   typedef ABI::Windows::UI::Input::ManipulationDelta ManipulationDelta;
 
+  typedef mozilla::layers::ScrollableLayerGuid ScrollableLayerGuid;
+
 public:
   MetroInput(MetroWidget* aWidget,
              ICoreWindow* aWindow);
@@ -168,6 +171,7 @@ private:
   // Event processing helpers.  See function definitions for more info.
   void TransformRefPoint(const Point& aPosition,
                          LayoutDeviceIntPoint& aRefPointOut);
+  void TransformTouchEvent(WidgetTouchEvent* aEvent);
   void OnPointerNonTouch(IPointerPoint* aPoint);
   void AddPointerMoveDataToRecognizer(IPointerEventArgs* aArgs);
   void InitGeckoMouseEventFromPointerPoint(WidgetMouseEvent* aEvent,
@@ -203,7 +207,7 @@ private:
   //   For example, a set of mousemove, mousedown, and mouseup events might
   //   be sent if a tap is detected.
   bool mContentConsumingTouch;
-  bool mIsFirstTouchMove;
+  bool mApzConsumingTouch;
   bool mCancelable;
   bool mRecognizerWantsEvents;
   nsTArray<uint32_t> mCanceledIds;
@@ -277,6 +281,7 @@ private:
   void DispatchTouchCancel(WidgetTouchEvent* aEvent);
 
   nsDeque mInputEventQueue;
+  mozilla::layers::ScrollableLayerGuid mTargetAPZCGuid;
   static nsEventStatus sThrowawayStatus;
 };
 

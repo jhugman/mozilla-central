@@ -136,6 +136,8 @@ class MochitestRunner(MozbuildObject):
                 print('Specified test path does not exist: %s' % test_root_file)
                 return 1
             options.testPath = test_path
+        elif conditions.is_b2g_desktop:
+            options.testManifest = 'b2g-desktop.json'
         else:
             options.testManifest = 'b2g.json'
 
@@ -390,9 +392,9 @@ def MochitestCommand(func):
     func = repeat(func)
 
     runUntilFailure = CommandArgument("--run-until-failure", action='store_true',
-        help='Run a test repeatedly and stops on the first time the test fails. ' \
-             'Only available when running a single test. Default cap is 30 runs, ' \
-             'which can be overwritten with the --repeat parameter.')
+        help='Run tests repeatedly and stops on the first time a test fails. ' \
+             'Default cap is 30 runs, which can be overwritten ' \
+             'with the --repeat parameter.')
     func = runUntilFailure(func)
 
     slow = CommandArgument('--slow', action='store_true',

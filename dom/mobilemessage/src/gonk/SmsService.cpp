@@ -84,13 +84,6 @@ SmsService::GetSmsDefaultServiceId(uint32_t* aServiceId)
 }
 
 NS_IMETHODIMP
-SmsService::HasSupport(bool* aHasSupport)
-{
-  *aHasSupport = true;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 SmsService::GetSegmentInfoForText(const nsAString& aText,
                                   nsIMobileMessageCallback* aRequest)
 {
@@ -147,6 +140,19 @@ SmsService::RemoveSilentNumber(const nsAString& aNumber)
 
   NS_ENSURE_TRUE(mSilentNumbers.RemoveElement(aNumber), NS_ERROR_FAILURE);
   return NS_OK;
+}
+
+NS_IMETHODIMP
+SmsService::GetSmscAddress(uint32_t aServiceId,
+                           nsIMobileMessageCallback *aRequest)
+{
+  nsCOMPtr<nsIRadioInterface> radioInterface;
+  if (mRil) {
+    mRil->GetRadioInterface(aServiceId, getter_AddRefs(radioInterface));
+  }
+  NS_ENSURE_TRUE(radioInterface, NS_ERROR_FAILURE);
+
+  return radioInterface->GetSmscAddress(aRequest);
 }
 
 } // namespace mobilemessage

@@ -149,13 +149,13 @@ public class GeckoLayerClient implements LayerView.Listener, PanZoomTarget
 
         // Gecko being ready is one of the two conditions (along with having an available
         // surface) that cause us to create the compositor. So here, now that we know gecko
-        // is ready, call createCompositor() to see if we can actually do the creation.
+        // is ready, call updateCompositor() to see if we can actually do the creation.
         // This needs to run on the UI thread so that the surface validity can't change on
         // us while we're in the middle of creating the compositor.
         mView.post(new Runnable() {
             @Override
             public void run() {
-                mView.getGLController().createCompositor();
+                mView.getGLController().updateCompositor();
             }
         });
     }
@@ -835,7 +835,6 @@ public class GeckoLayerClient implements LayerView.Listener, PanZoomTarget
         if (notifyGecko && mGeckoIsReady) {
             geometryChanged(null);
         }
-        setShadowVisibility();
     }
 
     /*
@@ -893,23 +892,6 @@ public class GeckoLayerClient implements LayerView.Listener, PanZoomTarget
     public interface OnMetricsChangedListener {
         public void onMetricsChanged(ImmutableViewportMetrics viewport);
         public void onPanZoomStopped();
-    }
-
-    private void setShadowVisibility() {
-        try {
-            if (BrowserApp.mBrowserToolbar == null) // this will throw if we don't have BrowserApp
-                return;
-            ThreadUtils.postToUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    if (BrowserApp.mBrowserToolbar == null) {
-                        return;
-                    }
-                    ImmutableViewportMetrics m = mViewportMetrics;
-                    BrowserApp.mBrowserToolbar.setShadowVisibility(m.viewportRectTop >= m.pageRectTop);
-                }
-            });
-        } catch (NoClassDefFoundError ex) {}
     }
 
     /** Implementation of PanZoomTarget */

@@ -19,9 +19,11 @@ dictionary MmsDeliveryInfo
 {
   DOMString? receiver;
   DOMString? deliveryStatus;
+  jsval      deliveryTimestamp; // Date object; null if not available (e.g.,
+                                // |delivery| = "received" or not yet delivered).
 };
 
-[scriptable, builtinclass, uuid(35d88c5e-2746-11e3-9d7b-83ca2203a291)]
+[scriptable, builtinclass, uuid(3593c914-420a-11e3-a297-a3bdd768257f)]
 interface nsIDOMMozMmsMessage : nsISupports
 {
   /**
@@ -67,4 +69,7 @@ interface nsIDOMMozMmsMessage : nsISupports
   readonly attribute jsval     expiryDate;     // Date object
                                                // Expiry date for an MMS to be
                                                // manually downloaded.
+
+  // Request read report from sender or not.
+  readonly attribute boolean   isReadReportRequested;
 };

@@ -193,14 +193,11 @@ AndroidBridge::Init(JNIEnv *jEnv)
     jSurfaceClass = getClassGlobalRef("android/view/Surface");
     if (mAPIVersion <= 8 /* Froyo */) {
         jSurfacePointerField = getField("mSurface", "I");
-    } else {
+    } else if (mAPIVersion > 8 && mAPIVersion < 19 /* KitKat */) {
         jSurfacePointerField = getField("mNativeSurface", "I");
-
-        // Apparently mNativeSurface doesn't exist in Key Lime Pie, so just clear the
-        // exception if we have one and move on.
-        if (jEnv->ExceptionCheck()) {
-            jEnv->ExceptionClear();
-        }
+    } else {
+        // We don't know how to get this, just set it to 0
+        jSurfacePointerField = 0;
     }
 
     jclass eglClass = getClassGlobalRef("com/google/android/gles_jni/EGLSurfaceImpl");
@@ -726,19 +723,19 @@ AndroidBridge::RegisterCompositor(JNIEnv *env)
 }
 
 EGLSurface
-AndroidBridge::ProvideEGLSurface()
+AndroidBridge::CreateEGLSurfaceForCompositor()
 {
     if (!jEGLSurfacePointerField) {
         return nullptr;
     }
-    MOZ_ASSERT(mGLControllerObj, "AndroidBridge::ProvideEGLSurface called with a null GL controller ref");
+    MOZ_ASSERT(mGLControllerObj, "AndroidBridge::CreateEGLSurfaceForCompositor called with a null GL controller ref");
 
     JNIEnv* env = GetJNIForThread(); // called on the compositor thread
     if (!env) {
         return nullptr;
     }
 
-    jobject eglSurface = ProvideEGLSurfaceWrapper(mGLControllerObj);
+    jobject eglSurface = CreateEGLSurfaceForCompositorWrapper(mGLControllerObj);
     if (!eglSurface)
         return nullptr;
 
@@ -1652,25 +1649,6 @@ void
 AndroidBridge::ScheduleComposite()
 {
     nsWindow::ScheduleComposite();
-}
-
-void
-AndroidBridge::GetGfxInfoData(nsACString& aRet)
-{
-    ALOG_BRIDGE("AndroidBridge::GetGfxInfoData");
-
-    JNIEnv* env = GetJNIEnv();
-    if (!env)
-        return;
-
-    AutoLocalJNIFrame jniFrame(env);
-    jstring jstrRet = GetGfxInfoDataWrapper();
-
-    if (!jstrRet)
-        return;
-
-    nsJNIString jniStr(jstrRet, env);
-    CopyUTF16toUTF8(jniStr, aRet);
 }
 
 nsresult

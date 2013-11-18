@@ -21,6 +21,7 @@ EXPORTS.mozilla.gfx += [
     'Blur.h',
     'BorrowedContext.h',
     'DataSurfaceHelpers.h',
+    'Helpers.h',
     'Matrix.h',
     'PathHelpers.h',
     'Point.h',
@@ -89,6 +90,7 @@ SOURCES += [
     'Factory.cpp',
     'ImageScaling.cpp',
     'Matrix.cpp',
+    'Path.cpp',
     'PathCairo.cpp',
     'PathHelpers.cpp',
     'PathRecording.cpp',
@@ -102,6 +104,7 @@ SOURCES += [
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
     SOURCES += [
+        'MacIOSurface.cpp',
         'QuartzSupport.mm',
     ]
 

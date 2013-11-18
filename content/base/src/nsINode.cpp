@@ -2198,21 +2198,6 @@ nsINode::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
     if (elm) {                                                               \
       elm->SetEventHandler(nsGkAtoms::on##name_, EmptyString(), handler);    \
     }                                                                        \
-  }                                                                          \
-  NS_IMETHODIMP nsINode::GetOn##name_(JSContext *cx, JS::Value *vp) {        \
-    EventHandlerNonNull* h = GetOn##name_();                                 \
-    vp->setObjectOrNull(h ? h->Callable().get() : nullptr);                  \
-    return NS_OK;                                                            \
-  }                                                                          \
-  NS_IMETHODIMP nsINode::SetOn##name_(JSContext *cx, const JS::Value &v) {   \
-    nsRefPtr<EventHandlerNonNull> handler;                                   \
-    JSObject *callable;                                                      \
-    if (v.isObject() &&                                                      \
-        JS_ObjectIsCallable(cx, callable = &v.toObject())) {                 \
-      handler = new EventHandlerNonNull(callable);                           \
-    }                                                                        \
-    SetOn##name_(handler);                                                   \
-    return NS_OK;                                                            \
   }
 #define TOUCH_EVENT EVENT
 #define DOCUMENT_ONLY_EVENT EVENT
@@ -2337,8 +2322,8 @@ AddScopeElements(TreeMatchContext& aMatchContext,
 // Actually find elements matching aSelectorList (which must not be
 // null) and which are descendants of aRoot and put them in aList.  If
 // onlyFirstMatch, then stop once the first one is found.
-template<bool onlyFirstMatch, class T>
-inline static nsresult
+template<bool onlyFirstMatch, class Collector, class T>
+MOZ_ALWAYS_INLINE static nsresult
 FindMatchingElements(nsINode* aRoot, const nsAString& aSelector, T &aList)
 {
 
@@ -2424,6 +2409,7 @@ FindMatchingElements(nsINode* aRoot, const nsAString& aSelector, T &aList)
     return NS_OK;
   }
 
+  Collector results;
   for (nsIContent* cur = aRoot->GetFirstChild();
        cur;
        cur = cur->GetNextNode(aRoot)) {
@@ -2431,10 +2417,19 @@ FindMatchingElements(nsINode* aRoot, const nsAString& aSelector, T &aList)
         nsCSSRuleProcessor::SelectorListMatches(cur->AsElement(),
                                                 matchingContext,
                                                 selectorList)) {
-      aList.AppendElement(cur->AsElement());
       if (onlyFirstMatch) {
+        aList.AppendElement(cur->AsElement());
         return NS_OK;
       }
+      results.AppendElement(cur->AsElement());
+    }
+  }
+
+  const uint32_t len = results.Length();
+  if (len) {
+    aList.SetCapacity(len);
+    for (uint32_t i = 0; i < len; ++i) {
+      aList.AppendElement(results.ElementAt(i));
     }
   }
 
@@ -2447,6 +2442,10 @@ struct ElementHolder {
     NS_ABORT_IF_FALSE(!mElement, "Should only get one element");
     mElement = aElement;
   }
+  void SetCapacity(uint32_t aCapacity) { MOZ_CRASH("Don't call me!"); }
+  uint32_t Length() { return 0; }
+  Element* ElementAt(uint32_t aIndex) { return nullptr; }
+
   Element* mElement;
 };
 
@@ -2454,7 +2453,7 @@ Element*
 nsINode::QuerySelector(const nsAString& aSelector, ErrorResult& aResult)
 {
   ElementHolder holder;
-  aResult = FindMatchingElements<true>(this, aSelector, holder);
+  aResult = FindMatchingElements<true, ElementHolder>(this, aSelector, holder);
 
   return holder.mElement;
 }
@@ -2464,7 +2463,10 @@ nsINode::QuerySelectorAll(const nsAString& aSelector, ErrorResult& aResult)
 {
   nsRefPtr<nsSimpleContentList> contentList = new nsSimpleContentList(this);
 
-  aResult = FindMatchingElements<false>(this, aSelector, *contentList);
+  aResult =
+    FindMatchingElements<false, nsAutoTArray<Element*, 128>>(this,
+                                                             aSelector,
+                                                             *contentList);
 
   return contentList.forget();
 }
@@ -2540,6 +2542,17 @@ nsINode::CloneNode(bool aDeep, ErrorResult& aError)
                                       getter_AddRefs(result));
   return result.forget();
 }
+
+already_AddRefed<nsINode>
+nsINode::CloneNode(mozilla::ErrorResult& aError)
+{
+  if (HasChildNodes()) {
+    // Flag it as an error, not a warning, to make people actually notice.
+    OwnerDoc()->WarnOnceAbout(nsIDocument::eUnsafeCloneNode, true);
+  }
+  return CloneNode(true, aError);
+}
+
 
 nsDOMAttributeMap*
 nsINode::GetAttributes()

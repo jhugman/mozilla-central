@@ -67,6 +67,7 @@ WEBIDL_FILES = [
     'CSSValueList.webidl',
     'DataContainerEvent.webidl',
     'DataStore.webidl',
+    'DedicatedWorkerGlobalScope.webidl',
     'DelayNode.webidl',
     'DesktopNotification.webidl',
     'DeviceMotionEvent.webidl',
@@ -209,6 +210,7 @@ WEBIDL_FILES = [
     'Location.webidl',
     'MediaElementAudioSourceNode.webidl',
     'MediaError.webidl',
+    'MediaList.webidl',
     'MediaRecorder.webidl',
     'MediaSource.webidl',
     'MediaStream.webidl',
@@ -272,6 +274,7 @@ WEBIDL_FILES = [
     'ScrollAreaEvent.webidl',
     'SettingsManager.webidl',
     'SharedWorker.webidl',
+    'SharedWorkerGlobalScope.webidl',
     'SimpleGestureEvent.webidl',
     'SourceBuffer.webidl',
     'SourceBufferList.webidl',
@@ -415,8 +418,9 @@ WEBIDL_FILES = [
     'WebSocket.webidl',
     'WheelEvent.webidl',
     'WifiOptions.webidl',
+    'Worker.webidl',
+    'WorkerGlobalScope.webidl',
     'WorkerLocation.webidl',
-    'WorkerMessagePort.webidl',
     'WorkerNavigator.webidl',
     'XMLDocument.webidl',
     'XMLHttpRequest.webidl',
@@ -511,11 +515,19 @@ if CONFIG['MOZ_B2G_RIL']:
         'MozCellBroadcast.webidl',
         'MozCellBroadcastEvent.webidl',
         'MozEmergencyCbModeEvent.webidl',
+        'MozMobileConnectionArray.webidl',
         'MozOtaStatusEvent.webidl',
-        'MozStkCommandEvent.webidl',
         'MozVoicemail.webidl',
         'MozVoicemailEvent.webidl',
         'USSDReceivedEvent.webidl',
+    ]
+
+if CONFIG['MOZ_NFC']:
+    WEBIDL_FILES += [
+         'MozNdefRecord.webidl',
+         'MozNfc.webidl',
+         'MozNFCPeer.webidl',
+         'MozNFCTag.webidl',
     ]
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
@@ -557,6 +569,7 @@ GENERATED_EVENTS_WEBIDL_FILES = [
     'MediaStreamEvent.webidl',
     'MozContactChangeEvent.webidl',
     'MozInterAppMessageEvent.webidl',
+    'MozStkCommandEvent.webidl',
     'RTCDataChannelEvent.webidl',
     'RTCPeerConnectionIceEvent.webidl',
     'TrackEvent.webidl',
@@ -569,4 +582,3 @@ if CONFIG['MOZ_GAMEPAD']:
         'GamepadButtonEvent.webidl',
         'GamepadEvent.webidl',
     ]
-

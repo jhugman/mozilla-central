@@ -7,7 +7,6 @@
 #include "base/basictypes.h"
 #include "BluetoothOppManager.h"
 
-#include "BluetoothProfileController.h"
 #include "BluetoothService.h"
 #include "BluetoothSocket.h"
 #include "BluetoothUtils.h"
@@ -189,7 +188,6 @@ BluetoothOppManager::BluetoothOppManager() : mConnected(false)
                                            , mSentFileLength(0)
                                            , mWaitingToSendPutFinal(false)
                                            , mCurrentBlobIndex(-1)
-                                           , mController(nullptr)
 {
   mConnectedDeviceAddress.AssignLiteral(BLUETOOTH_ADDRESS_NONE);
 }
@@ -279,53 +277,23 @@ BluetoothOppManager::ConnectInternal(const nsAString& aDeviceAddress)
 }
 
 void
-BluetoothOppManager::Connect(const nsAString& aDeviceAddress,
-                             BluetoothProfileController* aController)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(aController && !mController);
-
-  BluetoothService* bs = BluetoothService::Get();
-  if (!bs || sInShutdown) {
-    aController->OnConnect(NS_LITERAL_STRING(ERR_NO_AVAILABLE_RESOURCE));
-    return;
-  }
-
-  if (mSocket) {
-    if (mConnectedDeviceAddress == aDeviceAddress) {
-      aController->OnConnect(NS_LITERAL_STRING(ERR_ALREADY_CONNECTED));
-    } else {
-      aController->OnConnect(NS_LITERAL_STRING(ERR_REACHED_CONNECTION_LIMIT));
-    }
-    return;
-  }
-
-  mController = aController;
-  OnConnect(EmptyString());
-}
-
-void
-BluetoothOppManager::Disconnect(BluetoothProfileController* aController)
-{
-  if (!mSocket) {
-    if (aController) {
-      aController->OnDisconnect(NS_LITERAL_STRING(ERR_ALREADY_DISCONNECTED));
-    }
-    return;
-  }
-
-  MOZ_ASSERT(!mController);
-
-  mController = aController;
-  mSocket->Disconnect();
-}
-
-void
 BluetoothOppManager::HandleShutdown()
 {
   MOZ_ASSERT(NS_IsMainThread());
   sInShutdown = true;
-  Disconnect(nullptr);
+
+  if (mSocket) {
+    mSocket->Disconnect();
+    mSocket = nullptr;
+  }
+  if (mRfcommSocket) {
+    mRfcommSocket->Disconnect();
+    mRfcommSocket = nullptr;
+  }
+  if (mL2capSocket) {
+    mL2capSocket->Disconnect();
+    mL2capSocket = nullptr;
+  }
   sBluetoothOppManager = nullptr;
 }
 
@@ -494,8 +462,10 @@ BluetoothOppManager::StopSendingFile()
 
   if (mIsServer) {
     mAbortFlag = true;
+  } else if (mSocket) {
+    mSocket->Disconnect();
   } else {
-    Disconnect(nullptr);
+    BT_WARNING("%s: No ongoing file transfer to stop", __FUNCTION__);
   }
 
   return true;
@@ -558,7 +528,9 @@ BluetoothOppManager::AfterOppConnected()
     // If we fail to get a mount lock, abort this transaction
     // Directly sending disconnect-request is better than abort-request
     BT_WARNING("BluetoothOPPManager couldn't get a mount lock!");
-    Disconnect(nullptr);
+
+    MOZ_ASSERT(mSocket);
+    mSocket->Disconnect();
   }
 }
 
@@ -1583,36 +1555,26 @@ BluetoothOppManager::AcquireSdcardMountLock()
 }
 
 void
+BluetoothOppManager::Connect(const nsAString& aDeviceAddress,
+                             BluetoothProfileController* aController)
+{
+  MOZ_ASSERT(false);
+}
+
+void
+BluetoothOppManager::Disconnect(BluetoothProfileController* aController)
+{
+  MOZ_ASSERT(false);
+}
+
+void
 BluetoothOppManager::OnConnect(const nsAString& aErrorStr)
 {
-  MOZ_ASSERT(NS_IsMainThread());
-
-  if (!aErrorStr.IsEmpty()) {
-    mSocket = nullptr;
-    Listen();
-  }
-
-  /**
-   * On the one hand, notify the controller that we've done for outbound
-   * connections. On the other hand, we do nothing for inbound connections.
-   */
-  NS_ENSURE_TRUE_VOID(mController);
-
-  nsRefPtr<BluetoothProfileController> controller = mController.forget();
-  controller->OnConnect(aErrorStr);
+  MOZ_ASSERT(false);
 }
 
 void
 BluetoothOppManager::OnDisconnect(const nsAString& aErrorStr)
 {
-  MOZ_ASSERT(NS_IsMainThread());
-
-  /**
-   * On the one hand, notify the controller that we've done for outbound
-   * connections. On the other hand, we do nothing for inbound connections.
-   */
-  NS_ENSURE_TRUE_VOID(mController);
-
-  nsRefPtr<BluetoothProfileController> controller = mController.forget();
-  controller->OnDisconnect(aErrorStr);
+  MOZ_ASSERT(false);
 }

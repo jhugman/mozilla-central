@@ -200,6 +200,7 @@ public:
    * Return true if ARIA role is specified on the element.
    */
   bool HasARIARole() const { return mRoleMapEntry; }
+  bool IsARIARole(nsIAtom* aARIARole) const;
 
   /**
    * Retrun ARIA role map if any.
@@ -628,11 +629,6 @@ public:
     // to force it for links they internally know to be invalid
     return (0 == (State() & mozilla::a11y::states::INVALID));
   }
-
-  /**
-   * Return true if the link currently has the focus.
-   */
-  bool IsLinkSelected();
 
   /**
    * Return the number of anchors within the link.
