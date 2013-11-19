@@ -2290,11 +2290,10 @@ onInstallSuccessAck: function onInstallSuccessAck(aManifestURL,
         JSON.stringify({ manifestURL: app.manifestURL }));
     }).bind(this));
 
-
     if (!aData.isPackage) {
       this.updateAppHandlers(null, app.manifest, app);
       if (aInstallSuccessCallback) {
-        aInstallSuccessCallback(manifest);
+        aInstallSuccessCallback(app.manifest);
       }
     }
     let dontNeedNetwork = false;
