@@ -6945,7 +6945,7 @@ var WebappsUI = {
     Services.obs.addObserver(this, "webapps-launch", false);
     Services.obs.addObserver(this, "webapps-uninstall", false);
     Services.obs.addObserver(this, "webapps-install-error", false);
-    Services.obs.addObserver(this, "Webapps:AppInstalled", false);
+    Services.obs.addObserver(this, "Webapps:ApkInstalled", false);
   },
 
   uninit: function unint() {
@@ -6953,7 +6953,7 @@ var WebappsUI = {
     Services.obs.removeObserver(this, "webapps-launch");
     Services.obs.removeObserver(this, "webapps-uninstall");
     Services.obs.removeObserver(this, "webapps-install-error");
-    Services.obs.removeObserver(this, "Webapps:AppInstalled");
+    Services.obs.removeObserver(this, "Webapps:ApkInstalled");
   },
 
   DEFAULT_PREFS_FILENAME: "default-prefs.js",
@@ -6966,7 +6966,7 @@ var WebappsUI = {
     } catch(ex) { }
     console.log("observe: topic: " + aTopic);
     switch (aTopic) {
-      case "Webapps:AppInstalled":
+      case "Webapps:ApkInstalled":
         // TODO move this event catching code to Webapps.jsm
         console.log("aData:" + aData);
         DOMApplicationRegistry.confirmApkInstall(data);

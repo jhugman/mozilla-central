@@ -78,7 +78,7 @@ public class InstallListener extends BroadcastReceiver {
 
         // TODO check if gecko events get queued if Gecko isn't running
         GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent(
-                    "Webapps:AppInstalled", String.format("{\"app\": {\"manifestURL\":\"%s\"," +
+                    "Webapps:ApkInstalled", String.format("{\"app\": {\"manifestURL\":\"%s\"," +
                                             "\"origin\":\"%s\", \"isPackaged\":%s," +
                                             "\"packageName\":\"%s\", \"requestId\":\"%s\", \"manifest\": %s}}", 
                                             manifestUrl, origin, isPackaged, packageName, requestId, manifestContent)));
