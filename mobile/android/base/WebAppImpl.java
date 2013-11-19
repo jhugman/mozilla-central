@@ -11,12 +11,14 @@ import java.net.URL;
 
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.mozilla.gecko.webapp.ApkResources;
 import org.mozilla.gecko.webapp.InstallHelper;
 import org.mozilla.gecko.webapp.InstallHelper.InstallCallback;
 
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager.NameNotFoundException;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.drawable.BitmapDrawable;
@@ -118,8 +120,14 @@ public class WebAppImpl extends GeckoApp implements InstallCallback {
 
         // TODO this is where we construct the URL from the Intent from the
         // the synthesized APK.
-        // TODO Translate AndroidIntents into WebActivities here.
+        String packageName = intent.getStringExtra("packageName");
+        try {
+            uri = new ApkResources(packageName).getManifestUrl(this);
+        } catch (NameNotFoundException e) {
+            Log.e(LOGTAG, "Can't resolve package name " + packageName, e);
+        }
 
+        // TODO Translate AndroidIntents into WebActivities here.
         return uri;
     }
 
@@ -253,6 +261,7 @@ public class WebAppImpl extends GeckoApp implements InstallCallback {
                     }
                 }
                 break;
+            case RESTORED:
             case LOADED:
                 hideSplash();
                 break;
