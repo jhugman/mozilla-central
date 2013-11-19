@@ -14,6 +14,7 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/NetUtil.jsm");
 Cu.import("resource://gre/modules/FileUtils.jsm");
+Cu.import("resource://gre/modules/DOMRequestHelper.jsm");
 
 function dump(a) {
   Services.console.logStringMessage(a);
@@ -23,13 +24,15 @@ function sendMessageToJava(aMessage) {
   return Services.androidBridge.handleGeckoMessage(JSON.stringify(aMessage));
 }
 this.WebappManager = {
+  __proto__: DOMRequestIpcHelper.prototype,
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver,
                                          Ci.nsISupportsWeakReference]),
 
   observe: function(aSubject, aTopic, aData) {
     switch (aTopic) {
       case "webapps-download-apk":
-        this._downloadApk(aData);
+        dump("WebappManager.jsm: data: " + aData);
+        this._downloadApk(JSON.parse(aData));
         break;
     }
   },
@@ -86,8 +89,11 @@ this.WebappManager = {
     }).bind(this);
   },
 
-  _downloadApk: function(aManifestUrl) {
-    dump("_downloadApk for " + aManifestUrl);
+  _downloadApk: function(aMsg) {
+    dump("Request ID : " + aMsg.requestID);
+
+    let manifestUrl = aMsg.app.manifestURL;
+    dump("_downloadApk for " + manifestUrl);
 
     // Get the endpoint URL and convert it to an nsIURI/nsIURL object.
     const GENERATOR_URL_PREF = "dom.mozApps.apkGeneratorEndpoint";
@@ -97,7 +103,7 @@ this.WebappManager = {
 
     // Populate the query part of the URL with the manifest URL parameter.
     let params = {
-      manifestUrl: aManifestUrl,
+      manifestUrl: manifestUrl,
     };
     generatorUrl.query =
       [p + "=" + encodeURIComponent(params[p]) for (p in params)].join("&");
@@ -107,7 +113,7 @@ this.WebappManager = {
 
     let filePath = sendMessageToJava({
       type: "WebApps:GetTempFilePath",
-      fileName: aManifestUrl.replace(/[^a-zA-Z0-9]/gi, "")
+      fileName: manifestUrl.replace(/[^a-zA-Z0-9]/gi, "")
     });
     dump("saving APK to " + filePath);
 
@@ -128,7 +134,8 @@ this.WebappManager = {
               dump("Downloaded successfully");
               sendMessageToJava({
                 type: "WebApps:InstallApk",
-                filePath: filePath
+                filePath: filePath,
+                requestId: aMsg.requestID
               });
             }
           });

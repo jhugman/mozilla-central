@@ -1113,7 +1113,8 @@ this.DOMApplicationRegistry = {
     switch (aMessage.name) {
       case "Webapps:Install": {
 #ifdef MOZ_ANDROID_SYNTHAPKS
-        Services.obs.notifyObservers(null, "webapps-download-apk", msg.app.manifestURL);
+        debug("MSG = " + JSON.stringify(msg));
+        Services.obs.notifyObservers(null, "webapps-download-apk", JSON.stringify(msg));
 #else
         this.doInstall(msg, mm);
 #endif
@@ -2331,22 +2332,25 @@ onInstallSuccessAck: function onInstallSuccessAck(aManifestURL,
   },
 
   confirmApkInstall: function(aData) { 
-        this.confirmInstall(aData, null, function(aManifest) {
-          console.log("callback:" + JSON.stringify(aData.app.manifestURL));
-          let id = this._appIdForManifestURL(aData.app.manifestURL);
-          this.broadcastMessage("Webapps:AddApp", { id: id, app: aData.app });
-          this.broadcastMessage("Webapps:Install:Return:OK", aData);
-          this.broadcastMessage("Webapps:UpdateState", {
-            app: aData.app,
-            manifest: aManifest,
-            manifestURL: aData.app.manifestURL
-          });
-        });
-        this.broadcastMessage("Webapps:FireEvent", {
-            eventType: ["downloadsuccess", "downloadapplied"],
-            manifestURL: aData.app.manifestURL
-          });
-        console.log("END OF APP INSTALLED");
+    this.confirmInstall(aData, null, (function(aManifest) {
+      //let req = this.getRequest(msg.requestID);
+      debug("callback:" + JSON.stringify(aData.app.manifestURL));
+      let id = this._appIdForManifestURL(aData.app.manifestURL);
+      this.broadcastMessage("Webapps:AddApp", { id: id, app: aData.app });
+      
+      this.broadcastMessage("Webapps:UpdateState", {
+        app: aData.app,
+        manifest: aManifest,
+        manifestURL: aData.app.manifestURL
+      });
+      this.broadcastMessage("Webapps:Install:Return:OK", aData);
+
+      this.broadcastMessage("Webapps:FireEvent", {
+        eventType: ["downloadsuccess", "downloadapplied"],
+        manifestURL: aData.app.manifestURL
+      });          
+    }).bind(this));
+    debug("END OF APP INSTALLED");
   },
 
   confirmInstall: function(aData, aProfileDir, aInstallSuccessCallback) {

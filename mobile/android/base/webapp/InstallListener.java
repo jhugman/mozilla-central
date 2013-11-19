@@ -16,11 +16,14 @@ import android.net.Uri;
 
 import java.io.File;
 
-
-
 public class InstallListener extends BroadcastReceiver {
 
     private static String LOGTAG = "GeckoInstallListener";
+    private String requestId = null;
+
+    public InstallListener(String requestId) {
+      this.requestId = requestId;
+    }
 
     @Override
     public void onReceive(Context context, Intent intent) {
@@ -72,11 +75,13 @@ public class InstallListener extends BroadcastReceiver {
 
         Log.i(LOGTAG, "manifestContent = " + manifestContent);
 
+
+        // TODO check if gecko events get queued if Gecko isn't running
         GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent(
                     "Webapps:AppInstalled", String.format("{\"app\": {\"manifestURL\":\"%s\"," +
                                             "\"origin\":\"%s\", \"isPackaged\":%s," +
-                                            "\"packageName\":\"%s\", \"manifest\": %s}}", 
-                                            manifestUrl, origin, isPackaged, packageName, manifestContent)));
+                                            "\"packageName\":\"%s\", \"requestId\":\"%s\", \"manifest\": %s}}", 
+                                            manifestUrl, origin, isPackaged, packageName, requestId, manifestContent)));
 
     }
 

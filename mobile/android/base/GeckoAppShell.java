@@ -26,6 +26,7 @@ import android.app.PendingIntent;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.content.pm.ApplicationInfo;
@@ -2702,11 +2703,17 @@ public class GeckoAppShell
         return filePath;
     }
 
-    public static void installApk(Context context, String filePath) {
+    public static void installApk(Context context, String filePath, String requestId) {
         File file = new File(filePath);
         Intent intent = new Intent(Intent.ACTION_VIEW);
         intent.setDataAndType(Uri.fromFile(file), "application/vnd.android.package-archive");
         context.startActivity(intent);
+        
+        IntentFilter filter = new IntentFilter();
+        filter.addDataScheme("package");
+        filter.addAction("android.intent.action.PACKAGE_ADDED");
+
+        context.registerReceiver(new org.mozilla.gecko.webapp.InstallListener(requestId), filter);
     }
 
 }
