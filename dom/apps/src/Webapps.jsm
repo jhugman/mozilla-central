@@ -2171,9 +2171,6 @@ onInstallSuccessAck: function onInstallSuccessAck(aManifestURL,
     appObject.appStatus =
       aNewApp.appStatus || Ci.nsIPrincipal.APP_STATUS_INSTALLED;
 
-    let appNote = JSON.stringify(appObject);
-    appNote.id = aId;
-
     if (aManifest.appcache_path) {
       appObject.installState = "pending";
       appObject.downloadAvailable = true;
@@ -2202,7 +2199,7 @@ onInstallSuccessAck: function onInstallSuccessAck(aManifestURL,
     appObject.installerAppId = aData.appId;
     appObject.installerIsBrowser = aData.isBrowser;
 
-    return [appNote, appObject];
+    return appObject;
   },
 
   _copyStates: function(aData, aAppObject) {
@@ -2254,8 +2251,7 @@ onInstallSuccessAck: function onInstallSuccessAck(aManifestURL,
     debug("app.origin: " + app.origin);
     let manifest = new ManifestHelper(jsonManifest, app.origin);
 
-    let [appNote, appObject] =
-      this._cloneApp(aData, app, manifest, id, localId);
+    let appObject = this._cloneApp(aData, app, manifest, id, localId);
 
     this.webapps[id] = appObject;
 
