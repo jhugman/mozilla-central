@@ -2341,7 +2341,7 @@ onInstallSuccessAck: function onInstallSuccessAck(aManifestURL,
                                [aId, aManifest]) {
     debug("_onDownloadPackage");
     // Success! Move the zip out of TmpD.
-    let app = DOMApplicationRegistry.webapps[aId];
+    let app = this.webapps[aId];
     let zipFile =
       FileUtils.getFile("TmpD", ["webapps", aId, "application.zip"], true);
     let dir = this._getAppDir(aId);
