@@ -1340,7 +1340,7 @@ this.DOMApplicationRegistry = {
           origin: app.origin,
           installOrigin: app.installOrigin,
           downloadSize: app.downloadSize
-        }, isUpdate, function(aId, aManifest) {
+        }, isUpdate).then(function([aId, aManifest]) {
           // Success! Keep the zip in of TmpD, we'll move it out when
           // applyDownload() will be called.
           let tmpDir = FileUtils.getDir("TmpD", ["webapps", aId], true, true);
@@ -2142,7 +2142,7 @@ onInstallSuccessAck: function onInstallSuccessAck(aManifestURL,
 
       delete this.queuedPackageDownload[aManifestURL];
 
-      this.downloadPackage(manifest, newApp, false,
+      this.downloadPackage(manifest, newApp, false).then(
         this._onDownloadPackage.bind(this, newApp, installSuccessCallback)
       );
     }
@@ -2346,8 +2346,8 @@ onInstallSuccessAck: function onInstallSuccessAck(aManifestURL,
    * @param aId {Integer} the unique ID of the application
    * @param aManifest {Object} The manifest of the application
    */
-  _onDownloadPackage: function(aNewApp, aInstallSuccessCallback, aId,
-                               aManifest) {
+  _onDownloadPackage: function(aNewApp, aInstallSuccessCallback,
+                               [aId, aManifest]) {
     debug("_onDownloadPackage");
     // Success! Move the zip out of TmpD.
     let app = DOMApplicationRegistry.webapps[aId];
@@ -2548,14 +2548,11 @@ onInstallSuccessAck: function onInstallSuccessAck(aManifestURL,
 
       let [rv, zipReader] = yield this._openSignedJarFile(oldApp, zipFile);
 
+      let newManifest;
       try {
-        let newManifest =
-          this._readPackage(rv, zipReader, zipFile, oldApp, aNewApp,
-                            isLocalFileInstall, aIsUpdate, aManifest,
-                            requestChannel, hash);
-        if (aOnSuccess) {
-          aOnSuccess(id, newManifest);
-        }
+        newManifest = this._readPackage(rv, zipReader, zipFile, oldApp, aNewApp,
+                                        isLocalFileInstall, aIsUpdate,
+                                        aManifest, requestChannel, hash);
       } catch (e) {
         debug("package read error: " + e);
         // Something bad happened when reading the package.
@@ -2580,8 +2577,10 @@ onInstallSuccessAck: function onInstallSuccessAck(aManifestURL,
 
       AppDownloadManager.remove(aNewApp.manifestURL);
 
+      throw new Task.Result([id, newManifest]);
+
     }).bind(this)).then(
-      null,
+      aOnSuccess,
       this._revertDownloadPackage.bind(this, id, oldApp, aNewApp, aIsUpdate)
     );
   },
