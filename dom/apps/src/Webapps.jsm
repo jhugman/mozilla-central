@@ -2330,6 +2330,25 @@ onInstallSuccessAck: function onInstallSuccessAck(aManifestURL,
     }
   },
 
+  confirmApkInstall: function(aData) { 
+        this.confirmInstall(aData, null, function(aManifest) {
+          console.log("callback:" + JSON.stringify(aData.app.manifestURL));
+          let id = this._appIdForManifestURL(aData.app.manifestURL);
+          this.broadcastMessage("Webapps:AddApp", { id: id, app: aData.app });
+          this.broadcastMessage("Webapps:Install:Return:OK", aData);
+          this.broadcastMessage("Webapps:UpdateState", {
+            app: aData.app,
+            manifest: aManifest,
+            manifestURL: aData.app.manifestURL
+          });
+        });
+        this.broadcastMessage("Webapps:FireEvent", {
+            eventType: ["downloadsuccess", "downloadapplied"],
+            manifestURL: aData.app.manifestURL
+          });
+        console.log("END OF APP INSTALLED");
+  },
+
   confirmInstall: function(aData, aProfileDir, aInstallSuccessCallback) {
     let isReinstall = false;
     let app = aData.app;
@@ -2461,6 +2480,7 @@ onInstallSuccessAck: function onInstallSuccessAck(aManifestURL,
         aInstallSuccessCallback(app.manifest);
       }
     }
+#ifdef MOZ_ANDROID_SYNTHAPKS
     let dontNeedNetwork = false;
     if (manifest.package_path) {
       // If it is a local app then it must been installed from a local file
@@ -2486,6 +2506,7 @@ onInstallSuccessAck: function onInstallSuccessAck(aManifestURL,
       // ack the install.
       this.onInstallSuccessAck(app.manifestURL, dontNeedNetwork);
     }
+#endif
   },
 
   _nextLocalId: function() {

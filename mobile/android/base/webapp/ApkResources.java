@@ -33,6 +33,11 @@ public class ApkResources {
         return mInfo;
     }
 
+    private Bundle metadata(Context context) throws NameNotFoundException {
+        // Beware the null pointer exception.
+        return info(context).metaData;
+    }
+
     public String getManifest(Context context) {
         return readResource(context, "manifest");
     }
@@ -41,13 +46,17 @@ public class ApkResources {
         return readResource(context, "mini");
     }
 
+
     public String getManifestUrl(Context context) throws NameNotFoundException {
-        ApplicationInfo app = info(context);
+        return metadata(context).getString("packageName");
+    }
 
-        // Beware the null pointer exception.
-        Bundle metadata = app.metaData;
-
-        return metadata.getString("packageName");
+    public boolean isPackaged(Context context) {
+        try {
+            return "packaged".equals(metadata(context).getString("webapp", null));
+        } catch (NameNotFoundException e) {
+            return false;
+        }
     }
 
     private String readResource(Context context, String resourceName) {
@@ -63,9 +72,9 @@ public class ApkResources {
                 fileContent.append(line);
             }
         } catch (FileNotFoundException e) {
-            Log.e(LOGTAG, String.format("file not found: \"%s\"", resourceName));
+            Log.e(LOGTAG, String.format("File not found: \"%s\"", resourceName));
         } catch (IOException e) {
-            Log.e(LOGTAG, "couldn't read file: " + resourceName);
+            Log.e(LOGTAG, String.format("Couldn't read file: \"%s\"", resourceName));
         }
 
         return fileContent.toString();

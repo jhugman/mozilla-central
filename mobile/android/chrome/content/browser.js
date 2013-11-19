@@ -6968,7 +6968,9 @@ var WebappsUI = {
     switch (aTopic) {
       case "Webapps:AppInstalled":
         console.log("aData:" + aData);
-        DOMApplicationRegistry.confirmInstall(data, null, function() {
+        DOMApplicationRegistry.confirmInstall(data, null, function(aManifest) {
+          console.log("callback:" + JSON.stringify(data.app.manifestURL));
+          DOMApplicationRegistry.onInstallSuccessAck(data.app.manifestURL);
           // ooh - what to put here?
           // we currently don't have the profile path as it's not been installed yet.  
           // we prob just need to inform the system that we've installed so that the ui can update
