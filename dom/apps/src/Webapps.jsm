@@ -2202,13 +2202,6 @@ onInstallSuccessAck: function onInstallSuccessAck(aManifestURL,
     return appObject;
   },
 
-  _copyStates: function(aData, aAppObject) {
-    for each (let prop in ["installState", "downloadAvailable", "downloading",
-                           "downloadSize", "readyToApplyDownload"]) {
-      aData.app[prop] = aAppObject[prop];
-    }
-  },
-
   _writeManifestFile: function(aId, aIsPackage, aJsonManifest) {
     debug("_writeManifestFile");
     let dir = this._getAppDir(aId);
@@ -2274,7 +2267,10 @@ onInstallSuccessAck: function onInstallSuccessAck(aManifestURL,
                            this.webapps[id].manifestURL, jsonManifest);
     }
 
-    this._copyStates(aData, appObject);
+    for each (let prop in ["installState", "downloadAvailable", "downloading",
+                           "downloadSize", "readyToApplyDownload"]) {
+      aData.app[prop] = appObject[prop];
+    }
 
     if (manifest.appcache_path) {
       this.queuedDownload[app.manifestURL] = {
