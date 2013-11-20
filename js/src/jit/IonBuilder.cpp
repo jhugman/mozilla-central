@@ -37,7 +37,7 @@ using namespace js::jit;
 using mozilla::DebugOnly;
 using mozilla::Maybe;
 
-IonBuilder::IonBuilder(JSContext *analysisContext, JSCompartment *comp, TempAllocator *temp, MIRGraph *graph,
+IonBuilder::IonBuilder(JSContext *analysisContext, CompileCompartment *comp, TempAllocator *temp, MIRGraph *graph,
                        types::CompilerConstraintList *constraints,
                        BaselineInspector *inspector, CompileInfo *info, BaselineFrame *baselineFrame,
                        size_t inliningDepth, uint32_t loopDepth)
@@ -48,7 +48,7 @@ IonBuilder::IonBuilder(JSContext *analysisContext, JSCompartment *comp, TempAllo
     abortReason_(AbortReason_Disable),
     reprSetHash_(nullptr),
     constraints_(constraints),
-    analysis_(info->script()),
+    analysis_(*temp, info->script()),
     thisTypes(nullptr),
     argTypes(nullptr),
     typeArray(nullptr),
@@ -56,6 +56,12 @@ IonBuilder::IonBuilder(JSContext *analysisContext, JSCompartment *comp, TempAllo
     loopDepth_(loopDepth),
     callerResumePoint_(nullptr),
     callerBuilder_(nullptr),
+    cfgStack_(*temp),
+    loops_(*temp),
+    switches_(*temp),
+    labels_(*temp),
+    iterators_(*temp),
+    loopHeaders_(*temp),
     inspector(inspector),
     inliningDepth_(inliningDepth),
     numLoopRestarts_(0),
@@ -542,7 +548,7 @@ IonBuilder::init()
         return false;
     }
 
-    if (!analysis().init(gsn))
+    if (!analysis().init(alloc(), gsn))
         return false;
 
     return true;
@@ -1179,8 +1185,8 @@ IonBuilder::traverseBytecode()
         //
         // This is used to catch problems where IonBuilder pops a value without
         // adding any SSA uses and doesn't call setFoldedUnchecked on it.
-        Vector<MDefinition *, 4, IonAllocPolicy> popped;
-        Vector<size_t, 4, IonAllocPolicy> poppedUses;
+        Vector<MDefinition *, 4, IonAllocPolicy> popped(alloc());
+        Vector<size_t, 4, IonAllocPolicy> poppedUses(alloc());
         unsigned nuses = GetUseCount(script_, pc - script_->code);
 
         for (unsigned i = 0; i < nuses; i++) {
@@ -3802,7 +3808,7 @@ IonBuilder::inlineScriptedCall(CallInfo &callInfo, JSFunction *target)
     if (!info)
         return false;
 
-    MIRGraphExits saveExits;
+    MIRGraphExits saveExits(alloc());
     AutoAccumulateExits aae(graph(), saveExits);
 
     // Build the graph.
@@ -4156,7 +4162,7 @@ IonBuilder::inlineCallsite(ObjectVector &targets, ObjectVector &originals,
     }
 
     // Choose a subset of the targets for polymorphic inlining.
-    BoolVector choiceSet;
+    BoolVector choiceSet(alloc());
     uint32_t numInlined = selectInliningTargets(targets, callInfo, choiceSet);
     if (numInlined == 0)
         return InliningStatus_NotInlined;
@@ -4178,7 +4184,7 @@ IonBuilder::inlineGenericFallback(JSFunction *target, CallInfo &callInfo, MBasic
         return false;
 
     // Create a new CallInfo to track modified state within this block.
-    CallInfo fallbackInfo(callInfo.constructing());
+    CallInfo fallbackInfo(alloc(), callInfo.constructing());
     if (!fallbackInfo.init(callInfo))
         return false;
     fallbackInfo.popFormals(fallbackBlock);
@@ -4216,7 +4222,7 @@ IonBuilder::inlineTypeObjectFallback(CallInfo &callInfo, MBasicBlock *dispatchBl
     // We now move the MGetPropertyCache and friends into a fallback path.
 
     // Create a new CallInfo to track modified state within the fallback path.
-    CallInfo fallbackInfo(callInfo.constructing());
+    CallInfo fallbackInfo(alloc(), callInfo.constructing());
     if (!fallbackInfo.init(callInfo))
         return false;
 
@@ -4398,7 +4404,7 @@ IonBuilder::inlineCalls(CallInfo &callInfo, ObjectVector &targets,
         inlineBlock->rewriteSlot(funIndex, funcDef);
 
         // Create a new CallInfo to track modified state within the inline block.
-        CallInfo inlineInfo(callInfo.constructing());
+        CallInfo inlineInfo(alloc(), callInfo.constructing());
         if (!inlineInfo.init(callInfo))
             return false;
         inlineInfo.popFormals(inlineBlock);
@@ -4730,7 +4736,7 @@ IonBuilder::jsop_funcall(uint32_t argc)
     types::TemporaryTypeSet *calleeTypes = current->peek(calleeDepth)->resultTypeSet();
     JSFunction *native = getSingleCallTarget(calleeTypes);
     if (!native || !native->isNative() || native->native() != &js_fun_call) {
-        CallInfo callInfo(false);
+        CallInfo callInfo(alloc(), false);
         if (!callInfo.init(current, argc))
             return false;
         return makeCall(native, callInfo, false);
@@ -4765,7 +4771,7 @@ IonBuilder::jsop_funcall(uint32_t argc)
         argc -= 1;
     }
 
-    CallInfo callInfo(false);
+    CallInfo callInfo(alloc(), false);
     if (!callInfo.init(current, argc))
         return false;
 
@@ -4785,7 +4791,7 @@ IonBuilder::jsop_funapply(uint32_t argc)
     types::TemporaryTypeSet *calleeTypes = current->peek(calleeDepth)->resultTypeSet();
     JSFunction *native = getSingleCallTarget(calleeTypes);
     if (argc != 2) {
-        CallInfo callInfo(false);
+        CallInfo callInfo(alloc(), false);
         if (!callInfo.init(current, argc))
             return false;
         return makeCall(native, callInfo, false);
@@ -4803,7 +4809,7 @@ IonBuilder::jsop_funapply(uint32_t argc)
 
     // Fallback to regular call if arg 2 is not definitely |arguments|.
     if (argument->type() != MIRType_Magic) {
-        CallInfo callInfo(false);
+        CallInfo callInfo(alloc(), false);
         if (!callInfo.init(current, argc))
             return false;
         return makeCall(native, callInfo, false);
@@ -4881,7 +4887,7 @@ IonBuilder::jsop_funapplyarguments(uint32_t argc)
     // can inline the apply() target and don't care about the actual arguments
     // that were passed in.
 
-    CallInfo callInfo(false);
+    CallInfo callInfo(alloc(), false);
 
     // Vp
     MPassArg *passVp = current->pop()->toPassArg();
@@ -4890,7 +4896,7 @@ IonBuilder::jsop_funapplyarguments(uint32_t argc)
     passVp->block()->discard(passVp);
 
     // Arguments
-    MDefinitionVector args;
+    MDefinitionVector args(alloc());
     if (inliningDepth_) {
         if (!args.append(inlineCallInfo_->argv().begin(), inlineCallInfo_->argv().end()))
             return false;
@@ -4945,7 +4951,7 @@ IonBuilder::jsop_call(uint32_t argc, bool constructing)
     int calleeDepth = -((int)argc + 2);
 
     // Acquire known call target if existent.
-    ObjectVector originals;
+    ObjectVector originals(alloc());
     bool gotLambda = false;
     types::TemporaryTypeSet *calleeTypes = current->peek(calleeDepth)->resultTypeSet();
     if (calleeTypes) {
@@ -4957,11 +4963,11 @@ IonBuilder::jsop_call(uint32_t argc, bool constructing)
     // If any call targets need to be cloned, look for existing clones to use.
     // Keep track of the originals as we need to case on them for poly inline.
     bool hasClones = false;
-    ObjectVector targets;
+    ObjectVector targets(alloc());
     for (uint32_t i = 0; i < originals.length(); i++) {
         JSFunction *fun = &originals[i]->as<JSFunction>();
         if (fun->hasScript() && fun->nonLazyScript()->shouldCloneAtCallsite) {
-            if (JSFunction *clone = ExistingCloneFunctionAtCallsite(compartment, fun, script(), pc)) {
+            if (JSFunction *clone = ExistingCloneFunctionAtCallsite(compartment->callsiteClones(), fun, script(), pc)) {
                 fun = clone;
                 hasClones = true;
             }
@@ -4970,7 +4976,7 @@ IonBuilder::jsop_call(uint32_t argc, bool constructing)
             return false;
     }
 
-    CallInfo callInfo(constructing);
+    CallInfo callInfo(alloc(), constructing);
     if (!callInfo.init(current, argc))
         return false;
 
@@ -5022,7 +5028,7 @@ IonBuilder::testShouldDOMCall(types::TypeSet *inTypes,
     // property, we can bake in a call to the bottom half of the DOM
     // accessor
     DOMInstanceClassMatchesProto instanceChecker =
-        GetDOMCallbacks(compartment->runtimeFromAnyThread())->instanceClassMatchesProto;
+        compartment->runtime()->DOMcallbacks()->instanceClassMatchesProto;
 
     const JSJitInfo *jinfo = func->jitInfo();
     if (jinfo->type != opType)
@@ -5292,7 +5298,7 @@ IonBuilder::jsop_eval(uint32_t argc)
         if (type != JSVAL_TYPE_OBJECT && type != JSVAL_TYPE_NULL && type != JSVAL_TYPE_UNDEFINED)
             return abort("Direct eval from script with maybe-primitive 'this'");
 
-        CallInfo callInfo(/* constructing = */ false);
+        CallInfo callInfo(alloc(), /* constructing = */ false);
         if (!callInfo.init(current, argc))
             return false;
         callInfo.unwrapArgs();
@@ -5325,7 +5331,7 @@ IonBuilder::jsop_eval(uint32_t argc)
                 current->push(dynamicName);
                 current->push(thisv);
 
-                CallInfo evalCallInfo(/* constructing = */ false);
+                CallInfo evalCallInfo(alloc(), /* constructing = */ false);
                 if (!evalCallInfo.init(current, /* argc = */ 0))
                     return false;
 
@@ -5928,13 +5934,19 @@ IonBuilder::maybeInsertResume()
 }
 
 static bool
-ClassHasEffectlessLookup(const Class *clasp)
+ClassHasEffectlessLookup(const Class *clasp, PropertyName *name)
 {
+    if (IsTypedArrayClass(clasp)) {
+        // Typed arrays have a lookupGeneric hook, but it only handles
+        // integers, not names.
+        JS_ASSERT(name);
+        return true;
+    }
     return clasp->isNative() && !clasp->ops.lookupGeneric;
 }
 
 static bool
-ClassHasResolveHook(JSCompartment *comp, const Class *clasp, PropertyName *name)
+ClassHasResolveHook(CompileCompartment *comp, const Class *clasp, PropertyName *name)
 {
     if (clasp->resolve == JS_ResolveStub)
         return false;
@@ -5945,7 +5957,7 @@ ClassHasResolveHook(JSCompartment *comp, const Class *clasp, PropertyName *name)
     }
 
     if (clasp->resolve == (JSResolveOp)fun_resolve)
-        return FunctionHasResolveHook(comp->runtimeFromAnyThread(), name);
+        return FunctionHasResolveHook(comp->runtime()->names(), name);
 
     return true;
 }
@@ -5968,7 +5980,7 @@ IonBuilder::testSingletonProperty(JSObject *obj, PropertyName *name)
     // property will change and trigger invalidation.
 
     while (obj) {
-        if (!ClassHasEffectlessLookup(obj->getClass()))
+        if (!ClassHasEffectlessLookup(obj->getClass(), name))
             return nullptr;
 
         types::TypeObjectKey *objType = types::TypeObjectKey::get(obj);
@@ -6194,9 +6206,9 @@ IonBuilder::getStaticName(JSObject *staticObject, PropertyName *name, bool *psuc
         if (name == names().undefined)
             return pushConstant(UndefinedValue());
         if (name == names().NaN)
-            return pushConstant(compartment->runtimeFromAnyThread()->NaNValue);
+            return pushConstant(compartment->runtime()->NaNValue());
         if (name == names().Infinity)
-            return pushConstant(compartment->runtimeFromAnyThread()->positiveInfinityValue);
+            return pushConstant(compartment->runtime()->positiveInfinityValue());
     }
 
     types::TypeObjectKey *staticType = types::TypeObjectKey::get(staticObject);
@@ -6515,6 +6527,9 @@ IonBuilder::getElemTryTypedObject(bool *emitted, MDefinition *obj, MDefinition *
                                                  objTypeReprs,
                                                  elemTypeReprs,
                                                  elemSize);
+
+      case TypeRepresentation::Reference:
+        return true;
     }
 
     MOZ_ASSUME_UNREACHABLE("Bad kind");
@@ -7776,12 +7791,13 @@ IonBuilder::objectsHaveCommonPrototype(types::TemporaryTypeSet *types, PropertyN
                 return false;
 
             const Class *clasp = type->clasp();
-            if (!ClassHasEffectlessLookup(clasp) || ClassHasResolveHook(compartment, clasp, name))
+            if (!ClassHasEffectlessLookup(clasp, name) || ClassHasResolveHook(compartment, clasp, name))
                 return false;
 
             // Look for a getter/setter on the class itself which may need
-            // to be called.
-            if (isGetter && clasp->ops.getGeneric)
+            // to be called. Ignore the getGeneric hook for typed arrays, it
+            // only handles integers and forwards names to the prototype.
+            if (isGetter && clasp->ops.getGeneric && !IsTypedArrayClass(clasp))
                 return false;
             if (!isGetter && clasp->ops.setGeneric)
                 return false;
@@ -8168,6 +8184,9 @@ IonBuilder::getPropTryTypedObject(bool *emitted, PropertyName *name,
         return true;
 
     switch (fieldTypeReprs.kind()) {
+      case TypeRepresentation::Reference:
+        return true;
+
       case TypeRepresentation::Struct:
       case TypeRepresentation::Array:
         return getPropTryComplexPropOfTypedObject(emitted,
@@ -8349,7 +8368,7 @@ IonBuilder::getPropTryCommonGetter(bool *emitted, PropertyName *name,
     current->add(wrapper);
     current->push(wrapper);
 
-    CallInfo callInfo(false);
+    CallInfo callInfo(alloc(), false);
     if (!callInfo.init(current, 0))
         return false;
 
@@ -8389,7 +8408,7 @@ IonBuilder::getPropTryInlineAccess(bool *emitted, PropertyName *name,
     if (current->peek(-1)->type() != MIRType_Object)
         return true;
 
-    BaselineInspector::ShapeVector shapes;
+    BaselineInspector::ShapeVector shapes(alloc());
     if (!inspector->maybeShapesForPropertyOp(pc, shapes))
         return false;
 
@@ -8636,7 +8655,7 @@ IonBuilder::setPropTryCommonSetter(bool *emitted, MDefinition *obj,
 
     // Call the setter. Note that we have to push the original value, not
     // the setter's return value.
-    CallInfo callInfo(false);
+    CallInfo callInfo(alloc(), false);
     if (!callInfo.init(current, 1))
         return false;
 
@@ -8706,6 +8725,7 @@ IonBuilder::setPropTryTypedObject(bool *emitted, MDefinition *obj,
         return true;
 
     switch (fieldTypeReprs.kind()) {
+      case TypeRepresentation::Reference:
       case TypeRepresentation::Struct:
       case TypeRepresentation::Array:
         // For now, only optimize storing scalars.
@@ -8782,7 +8802,7 @@ IonBuilder::setPropTryInlineAccess(bool *emitted, MDefinition *obj,
     if (barrier)
         return true;
 
-    BaselineInspector::ShapeVector shapes;
+    BaselineInspector::ShapeVector shapes(alloc());
     if (!inspector->maybeShapesForPropertyOp(pc, shapes))
         return false;
 
@@ -9501,7 +9521,8 @@ TypeRepresentationSetHash *
 IonBuilder::getOrCreateReprSetHash()
 {
     if (!reprSetHash_) {
-        TypeRepresentationSetHash *hash = alloc_->lifoAlloc()->new_<TypeRepresentationSetHash>();
+        TypeRepresentationSetHash *hash =
+            alloc_->lifoAlloc()->new_<TypeRepresentationSetHash>(alloc());
         if (!hash || !hash->init())
             return nullptr;
 

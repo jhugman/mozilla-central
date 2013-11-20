@@ -14,7 +14,7 @@ XPIDL_SOURCES += [
     'nsISiteSpecificUserAgent.idl',
 ]
 
-MODULE = 'dom'
+XPIDL_MODULE = 'dom'
 
 EXPORTS += [
     'Crypto.h',
@@ -57,6 +57,7 @@ EXPORTS.mozilla.dom += [
     'MessageChannel.h',
     'MessagePort.h',
     'MessagePortList.h',
+    'Navigator.h',
     'ScreenOrientation.h',
     'StructuredCloneTags.h',
     'URL.h',
@@ -118,11 +119,7 @@ EXTRA_JS_MODULES += [
 
 FAIL_ON_WARNINGS = True
 
-LIBXUL_LIBRARY = True
-
 MSVC_ENABLE_PGO = True
-
-LIBRARY_NAME = 'jsdombase_s'
 
 LOCAL_INCLUDES += [
     '../battery',
@@ -149,6 +146,8 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
     ]
 
 include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'gklayout'
 
 LOCAL_INCLUDES += [
     '/js/xpconnect/src',

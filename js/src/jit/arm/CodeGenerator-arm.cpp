@@ -1044,8 +1044,9 @@ class js::jit::OutOfLineTableSwitch : public OutOfLineCodeBase<CodeGeneratorARM>
     }
 
   public:
-    OutOfLineTableSwitch(MTableSwitch *mir)
-      : mir_(mir)
+    OutOfLineTableSwitch(TempAllocator &alloc, MTableSwitch *mir)
+      : mir_(mir),
+        codeLabels_(alloc)
     {}
 
     MTableSwitch *mir() const {
@@ -1125,7 +1126,7 @@ CodeGeneratorARM::emitTableSwitchDispatch(MTableSwitch *mir, const Register &ind
     // To fill in the CodeLabels for the case entries, we need to first
     // generate the case entries (we don't yet know their offsets in the
     // instruction stream).
-    OutOfLineTableSwitch *ool = new OutOfLineTableSwitch(mir);
+    OutOfLineTableSwitch *ool = new OutOfLineTableSwitch(alloc(), mir);
     for (int32_t i = 0; i < cases; i++) {
         CodeLabel cl;
         masm.writeCodePointer(cl.dest());
@@ -1871,7 +1872,7 @@ CodeGeneratorARM::visitInterruptCheck(LInterruptCheck *lir)
     if (!ool)
         return false;
 
-    void *interrupt = (void*)&GetIonContext()->runtime->interrupt;
+    void *interrupt = (void*)GetIonContext()->runtime->addressOfInterrupt();
     masm.load32(AbsoluteAddress(interrupt), lr);
     masm.ma_cmp(lr, Imm32(0));
     masm.ma_b(ool->entry(), Assembler::NonZero);
