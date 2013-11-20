@@ -6970,7 +6970,7 @@ var WebappsUI = {
         // TODO move this event catching code to Webapps.jsm
         console.log("browser.js: aData:" + aData);
         let jsonData = data.data;
-        jsonData.manifest = data.manifest;
+        jsonData.app.manifest = data.manifest;
         console.log("browser.js: jsonData:" + JSON.stringify(jsonData));
         DOMApplicationRegistry.confirmApkInstall(jsonData);
         break;
