@@ -2481,7 +2481,7 @@ onInstallSuccessAck: function onInstallSuccessAck(aManifestURL,
     let id = this._appIdForManifestURL(aNewApp.manifestURL);
     let oldApp = this.webapps[id];
 
-    return Task.spawn((function() {
+    return Task.spawn((function*() {
       yield this._ensureSufficientStorage(aNewApp);
 
       let fullPackagePath = aManifest.fullPackagePath();
@@ -2534,41 +2534,15 @@ onInstallSuccessAck: function onInstallSuccessAck(aManifestURL,
         // The package's Etag or hash has not changed.
         // We send a "applied" event right away.
         this._sendAppliedEvent(aNewApp, oldApp, id);
-        throw new Task.Result();
+        return;
       }
 
-      let [rv, zipReader] = yield this._openSignedJarFile(oldApp, zipFile);
-
-      let newManifest;
-      try {
-        newManifest = this._readPackage(rv, zipReader, zipFile, oldApp, aNewApp,
-                                        isLocalFileInstall, aIsUpdate,
-                                        aManifest, requestChannel, hash);
-      } catch (e) {
-        debug("package read error: " + e);
-        // Something bad happened when reading the package.
-        // Unrecoverable error, don't bug the user.
-        // Apps with installState 'pending' does not produce any
-        // notification, so we are safe with its current
-        // downloadAvailable state.
-        if (oldApp.installState !== "pending") {
-          oldApp.downloadAvailable = false;
-        }
-        if (typeof e == 'object') {
-          Cu.reportError("Error while reading package:" + e);
-          throw "INVALID_PACKAGE";
-        } else {
-          throw e;
-        }
-      } finally {
-        if (zipReader) {
-          zipReader.close();
-        }
-      }
+      let newManifest = yield this._openAndReadPackage(zipFile, oldApp, aNewApp,
+              isLocalFileInstall, aIsUpdate, aManifest, requestChannel, hash);
 
       AppDownloadManager.remove(aNewApp.manifestURL);
 
-      throw new Task.Result([id, newManifest]);
+      return [id, newManifest];
 
     }).bind(this)).then(
       aOnSuccess,
@@ -2855,21 +2829,82 @@ onInstallSuccessAck: function onInstallSuccessAck(aManifestURL,
     }
   },
 
-  _openSignedJarFile: function(aOldApp, aZipFile) {
+  _openAndReadPackage: function(aZipFile, aOldApp, aNewApp, aIsLocalFileInstall,
+                                aIsUpdate, aManifest, aRequestChannel, aHash) {
+    return Task.spawn((function*() {
+      let zipReader, isSigned, newManifest;
+
+      try {
+        [zipReader, isSigned] = yield this._openPackage(aZipFile, aOldApp);
+        newManifest = yield this._readPackage(aOldApp, aNewApp,
+                aIsLocalFileInstall, aIsUpdate, aManifest, aRequestChannel,
+                aHash, zipReader, isSigned);
+      } catch (e) {
+        debug("package open/read error: " + e);
+        // Something bad happened when opening/reading the package.
+        // Unrecoverable error, don't bug the user.
+        // Apps with installState 'pending' does not produce any
+        // notification, so we are safe with its current
+        // downloadAvailable state.
+        if (aOldApp.installState !== "pending") {
+          aOldApp.downloadAvailable = false;
+        }
+        if (typeof e == 'object') {
+          Cu.reportError("Error while reading package:" + e);
+          throw "INVALID_PACKAGE";
+        } else {
+          throw e;
+        }
+      } finally {
+        if (zipReader) {
+          zipReader.close();
+        }
+      }
+
+      return newManifest;
+
+    }).bind(this));
+  },
+
+  _openPackage: function(aZipFile, aOldApp) {
+    return Task.spawn((function*() {
+      let certDb;
+      try {
+        certDb = Cc["@mozilla.org/security/x509certdb;1"]
+                   .getService(Ci.nsIX509CertDB);
+      } catch (e) {
+        debug("nsIX509CertDB error: " + e);
+        // unrecoverable error, don't bug the user
+        aOldApp.downloadAvailable = false;
+        throw "CERTDB_ERROR";
+      }
+
+      let [result, zipReader] = yield this._openSignedPackage(aZipFile, certDb);
+
+      let isSigned;
+
+      if (Components.isSuccessCode(result)) {
+        isSigned = true;
+      } else if (result == Cr.NS_ERROR_FILE_CORRUPTED) {
+        throw "APP_PACKAGE_CORRUPTED";
+      } else if (result != Cr.NS_ERROR_SIGNED_JAR_NOT_SIGNED) {
+        throw "INVALID_SIGNATURE";
+      } else {
+        isSigned = false;
+        zipReader = Cc["@mozilla.org/libjar/zip-reader;1"]
+                      .createInstance(Ci.nsIZipReader);
+        zipReader.open(aZipFile);
+      }
+
+      return [zipReader, isSigned];
+
+    }).bind(this));
+  },
+
+  _openSignedPackage: function(aZipFile, aCertDb) {
     let deferred = Promise.defer();
 
-    let certdb;
-    try {
-      certdb = Cc["@mozilla.org/security/x509certdb;1"]
-                 .getService(Ci.nsIX509CertDB);
-    } catch (e) {
-      debug("nsIX509CertDB error: " + e);
-      // unrecoverable error, don't bug the user
-      aOldApp.downloadAvailable = false;
-      throw "CERTDB_ERROR";
-    }
-
-    certdb.openSignedJARFileAsync(
+    aCertDb.openSignedJARFileAsync(
        aZipFile,
        function(aRv, aZipReader) {
          deferred.resolve([aRv, aZipReader]);
@@ -2879,24 +2914,10 @@ onInstallSuccessAck: function onInstallSuccessAck(aManifestURL,
     return deferred.promise;
   },
 
-  _readPackage: function(aRv, aZipReader, aZipFile, aOldApp, aNewApp,
-                         aIsLocalFileInstall, aIsUpdate, aManifest,
-                         aRequestChannel, aHash) {
-    let isSigned;
-    if (Components.isSuccessCode(aRv)) {
-      isSigned = true;
-    } else if (aRv == Cr.NS_ERROR_FILE_CORRUPTED) {
-      throw "APP_PACKAGE_CORRUPTED";
-    } else if (aRv != Cr.NS_ERROR_SIGNED_JAR_NOT_SIGNED) {
-      throw "INVALID_SIGNATURE";
-    } else {
-      isSigned = false;
-      aZipReader = Cc["@mozilla.org/libjar/zip-reader;1"]
-                     .createInstance(Ci.nsIZipReader);
-      aZipReader.open(aZipFile);
-    }
-
-    this._checkSignature(aNewApp, isSigned, aIsLocalFileInstall);
+  _readPackage: function(aOldApp, aNewApp, aIsLocalFileInstall, aIsUpdate,
+                         aManifest, aRequestChannel, aHash, aZipReader,
+                         aIsSigned) {
+    this._checkSignature(aNewApp, aIsSigned, aIsLocalFileInstall);
 
     if (!aZipReader.hasEntry("manifest.webapp")) {
       throw "MISSING_MANIFEST";
@@ -2935,7 +2956,7 @@ onInstallSuccessAck: function onInstallSuccessAck(aManifestURL,
     }
 
     // Local file installs can be privileged even without the signature.
-    let maxStatus = isSigned || aIsLocalFileInstall
+    let maxStatus = aIsSigned || aIsLocalFileInstall
                     ? Ci.nsIPrincipal.APP_STATUS_PRIVILEGED
                     : Ci.nsIPrincipal.APP_STATUS_INSTALLED;
 
@@ -2946,8 +2967,8 @@ onInstallSuccessAck: function onInstallSuccessAck(aManifestURL,
     aOldApp.appStatus = AppsUtils.getAppManifestStatus(newManifest);
 
     this._saveEtag(aIsUpdate, aOldApp, aRequestChannel, aHash, newManifest);
-    this._checkOrigin(isSigned, aOldApp, newManifest, aIsUpdate);
-    this._getIds(isSigned, aZipReader, converter, aNewApp, aOldApp, aIsUpdate);
+    this._checkOrigin(aIsSigned, aOldApp, newManifest, aIsUpdate);
+    this._getIds(aIsSigned, aZipReader, converter, aNewApp, aOldApp, aIsUpdate);
 
     return newManifest;
   },
