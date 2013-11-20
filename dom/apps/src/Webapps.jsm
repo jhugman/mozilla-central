@@ -2866,7 +2866,7 @@ onInstallSuccessAck: function onInstallSuccessAck(aManifestURL,
     }).bind(this));
   },
 
-  _openPackage: function(aZipFile, aOldApp) {
+  _openPackage: function(aZipFile, aApp) {
     return Task.spawn((function*() {
       let certDb;
       try {
@@ -2875,7 +2875,7 @@ onInstallSuccessAck: function onInstallSuccessAck(aManifestURL,
       } catch (e) {
         debug("nsIX509CertDB error: " + e);
         // unrecoverable error, don't bug the user
-        aOldApp.downloadAvailable = false;
+        aApp.downloadAvailable = false;
         throw "CERTDB_ERROR";
       }
 
