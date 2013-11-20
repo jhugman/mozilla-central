@@ -2703,7 +2703,7 @@ public class GeckoAppShell
         return filePath;
     }
 
-    public static void installApk(Context context, String filePath, String requestId) {
+    public static void installApk(Context context, String filePath, String data) {
         File file = new File(filePath);
         Intent intent = new Intent(Intent.ACTION_VIEW);
         intent.setDataAndType(Uri.fromFile(file), "application/vnd.android.package-archive");
@@ -2713,7 +2713,7 @@ public class GeckoAppShell
         filter.addDataScheme("package");
         filter.addAction("android.intent.action.PACKAGE_ADDED");
 
-        context.registerReceiver(new org.mozilla.gecko.webapp.InstallListener(requestId), filter);
+        context.registerReceiver(new org.mozilla.gecko.webapp.InstallListener(data), filter);
     }
 
 }

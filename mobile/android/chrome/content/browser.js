@@ -6964,12 +6964,15 @@ var WebappsUI = {
       data = JSON.parse(aData);
       data.mm = aSubject;
     } catch(ex) { }
-    console.log("observe: topic: " + aTopic);
+    console.log("browser.js: observe: topic: " + aTopic);
     switch (aTopic) {
       case "Webapps:ApkInstalled":
         // TODO move this event catching code to Webapps.jsm
-        console.log("aData:" + aData);
-        DOMApplicationRegistry.confirmApkInstall(data);
+        console.log("browser.js: aData:" + aData);
+        let jsonData = data.data;
+        jsonData.manifest = data.manifest;
+        console.log("browser.js: jsonData:" + JSON.stringify(jsonData));
+        DOMApplicationRegistry.confirmApkInstall(jsonData);
         break;
       case "webapps-install-error":
         let msg = "";

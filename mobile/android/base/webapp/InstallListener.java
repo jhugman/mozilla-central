@@ -19,10 +19,10 @@ import java.io.File;
 public class InstallListener extends BroadcastReceiver {
 
     private static String LOGTAG = "GeckoInstallListener";
-    private String requestId = null;
+    private String data = null;
 
-    public InstallListener(String requestId) {
-      this.requestId = requestId;
+    public InstallListener(String data) {
+      this.data = data;
     }
 
     @Override
@@ -75,13 +75,12 @@ public class InstallListener extends BroadcastReceiver {
 
         Log.i(LOGTAG, "manifestContent = " + manifestContent);
 
+        Log.i(LOGTAG, String.format("data=%s",data));
 
         // TODO check if gecko events get queued if Gecko isn't running
         GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent(
-                    "Webapps:ApkInstalled", String.format("{\"app\": {\"manifestURL\":\"%s\"," +
-                                            "\"origin\":\"%s\", \"isPackaged\":%s," +
-                                            "\"packageName\":\"%s\", \"requestId\":\"%s\", \"manifest\": %s}}", 
-                                            manifestUrl, origin, isPackaged, packageName, requestId, manifestContent)));
+                    "Webapps:ApkInstalled", String.format("{\"data\":%s, \"manifest\":%s}",
+                    data, manifestContent)));
 
     }
 

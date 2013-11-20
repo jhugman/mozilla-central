@@ -662,7 +662,7 @@ abstract public class GeckoApp
                 String packageName = message.optString("packageName");
                 GeckoAppShell.uninstallWebApp(packageName);
             } else if (event.equals("WebApps:InstallApk")) {
-                GeckoAppShell.installApk(this, message.getString("filePath"), message.getString("requestId"));
+                GeckoAppShell.installApk(this, message.getString("filePath"), message.getString("data"));
             } else if (event.equals("WebApps:GetTempFilePath")) {
                 mCurrentResponse = GeckoAppShell.getTempFilePath(this, message.getString("fileName"));
             } else if (event.equals("Share:Text")) {

@@ -22,6 +22,7 @@ Cu.import("resource://gre/modules/SystemMessagePermissionsChecker.jsm");
 Cu.import("resource://gre/modules/AppDownloadManager.jsm");
 Cu.import("resource://gre/modules/WebappOSUtils.jsm");
 Cu.import("resource://gre/modules/osfile.jsm");
+Cu.import("resource://gre/modules/DOMRequestHelper.jsm");
 
 #ifdef MOZ_WIDGET_GONK
 XPCOMUtils.defineLazyGetter(this, "libcutils", function() {
@@ -2332,25 +2333,8 @@ onInstallSuccessAck: function onInstallSuccessAck(aManifestURL,
   },
 
   confirmApkInstall: function(aData) { 
-    this.confirmInstall(aData, null, (function(aManifest) {
-      //let req = this.getRequest(msg.requestID);
-      debug("callback:" + JSON.stringify(aData.app.manifestURL));
-      let id = this._appIdForManifestURL(aData.app.manifestURL);
-      this.broadcastMessage("Webapps:AddApp", { id: id, app: aData.app });
-      
-      this.broadcastMessage("Webapps:UpdateState", {
-        app: aData.app,
-        manifest: aManifest,
-        manifestURL: aData.app.manifestURL
-      });
-      this.broadcastMessage("Webapps:Install:Return:OK", aData);
-
-      this.broadcastMessage("Webapps:FireEvent", {
-        eventType: ["downloadsuccess", "downloadapplied"],
-        manifestURL: aData.app.manifestURL
-      });          
-    }).bind(this));
-    debug("END OF APP INSTALLED");
+    debug("Webapps.jsm: confirmApkInstall:" + JSON.stringify(aData));
+    this.broadcastMessage("Webapps:Install:Return:OK", aData);
   },
 
   confirmInstall: function(aData, aProfileDir, aInstallSuccessCallback) {

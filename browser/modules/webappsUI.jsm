@@ -44,6 +44,7 @@ this.webappsUI = {
   },
 
   receiveMessage: function(aMessage) {
+    dump("receiveMessage aMessage " + JSON.stringify(aMessage));
     let data = aMessage.data;
 
     let manifestURL = data.manifestURL ||

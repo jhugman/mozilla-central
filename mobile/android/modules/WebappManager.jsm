@@ -135,7 +135,7 @@ this.WebappManager = {
               sendMessageToJava({
                 type: "WebApps:InstallApk",
                 filePath: filePath,
-                requestId: aMsg.requestID
+                data: JSON.stringify(aMsg)
               });
             }
           });

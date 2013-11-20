@@ -35,15 +35,19 @@ WebappsRegistry.prototype = {
   __proto__: DOMRequestIpcHelper.prototype,
 
   receiveMessage: function(aMessage) {
+    debug("Webapps.js: aMessage: " + JSON.stringify(aMessage));
     let msg = aMessage.json;
     if (msg.oid != this._id)
       return
     let req = this.getRequest(msg.requestID);
-    if (!req)
+    if (!req) {
+      debug("Webapps.js: req doesn't exist: " + msg.requestID);
       return;
+    }
     let app = msg.app;
     switch (aMessage.name) {
       case "Webapps:Install:Return:OK":
+        debug("Webapps.js in switch: manifest url = " + app.manifestURL);
         this.removeMessageListeners("Webapps:Install:Return:KO");
         Services.DOMRequest.fireSuccess(req, createApplicationObject(this._window, app));
         cpmm.sendAsyncMessage("Webapps:Install:Return:Ack",
