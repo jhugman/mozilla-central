@@ -346,7 +346,7 @@ var BrowserApp = {
 
     // Init LoginManager
     Cc["@mozilla.org/login-manager;1"].getService(Ci.nsILoginManager);
-
+    console.log("window.arguments: " + JSON.stringify(window.arguments));
     let url = null;
     let pinned = false;
     if ("arguments" in window) {
@@ -6966,13 +6966,16 @@ var WebappsUI = {
     } catch(ex) { }
     console.log("browser.js: observe: topic: " + aTopic);
     switch (aTopic) {
-      case "Webapps:ApkInstalled":
-        // TODO move this event catching code to Webapps.jsm
-        console.log("browser.js: aData:" + aData);
-        let jsonData = data.data;
-        jsonData.app.manifest = data.manifest;
-        console.log("browser.js: jsonData:" + JSON.stringify(jsonData));
-        DOMApplicationRegistry.confirmApkInstall(jsonData);
+      case "Webapps:AppInstalled":
+        console.log("aData:" + aData);
+        DOMApplicationRegistry.confirmInstall(data, null, function(aManifest) {
+          console.log("callback:" + JSON.stringify(data.app.manifestURL));
+          DOMApplicationRegistry.onInstallSuccessAck(data.app.manifestURL);
+          // ooh - what to put here?
+          // we currently don't have the profile path as it's not been installed yet.
+          // we prob just need to inform the system that we've installed so that the ui can update
+        });
+        console.log("END OF APP INSTALLED");
         break;
       case "webapps-install-error":
         let msg = "";

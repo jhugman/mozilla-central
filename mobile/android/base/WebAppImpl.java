@@ -45,6 +45,8 @@ public class WebAppImpl extends GeckoApp implements InstallCallback {
 
     private View mSplashscreen;
 
+    private ApkResources mApkResources;
+
     protected int getIndex() { return 0; }
 
     @Override
@@ -56,7 +58,6 @@ public class WebAppImpl extends GeckoApp implements InstallCallback {
     @Override
     public void onCreate(Bundle savedInstance)
     {
-        super.onCreate(savedInstance);
 
         String action = getIntent().getAction();
         Bundle extras = getIntent().getExtras();
@@ -68,8 +69,18 @@ public class WebAppImpl extends GeckoApp implements InstallCallback {
             extras = new Bundle();
         }
 
-        boolean isInstalled = extras.getBoolean("isInstalled", false);
+        String packageName = extras.getString("packageName");
 
+        mApkResources = new ApkResources(packageName);
+
+        boolean isInstalled = extras.getBoolean("isInstalled", false);
+        if (isInstalled) {
+            // XXX GeckoThread uses the intent action to set this as a webapp
+            getIntent().setAction(GeckoApp.ACTION_WEBAPP_PREFIX + getIndex());
+        }
+
+        // start Gecko.
+        super.onCreate(savedInstance);
 
         mTitlebarText = (TextView)findViewById(R.id.webapp_title);
         mTitlebar = findViewById(R.id.webapp_titlebar);
@@ -117,18 +128,11 @@ public class WebAppImpl extends GeckoApp implements InstallCallback {
         if (uri != null) {
             return uri;
         }
-
-        // TODO this is where we construct the URL from the Intent from the
+        // This is where we construct the URL from the Intent from the
         // the synthesized APK.
-        String packageName = intent.getStringExtra("packageName");
-        try {
-            uri = new ApkResources(packageName).getManifestUrl(this);
-        } catch (NameNotFoundException e) {
-            Log.e(LOGTAG, "Can't resolve package name " + packageName, e);
-        }
 
         // TODO Translate AndroidIntents into WebActivities here.
-        return uri;
+        return mApkResources.getManifest(this);
     }
 
     @Override
@@ -159,10 +163,10 @@ public class WebAppImpl extends GeckoApp implements InstallCallback {
         ImageView image = (ImageView)findViewById(R.id.splashscreen_icon);
         Drawable d = null;
 
-        String uri = getIntent().getStringExtra("iconUri");
+        Uri uri = mApkResources.getLogoUri();
 
         if (uri != null) {
-            image.setImageURI(Uri.parse(uri));
+            image.setImageURI(uri);
             d = image.getDrawable();
         } else {
             // look for a logo.png in the profile dir and show it. If we can't find a logo show nothing
@@ -245,7 +249,7 @@ public class WebAppImpl extends GeckoApp implements InstallCallback {
                         // If we can't parse the url, and its an app protocol hide
                         // the titlebar and return, otherwise show the titlebar
                         // and the full url
-                        if (!urlString.startsWith("app://")) {
+                        if (urlString != null && !urlString.startsWith("app://")) {
                             mTitlebar.setVisibility(View.VISIBLE);
                         } else {
                             mTitlebar.setVisibility(View.GONE);
@@ -296,7 +300,7 @@ public class WebAppImpl extends GeckoApp implements InstallCallback {
     }
 
     protected void startInstall(Bundle extras) {
-        InstallHelper installHelper = new InstallHelper(this.getApplicationContext(), this);
+        InstallHelper installHelper = new InstallHelper(this.getApplicationContext(), mApkResources, this);
         JSONObject message = installHelper.createInstallMessage(extras);
 
         if (message == null) {

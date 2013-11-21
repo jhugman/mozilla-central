@@ -356,6 +356,7 @@ public class GeckoAppShell
             });
 
         // and go
+        Log.d(LOGTAG, "GeckoLoader.nativeRun " + combinedArgs);
         GeckoLoader.nativeRun(combinedArgs);
 
         // Remove pumpMessageLoop() idle handler
@@ -2592,6 +2593,7 @@ public class GeckoAppShell
     @GeneratableAndroidBridgeTarget(stubName = "ShowFilePickerAsyncWrapper")
     public static void showFilePickerAsync(String aMimeType, final long id) {
         sActivityHelper.showFilePickerAsync(getGeckoInterface().getActivity(), aMimeType, new ActivityHandlerHelper.FileResultHandler() {
+            @Override
             public void gotFile(String filename) {
                 GeckoAppShell.notifyFilePickerResult(filename, id);
             }
@@ -2699,7 +2701,7 @@ public class GeckoAppShell
                 tempFile.delete();
             }
             tempFile = null;
-        }    
+        }
         return filePath;
     }
 
