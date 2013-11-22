@@ -11,7 +11,6 @@ import org.mozilla.gecko.util.ThreadUtils;
 
 import org.json.JSONObject;
 
-import android.content.Intent;
 import android.content.Context;
 import android.content.res.Configuration;
 import android.content.res.Resources;
@@ -104,7 +103,7 @@ public class GeckoThread extends Thread implements GeckoEventListener {
         } catch (Exception e) {
             Log.w(LOGTAG, "Caught exception getting plugin dirs.", e);
         }
-        
+
         if (app instanceof Activity) {
             Activity activity = (Activity)app;
             resourcePath = activity.getApplication().getPackageResourcePath();
@@ -126,6 +125,7 @@ public class GeckoThread extends Thread implements GeckoEventListener {
     }
 
     private String getTypeFromAction(String action) {
+        Log.i(LOGTAG, "Intent action = " + action);
         if (action != null && action.startsWith(GeckoApp.ACTION_WEBAPP_PREFIX)) {
             return "-webapp";
         }

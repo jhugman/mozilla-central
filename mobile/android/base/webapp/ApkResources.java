@@ -80,4 +80,8 @@ public class ApkResources {
         return fileContent.toString();
     }
 
+    public Uri getLogoUri() {
+        return Uri.parse("android.resource://" + mPackageName + "/drawable/ic_launcher");
+    }
+
 }

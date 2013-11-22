@@ -17,7 +17,7 @@ Cu.import("resource://gre/modules/FileUtils.jsm");
 Cu.import("resource://gre/modules/DOMRequestHelper.jsm");
 
 function dump(a) {
-  Services.console.logStringMessage(a);
+  Services.console.logStringMessage("WebappManager.jsm: " + a);
 }
 
 function sendMessageToJava(aMessage) {
@@ -31,14 +31,14 @@ this.WebappManager = {
   observe: function(aSubject, aTopic, aData) {
     switch (aTopic) {
       case "webapps-download-apk":
-        dump("WebappManager.jsm: data: " + aData);
+        dump("aData: " + aData);
         this._downloadApk(JSON.parse(aData));
         break;
       case "Webapps:ApkInstalled":
-        console.log("WebappManager.jsm: aData:" + aData);
+        dump("aData:" + aData);
         let jsonData = data.data;
         jsonData.app.manifest = data.manifest;
-        console.log("WebappManager.jsm: jsonData:" + JSON.stringify(jsonData));
+        dump("jsonData:" + JSON.stringify(jsonData));
         this._confirmApkInstall(jsonData);
         break;        
     }
@@ -47,7 +47,7 @@ this.WebappManager = {
   _checkingForUpdates: false,
 
   _confirmApkInstall: function(aData) { 
-    debug("Webapps.jsm: confirmApkInstall:" + JSON.stringify(aData));
+    dump("confirmApkInstall:" + JSON.stringify(aData));
     this.broadcastMessage("Webapps:Install:Return:OK", aData);
   },
 

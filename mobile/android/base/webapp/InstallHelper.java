@@ -20,13 +20,16 @@ public class InstallHelper implements GeckoEventListener {
 
     private final InstallCallback mCallback;
 
+    private final ApkResources mApkResources;
+
     public static interface InstallCallback {
         void installCompleted(InstallHelper installHelper, String event, JSONObject message);
     }
 
-    public InstallHelper(Context context, InstallCallback cb) {
+    public InstallHelper(Context context, ApkResources apkResources, InstallCallback cb) {
         mContext = context;
         mCallback = cb;
+        mApkResources = apkResources;
     }
 
     public JSONObject createInstallMessage(Bundle extras) {
@@ -59,11 +62,10 @@ public class InstallHelper implements GeckoEventListener {
         messageObject.putOpt("packageName", packageName);
         messageObject.putOpt("title", app.name);
 
-        ApkResources res = new ApkResources(packageName);
-        messageObject.putOpt("manifest", new JSONObject(res.getManifest(mContext)));
+        messageObject.putOpt("manifest", new JSONObject(mApkResources.getManifest(mContext)));
 
         if ("packaged".equals(appType)) {
-            messageObject.putOpt("updateManifest", new JSONObject(res.getMiniManifest(mContext)));
+            messageObject.putOpt("updateManifest", new JSONObject(mApkResources.getMiniManifest(mContext)));
         }
 
         return messageObject;

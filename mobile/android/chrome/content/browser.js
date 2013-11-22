@@ -346,7 +346,7 @@ var BrowserApp = {
 
     // Init LoginManager
     Cc["@mozilla.org/login-manager;1"].getService(Ci.nsILoginManager);
-
+    console.log("window.arguments: " + JSON.stringify(window.arguments));
     let url = null;
     let pinned = false;
     if ("arguments" in window) {
