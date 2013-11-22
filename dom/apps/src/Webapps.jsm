@@ -2519,12 +2519,7 @@ onInstallSuccessAck: function onInstallSuccessAck(aManifestURL,
       oldApp.progress = 0;
 
       let zipFile = yield this._getPackage(requestChannel, id, oldApp, aNewApp);
-
-      let file = yield OS.File.open(zipFile.path, { read: true });
-
-      let hash = yield this._computeFileHash(file, zipFile.path);
-
-      debug("File hash computed: " + hash);
+      let hash = yield this._computeFileHash(zipFile.path);
 
       let responseStatus = requestChannel.responseStatus;
       let oldPackage = (responseStatus == 304 || hash == oldApp.packageHash);
@@ -2737,46 +2732,56 @@ onInstallSuccessAck: function onInstallSuccessAck(aManifestURL,
     return deferred.promise;
   },
 
-  _computeFileHash: function(aFile, aZipFilePath) {
-    let deferred = Promise.defer();
+  /**
+   * Compute the MD5 hash of a file, doing async IO off the main thread.
+   *
+   * @param   {String} aFilePath
+   *                   the path of the file to hash
+   * @returns {String} the MD5 hash of the file
+   */
+  _computeFileHash: function(aFilePath) {
+    return Task.spawn(function*() {
+      let hasher = Cc["@mozilla.org/security/hash;1"]
+                     .createInstance(Ci.nsICryptoHash);
+      // We want to use the MD5 algorithm.
+      hasher.init(hasher.MD5);
 
-    // Returns the MD5 hash of a file, doing async IO off the main thread.
+      const CHUNK_SIZE = 16384;
 
-    let hasher = Cc["@mozilla.org/security/hash;1"]
-                   .createInstance(Ci.nsICryptoHash);
-    // We want to use the MD5 algorithm.
-    hasher.init(hasher.MD5);
+      // Return the two-digit hexadecimal code for a byte.
+      function toHexString(charCode) {
+        return ("0" + charCode.toString(16)).slice(-2);
+      }
 
-    const CHUNK_SIZE = 16384;
-    // Return the two-digit hexadecimal code for a byte.
-    function toHexString(charCode) {
-      return ("0" + charCode.toString(16)).slice(-2);
-    }
+      let file;
+      try {
+        file = yield OS.File.open(aFilePath, { read: true });
+      } catch(e) {
+        debug("Error opening " + aFilePath + ": " + e);
+        return null;
+      }
 
-    let readChunk = function readChunk() {
-      aFile.read(CHUNK_SIZE).then(
-        function readSuccess(array) {
+      try {
+        let array;
+        do {
+          array = yield file.read(CHUNK_SIZE);
           hasher.update(array, array.length);
-          if (array.length == CHUNK_SIZE) {
-            readChunk();
-          } else {
-            // We're passing false to get the binary hash and not base64.
-            let hashData = hasher.finish(false);
-            // convert the binary hash data to a hex string.
-            let hash = ([toHexString(hashData.charCodeAt(i)) for (i in hashData)]
-                      .join(""));
-            deferred.resolve(hash);
-          }
-        },
-        function readError() {
-          debug("Error reading " + aZipFilePath);
-          deferred.resolve(null);
-        }
-      );
-    }
-    readChunk();
+        } while (array.length == CHUNK_SIZE);
+      } catch(e) {
+        debug("Error reading " + aFilePath + ": " + e);
+        return null;
+      }
 
-    return deferred.promise;
+      yield file.close();
+
+      // We're passing false to get the binary hash and not base64.
+      let data = hasher.finish(false);
+      // Convert the binary hash data to a hex string.
+      let hash = [toHexString(data.charCodeAt(i)) for (i in data)].join("");
+      debug("File hash computed: " + hash);
+
+      return hash;
+    });
   },
 
   /**
