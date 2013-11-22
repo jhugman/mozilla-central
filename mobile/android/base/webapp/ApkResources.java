@@ -48,7 +48,7 @@ public class ApkResources {
 
 
     public String getManifestUrl(Context context) throws NameNotFoundException {
-        return metadata(context).getString("packageName");
+        return metadata(context).getString("manifestUrl");
     }
 
     public boolean isPackaged(Context context) {
