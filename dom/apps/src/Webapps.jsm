@@ -2558,7 +2558,7 @@ onInstallSuccessAck: function onInstallSuccessAck(aManifestURL,
 
     if (deviceStorage) {
       let req = deviceStorage.freeSpace();
-      req.onsuccess = req.onerror = function(e) {
+      req.onsuccess = req.onerror = e => {
         let freeBytes = e.target.result;
         let sufficientStorage = this._checkDownloadSize(freeBytes, aNewApp);
         if (sufficientStorage) {
