@@ -2332,10 +2332,6 @@ onInstallSuccessAck: function onInstallSuccessAck(aManifestURL,
     }
   },
 
-  confirmApkInstall: function(aData) { 
-    debug("Webapps.jsm: confirmApkInstall:" + JSON.stringify(aData));
-    this.broadcastMessage("Webapps:Install:Return:OK", aData);
-  },
 
   confirmInstall: function(aData, aProfileDir, aInstallSuccessCallback) {
     let isReinstall = false;
@@ -3278,7 +3274,11 @@ onInstallSuccessAck: function onInstallSuccessAck(aManifestURL,
     aData.apps = [];
     let tmp = [];
 
+    debug("getInstalled");
+
     for (let id in this.webapps) {
+      debug(id + " : " + JSON.stringify(this.webapps[id]));
+      debug(id + " : " + [(p + "=" + this.webapps[id][p]) for (p in this.webapps[id])].join("\n"));
       if (this.webapps[id].installOrigin == aData.origin &&
           this._isLaunchable(this.webapps[id])) {
         aData.apps.push(AppsUtils.cloneAppObject(this.webapps[id]));

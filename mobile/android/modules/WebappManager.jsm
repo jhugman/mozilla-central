@@ -34,10 +34,22 @@ this.WebappManager = {
         dump("WebappManager.jsm: data: " + aData);
         this._downloadApk(JSON.parse(aData));
         break;
+      case "Webapps:ApkInstalled":
+        console.log("WebappManager.jsm: aData:" + aData);
+        let jsonData = data.data;
+        jsonData.app.manifest = data.manifest;
+        console.log("WebappManager.jsm: jsonData:" + JSON.stringify(jsonData));
+        this._confirmApkInstall(jsonData);
+        break;        
     }
   },
 
   _checkingForUpdates: false,
+
+  _confirmApkInstall: function(aData) { 
+    debug("Webapps.jsm: confirmApkInstall:" + JSON.stringify(aData));
+    this.broadcastMessage("Webapps:Install:Return:OK", aData);
+  },
 
   _updateApps: function(aApps) {
     dump("_updateApps: " + aApps.length + " apps to update");
@@ -150,3 +162,4 @@ this.WebappManager = {
 };
 
 Services.obs.addObserver(this.WebappManager, "webapps-download-apk", true);
+Services.obs.addObserver(this.WebappManager, "Webapps:ApkInstalled", true);
