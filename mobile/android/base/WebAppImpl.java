@@ -270,7 +270,6 @@ public class WebAppImpl extends GeckoApp implements InstallCallback {
                     }
                 }
                 break;
-            case RESTORED:
             case LOADED:
                 hideSplash();
                 break;
