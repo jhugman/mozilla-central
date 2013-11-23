@@ -1,20 +1,21 @@
 package org.mozilla.gecko.webapp;
 
-import java.net.MalformedURLException;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.mozilla.gecko.GeckoAppShell;
+import org.mozilla.gecko.GeckoEvent;
+import org.mozilla.gecko.GeckoProfile;
 import org.mozilla.gecko.util.GeckoEventListener;
 
 import android.content.Context;
-import android.content.pm.ApplicationInfo;
-import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
-import android.os.Bundle;
 import android.util.Log;
 
 public class InstallHelper implements GeckoEventListener {
 
     private static final String LOGTAG = "GeckoInstallHelper";
+
+    private static final String[] INSTALL_EVENT_NAMES = new String[] {"WebApps:PostInstall"};
 
     private final Context mContext;
 
@@ -32,13 +33,32 @@ public class InstallHelper implements GeckoEventListener {
         mApkResources = apkResources;
     }
 
-    public JSONObject createInstallMessage(Bundle extras) {
-        String packageName = extras != null ? extras.getString("packageName") : null;
+    public void startInstall(GeckoProfile profile) {
+        JSONObject message = createInstallMessage();
+
+        if (message == null) {
+            throw new NullPointerException("Cannot find package name in the calling intent to install this app");
+        }
+
+        try {
+            message.putOpt("profilePath", profile.getDir());
+        } catch (JSONException e) {
+            // NOP
+        }
+
+        for (String eventName : INSTALL_EVENT_NAMES) {
+            GeckoAppShell.registerEventListener(eventName, this);
+        }
+        GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Webapps:AutoInstall", message.toString()));
+    }
+
+
+    private JSONObject createInstallMessage() {
+        String packageName = mApkResources.getPackageName();
         if (packageName != null) {
             // we're not installed yet.
             try {
-                return getInstallMessageFromPackage(packageName);
-
+                return getInstallMessageFromPackage();
             } catch (Exception e) {
                 Log.e(LOGTAG, "Can't install " + packageName, e);
             }
@@ -46,24 +66,17 @@ public class InstallHelper implements GeckoEventListener {
         return null;
     }
 
-    private JSONObject getInstallMessageFromPackage(String packageName) throws NameNotFoundException, MalformedURLException, JSONException {
-
-        ApplicationInfo app = mContext.getPackageManager()
-                .getApplicationInfo(packageName,
-                        PackageManager.GET_META_DATA);
-
-        Bundle metadata = app.metaData;
-        String urlString = metadata.getString("manifestUrl");
+    private JSONObject getInstallMessageFromPackage() throws NameNotFoundException, JSONException {
 
         JSONObject messageObject = new JSONObject();
-        messageObject.putOpt("manifestUrl", urlString);
-        String appType = metadata.getString("webapp");
-        messageObject.putOpt("type", appType);
-        messageObject.putOpt("packageName", packageName);
-        messageObject.putOpt("title", app.name);
 
+        messageObject.putOpt("packageName", mApkResources.getPackageName());
+        messageObject.putOpt("manifestUrl", mApkResources.getManifestUrl(mContext));
+        messageObject.putOpt("title", mApkResources.getAppName(mContext));
         messageObject.putOpt("manifest", new JSONObject(mApkResources.getManifest(mContext)));
 
+        String appType = mApkResources.getWebAppType(mContext);
+        messageObject.putOpt("type", appType);
         if ("packaged".equals(appType)) {
             messageObject.putOpt("updateManifest", new JSONObject(mApkResources.getMiniManifest(mContext)));
         }
@@ -73,11 +86,14 @@ public class InstallHelper implements GeckoEventListener {
 
     @Override
     public void handleMessage(String event, JSONObject message) {
-        Log.i(LOGTAG, "Install complete: " + event + "\n" + message);
 
-        mCallback.installCompleted(this, event, message);
+        for (String eventName : INSTALL_EVENT_NAMES) {
+            GeckoAppShell.unregisterEventListener(eventName, this);
+        }
 
-
+        if (mCallback != null) {
+            mCallback.installCompleted(this, event, message);
+        }
     }
 
 }

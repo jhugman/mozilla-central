@@ -33,6 +33,10 @@ public class ApkResources {
         return mInfo;
     }
 
+    public String getPackageName() {
+        return mPackageName;
+    }
+
     private Bundle metadata(Context context) throws NameNotFoundException {
         // Beware the null pointer exception.
         return info(context).metaData;
@@ -82,6 +86,14 @@ public class ApkResources {
 
     public Uri getLogoUri() {
         return Uri.parse("android.resource://" + mPackageName + "/drawable/ic_launcher");
+    }
+
+    public String getWebAppType(Context context) throws NameNotFoundException {
+        return metadata(context).getString("webapp");
+    }
+
+    public String getAppName(Context context) throws NameNotFoundException {
+        return info(context).name;
     }
 
 }

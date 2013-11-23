@@ -37,8 +37,6 @@ import android.widget.TextView;
 public class WebAppImpl extends GeckoApp implements InstallCallback {
     private static final String LOGTAG = "GeckoWebAppImpl";
 
-    private static final String[] INSTALL_EVENT_NAMES = new String[] {"WebApps:PostInstall"};
-
     private URL mOrigin;
     private TextView mTitlebarText = null;
     private View mTitlebar = null;
@@ -95,7 +93,8 @@ public class WebAppImpl extends GeckoApp implements InstallCallback {
         }
 
         if (!isInstalled) {
-            startInstall(extras);
+            InstallHelper installHelper = new InstallHelper(getApplicationContext(), mApkResources, this);
+            installHelper.startInstall(getProfile());
             return;
         }
 
@@ -142,18 +141,7 @@ public class WebAppImpl extends GeckoApp implements InstallCallback {
 
     @Override
     protected void loadStartupTab(String uri) {
-        String action = getIntent().getAction();
-
-        // This is almost certainly redundant.
-        if (GeckoApp.ACTION_WEBAPP_PREFIX.equals(action)) {
-            // This action assumes the uri is not an installed WebApp. We will
-            // use the WebAppAllocator to register the uri with an Android
-            // process so it can run chromeless.
-            int index = WebAppAllocator.getInstance(this).findAndAllocateIndex(uri, "App", (Bitmap) null);
-            Intent appIntent = GeckoAppShell.getWebAppIntent(index, uri);
-            startActivity(appIntent);
-            finish();
-        }
+        // NOP
     }
 
     private void showSplash(boolean isInstalled) {
@@ -296,38 +284,12 @@ public class WebAppImpl extends GeckoApp implements InstallCallback {
                 }
     }
 
-    protected void startInstall(Bundle extras) {
-        InstallHelper installHelper = new InstallHelper(this.getApplicationContext(), mApkResources, this);
-        JSONObject message = installHelper.createInstallMessage(extras);
-
-        if (message == null) {
-            throw new NullPointerException("Cannot find package name in the calling intent to install this app");
-        }
-
-        GeckoProfile profile = getProfile();
-        try {
-            message.putOpt("profilePath", profile.getDir());
-        } catch (JSONException e) {
-            // NOP
-        }
-
-        for (String eventName : INSTALL_EVENT_NAMES) {
-            GeckoAppShell.registerEventListener(eventName, installHelper);
-        }
-        GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Webapps:AutoInstall", message.toString()));
-    }
-
     @Override
     public void installCompleted(InstallHelper installHelper, String event, JSONObject message) {
-
-        for (String eventName : INSTALL_EVENT_NAMES) {
-            GeckoAppShell.unregisterEventListener(eventName, installHelper);
-        }
 
         if (event == null) {
             return;
         }
-
 
         if (event.equals("WebApps:PostInstall")) {
             try {
