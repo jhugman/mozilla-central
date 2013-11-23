@@ -103,7 +103,7 @@ public class WebAppImpl extends GeckoApp implements InstallCallback {
         setTitle(title != null ? title : "Web App");
 
         // Try to use the origin stored in the WebAppAllocator first
-        String origin = WebAppAllocator.getInstance(this).getAppForIndex(getIndex());
+        String origin = WebAppAllocator.getInstance(this).getOrigin(getIndex());
         try {
             mOrigin = new URL(origin);
         } catch (java.net.MalformedURLException ex) {
@@ -158,10 +158,8 @@ public class WebAppImpl extends GeckoApp implements InstallCallback {
 
     private void showSplash(boolean isInstalled) {
 
-        SharedPreferences prefs = getPreferences();
-
         // get the favicon dominant color, stored when the app was installed
-        int dominantColor = prefs.getInt(WebAppAllocator.iconKey(getIndex()), -1);
+        int dominantColor = WebAppAllocator.getInstance().getColor(getIndex());
 
         setBackgroundGradient(dominantColor);
 
@@ -186,7 +184,7 @@ public class WebAppImpl extends GeckoApp implements InstallCallback {
         if (d != null) {
             if (dominantColor == -1) {
                 Bitmap bitmap = ((BitmapDrawable) d).getBitmap();
-                WebAppAllocator.getInstance(getApplicationContext()).updateAppAllocation(null, getIndex(), bitmap);
+                WebAppAllocator.getInstance(getApplicationContext()).updateColor(getIndex(), bitmap);
             }
 
             Animation fadein = AnimationUtils.loadAnimation(this, R.anim.grow_fade_in_center);
@@ -195,11 +193,6 @@ public class WebAppImpl extends GeckoApp implements InstallCallback {
             image.startAnimation(fadein);
 
         }
-    }
-
-    protected SharedPreferences getPreferences() {
-        SharedPreferences prefs = getSharedPreferences("webapps", Context.MODE_PRIVATE | Context.MODE_MULTI_PROCESS);
-        return prefs;
     }
 
     public void setBackgroundGradient(int dominantColor) {
@@ -338,7 +331,8 @@ public class WebAppImpl extends GeckoApp implements InstallCallback {
 
         if (event.equals("WebApps:PostInstall")) {
             try {
-                mOrigin = new URL(message.optString("origin"));
+                String origin = message.optString("origin");
+                mOrigin = new URL(origin);
             } catch (MalformedURLException e) {
                 Log.e(LOGTAG, "Cannot decode origin", e);
             }

@@ -627,6 +627,7 @@ abstract public class GeckoApp
             } else if (event.equals("WebApps:Open")) {
                 String manifestURL = message.getString("manifestURL");
                 String origin = message.getString("origin");
+                // TODO this web app intent needs to be changed.
                 Intent intent = GeckoAppShell.getWebAppIntent(manifestURL, origin, "", null);
                 if (intent == null)
                     return;
@@ -639,16 +640,14 @@ abstract public class GeckoApp
                 String origin = message.getString("origin");
                 // preInstallWebapp will return a File object pointing to the profile directory of the webapp
                 String packageName = message.getString("packageName");
-                mCurrentResponse = GeckoAppShell.preInstallWebApp(name, manifestURL, packageName).toString();
-                GeckoAppShell.postInstallWebApp(name, manifestURL, packageName, iconURL, origin);
+                mCurrentResponse = GeckoAppShell.preInstallWebApp(packageName, name).toString();
+                GeckoAppShell.postInstallWebApp(packageName, origin, manifestURL, name);
             } else if (event.equals("WebApps:PreInstall")) {
                 // is any of this needed now?
                 String name = message.getString("name");
-                String manifestURL = message.getString("manifestURL");
-                String origin = message.getString("origin");
                 // preInstallWebapp will return a File object pointing to the profile directory of the webapp
                 String packageName = message.getString("packageName");
-                mCurrentResponse = GeckoAppShell.preInstallWebApp(name, manifestURL, packageName).toString();
+                mCurrentResponse = GeckoAppShell.preInstallWebApp(packageName, name).toString();
             } else if (event.equals("WebApps:PostInstall")) {
                 String name = message.getString("name");
                 String manifestURL = message.getString("manifestURL");
@@ -656,7 +655,7 @@ abstract public class GeckoApp
                 String originalOrigin = message.getString("originalOrigin");
                 String origin = message.getString("origin");
                 String packageName = message.getString("packageName");
-                GeckoAppShell.postInstallWebApp(name, manifestURL, packageName, iconURL, originalOrigin);
+                GeckoAppShell.postInstallWebApp(packageName, origin, manifestURL, name);
             } else if (event.equals("WebApps:Uninstall")) {
                 String origin = message.getString("origin");
                 String packageName = message.optString("packageName");

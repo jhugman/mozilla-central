@@ -685,26 +685,24 @@ public class GeckoAppShell
         gRestartScheduled = true;
     }
 
-    public static File preInstallWebApp(String aTitle, String aURI, String aOrigin) {
-        int index = WebAppAllocator.getInstance(getContext()).findAndAllocateIndex(aOrigin, aTitle, (String) null);
+    public static File preInstallWebApp(String aPackageName, String aTitle) {
+        int index = WebAppAllocator.getInstance(getContext()).allocatePackage(aPackageName, aTitle);
         GeckoProfile profile = GeckoProfile.get(getContext(), "webapp" + index);
         return profile.getDir();
     }
 
-    public static void postInstallWebApp(String aTitle, String aURI, String aOrigin, String aIconURL, String aOriginalOrigin) {
+    public static void postInstallWebApp(String aPackageName, String aOrigin, String aManifestUrl, String aTitle) {
     	WebAppAllocator allocator = WebAppAllocator.getInstance(getContext());
-		int index = allocator.getIndexForApp(aOrigin);
-    	assert index != -1 && aIconURL != null;
-    	allocator.updateAppAllocation(aOrigin, index, null);
-    	//createShortcut(aTitle, aURI, aOrigin, aIconURL, "webapp");
+		allocator.begin();
+    	int index = allocator.allocatePackage(aPackageName, aTitle);
+        allocator.putOrigin(index, aOrigin);
+        allocator.end();
     }
 
+    // TODO re-rewrite getWebAppIntent.
+    // TODO who actually uses this now?
     public static Intent getWebAppIntent(String aURI, String aOrigin, String aTitle, Bitmap aIcon) {
-        int index;
-        if (aIcon != null && !TextUtils.isEmpty(aTitle))
-            index = WebAppAllocator.getInstance(getContext()).findAndAllocateIndex(aOrigin, aTitle, aIcon);
-        else
-            index = WebAppAllocator.getInstance(getContext()).getIndexForApp(aOrigin);
+        int index = WebAppAllocator.getInstance(getContext()).getIndexForOrigin(aOrigin);
 
         if (index == -1)
             return null;
@@ -712,7 +710,7 @@ public class GeckoAppShell
         return getWebAppIntent(index, aURI);
     }
 
-    public static Intent getWebAppIntent(int aIndex, String aURI) {
+    private static Intent getWebAppIntent(int aIndex, String aURI) {
         Intent intent = new Intent();
         intent.setAction(GeckoApp.ACTION_WEBAPP_PREFIX + aIndex);
         intent.setData(Uri.parse(aURI));
