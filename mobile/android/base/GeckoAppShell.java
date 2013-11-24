@@ -702,20 +702,15 @@ public class GeckoAppShell
     // TODO re-rewrite getWebAppIntent.
     // TODO who actually uses this now?
     public static Intent getWebAppIntent(String aURI, String aOrigin, String aTitle, Bitmap aIcon) {
-        int index = WebAppAllocator.getInstance(getContext()).getIndexForOrigin(aOrigin);
+        WebAppAllocator slots = WebAppAllocator.getInstance(getContext());
+        int index = slots.getIndexForOrigin(aOrigin);
 
-        if (index == -1)
+        if (index == -1) {
             return null;
-
-        return getWebAppIntent(index, aURI);
-    }
-
-    private static Intent getWebAppIntent(int aIndex, String aURI) {
-        Intent intent = new Intent();
-        intent.setAction(GeckoApp.ACTION_WEBAPP_PREFIX + aIndex);
+        }
+        String packageName = slots.getAppForIndex(index);
+        Intent intent = getContext().getPackageManager().getLaunchIntentForPackage(packageName);
         intent.setData(Uri.parse(aURI));
-        intent.setClassName(AppConstants.ANDROID_PACKAGE_NAME,
-                            AppConstants.ANDROID_PACKAGE_NAME + ".WebApps$WebApp" + aIndex);
         return intent;
     }
 
@@ -749,6 +744,7 @@ public class GeckoAppShell
                 // the intent to be launched by the shortcut
                 Intent shortcutIntent;
                 if (aType.equalsIgnoreCase(SHORTCUT_TYPE_WEBAPP)) {
+                    // TODO this case is redundant now.
                     shortcutIntent = getWebAppIntent(aURI, aUniqueURI, aTitle, aIcon);
                 } else {
                     shortcutIntent = new Intent();
@@ -786,7 +782,6 @@ public class GeckoAppShell
                 // the intent to be launched by the shortcut
                 Intent shortcutIntent;
                 if (aType.equalsIgnoreCase(SHORTCUT_TYPE_WEBAPP)) {
-                    int index = WebAppAllocator.getInstance(getContext()).getIndexForApp(aUniqueURI);
                     shortcutIntent = getWebAppIntent(aURI, aUniqueURI, "", null);
                     if (shortcutIntent == null)
                         return;
@@ -2708,7 +2703,7 @@ public class GeckoAppShell
         Intent intent = new Intent(Intent.ACTION_VIEW);
         intent.setDataAndType(Uri.fromFile(file), "application/vnd.android.package-archive");
         context.startActivity(intent);
-        
+
         IntentFilter filter = new IntentFilter();
         filter.addDataScheme("package");
         filter.addAction("android.intent.action.PACKAGE_ADDED");
