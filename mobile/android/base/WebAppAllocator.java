@@ -5,14 +5,10 @@
 
 package org.mozilla.gecko;
 
-import org.mozilla.gecko.gfx.BitmapUtils;
 import org.mozilla.gecko.util.ThreadUtils;
 
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.content.SharedPreferences.Editor;
-import android.graphics.Bitmap;
-import android.util.Log;
 
 public class WebAppAllocator {
     private static final String PREFIX_ORIGIN = "webapp-origin-";
@@ -74,23 +70,10 @@ public class WebAppAllocator {
     public synchronized WebAppAllocator putPackageName(final int index,
                                                  final String packageName) {
         return commit(edit().putString(appKey(index), packageName));
-
     }
 
-    public void updateColor(final int index, final Bitmap aIcon) {
-        ThreadUtils.getBackgroundHandler().post(new Runnable() {
-            @Override
-            public void run() {
-                int color = 0;
-                try {
-                    color = BitmapUtils.getDominantColor(aIcon);
-                } catch (Exception e) {
-                    Log.e(LOGTAG, "Exception during getDominantColor", e);
-                }
-                Editor edit = mPrefs.edit();
-                edit.putInt(iconKey(index), color).commit();
-            }
-        });
+    public WebAppAllocator updateColor(int index, int color) {
+        return commit(edit().putInt(iconKey(index), color));
     }
 
     public synchronized int getIndexForApp(String packageName) {

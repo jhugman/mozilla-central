@@ -1,14 +1,23 @@
 package org.mozilla.gecko.webapp;
 
+import java.io.FileNotFoundException;
+import java.io.InputStream;
+
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.mozilla.gecko.GeckoAppShell;
 import org.mozilla.gecko.GeckoEvent;
 import org.mozilla.gecko.GeckoProfile;
+import org.mozilla.gecko.WebAppAllocator;
+import org.mozilla.gecko.gfx.BitmapUtils;
 import org.mozilla.gecko.util.GeckoEventListener;
+import org.mozilla.gecko.util.ThreadUtils;
 
 import android.content.Context;
 import android.content.pm.PackageManager.NameNotFoundException;
+import android.graphics.Bitmap;
+import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.Drawable;
 import android.util.Log;
 
 public class InstallHelper implements GeckoEventListener {
@@ -49,9 +58,39 @@ public class InstallHelper implements GeckoEventListener {
         for (String eventName : INSTALL_EVENT_NAMES) {
             GeckoAppShell.registerEventListener(eventName, this);
         }
+
         GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Webapps:AutoInstall", message.toString()));
+        calculateColor();
     }
 
+    private void calculateColor() {
+        ThreadUtils.getBackgroundHandler().post(new Runnable() {
+            @Override
+            public void run() {
+                // find the app launcher's launcher icon
+                Bitmap bitmap = null;
+                try {
+                    InputStream inputStream = mContext.getContentResolver().openInputStream(mApkResources.getLogoUri());
+                    BitmapDrawable d = (BitmapDrawable) Drawable.createFromStream(inputStream, null);
+                    bitmap = d.getBitmap();
+                } catch (FileNotFoundException e) {
+                    Log.e(LOGTAG, "Can't find icon drawable", e);
+                    return;
+                }
+                int color = -1;
+                try {
+                    color = BitmapUtils.getDominantColor(bitmap);
+                } catch (Exception e) {
+                    Log.e(LOGTAG, "Exception during getDominantColor", e);
+                }
+                if (color != -1) {
+                    WebAppAllocator slots = WebAppAllocator.getInstance(mContext);
+                    int index = slots.getIndexForApp(mApkResources.getPackageName());
+                    slots.updateColor(index, color);
+                }
+            }
+        });
+    }
 
     private JSONObject createInstallMessage() {
         String packageName = mApkResources.getPackageName();

@@ -125,6 +125,13 @@ public class WebAppImpl extends GeckoApp implements InstallCallback {
     }
 
     @Override
+    public void onResume() {
+        // TODO Ensure that Gecko hasn't been killed from under us,
+        // and if so start again.
+        super.onResume();
+    }
+
+    @Override
     protected String getURIFromIntent(Intent intent) {
         String uri = super.getURIFromIntent(intent);
         if (uri != null) {
@@ -168,16 +175,10 @@ public class WebAppImpl extends GeckoApp implements InstallCallback {
         }
 
         if (d != null) {
-            if (dominantColor == -1) {
-                Bitmap bitmap = ((BitmapDrawable) d).getBitmap();
-                WebAppAllocator.getInstance(getApplicationContext()).updateColor(getIndex(), bitmap);
-            }
-
             Animation fadein = AnimationUtils.loadAnimation(this, R.anim.grow_fade_in_center);
             fadein.setStartOffset(500);
             fadein.setDuration(1000);
             image.startAnimation(fadein);
-
         }
     }
 
@@ -266,20 +267,20 @@ public class WebAppImpl extends GeckoApp implements InstallCallback {
     }
 
     protected void hideSplash() {
-                if (mSplashscreen != null && mSplashscreen.getVisibility() == View.VISIBLE) {
-                    Animation fadeout = AnimationUtils.loadAnimation(this, android.R.anim.fade_out);
-                    fadeout.setAnimationListener(new Animation.AnimationListener() {
-                        @Override
-                        public void onAnimationEnd(Animation animation) {
-                          mSplashscreen.setVisibility(View.GONE);
-                        }
-                        @Override
-                        public void onAnimationRepeat(Animation animation) { }
-                        @Override
-                        public void onAnimationStart(Animation animation) { }
-                    });
-                    mSplashscreen.startAnimation(fadeout);
+        if (mSplashscreen != null && mSplashscreen.getVisibility() == View.VISIBLE) {
+            Animation fadeout = AnimationUtils.loadAnimation(this, android.R.anim.fade_out);
+            fadeout.setAnimationListener(new Animation.AnimationListener() {
+                @Override
+                public void onAnimationEnd(Animation animation) {
+                  mSplashscreen.setVisibility(View.GONE);
                 }
+                @Override
+                public void onAnimationRepeat(Animation animation) { }
+                @Override
+                public void onAnimationStart(Animation animation) { }
+            });
+            mSplashscreen.startAnimation(fadeout);
+        }
     }
 
     @Override
