@@ -68,8 +68,11 @@ public class WebAppImpl extends GeckoApp implements InstallCallback {
         }
 
         String packageName = extras.getString("packageName");
-
-        mApkResources = new ApkResources(packageName);
+        try {
+            mApkResources = new ApkResources(this, packageName);
+        } catch (NameNotFoundException e) {
+            Log.e(LOGTAG, "Can't find " + packageName + " package for webapp", e);
+        }
 
         boolean isInstalled = extras.getBoolean("isInstalled", false);
         if (isInstalled) {
@@ -131,12 +134,7 @@ public class WebAppImpl extends GeckoApp implements InstallCallback {
         // the synthesized APK.
 
         // TODO Translate AndroidIntents into WebActivities here.
-        try {
-            return mApkResources.getManifestUrl(this);
-        } catch (NameNotFoundException e) {
-            Log.e(LOGTAG, "Can't find an app for package", e);
-        }
-        return null;
+        return mApkResources.getManifestUrl();
     }
 
     @Override
