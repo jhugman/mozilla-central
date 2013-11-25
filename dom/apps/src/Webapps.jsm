@@ -918,7 +918,6 @@ this.DOMApplicationRegistry = {
   doAutoInstall: function (aData) {
     debug("AutoInstalling from Webapps.jsm: " + aData);
 
-
     let mm = {
       sendAsyncMessage: function (messageName, data) {
         // TODO hook this back to Java
@@ -927,6 +926,20 @@ this.DOMApplicationRegistry = {
     };
 
     let data = JSON.parse(aData);
+
+    if(data.apkInstalled) {
+      debug("APK INSTALLED");
+      let apkData = {};
+      [(apkData[p] = data.data[p]) for (p in data.data)];
+      apkData.packageName = data.packageName;
+      apkData.app = null;
+      [(apkData[p] = data.data.app[p]) for (p in data.data.app)];
+      apkData.manifest = data.data.manifest;
+      apkData.manifestUrl = data.data.app.manifestURL;
+      apkData.type = apkData.isPackaged ? "packaged" : "hosted";
+      data = apkData;
+      debug("new data: " + JSON.stringify(data));
+    }
 
     let manifestUrl = data.manifestUrl,
         uri = Services.io.newURI(manifestUrl, null, null),
@@ -943,7 +956,7 @@ this.DOMApplicationRegistry = {
         silentInstall: true,
         mm: mm
     };
-
+debug("Data type:" + data.type);
     switch (data.type) { // can be hosted or packaged.
       case "hosted":
         this.doInstall(message, mm);
