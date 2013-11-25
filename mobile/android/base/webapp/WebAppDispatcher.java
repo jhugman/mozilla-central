@@ -4,7 +4,6 @@ import org.mozilla.gecko.WebAppAllocator;
 
 import android.app.Activity;
 import android.content.Intent;
-import android.graphics.Bitmap;
 import android.os.Bundle;
 
 public class WebAppDispatcher extends Activity {
@@ -25,7 +24,7 @@ public class WebAppDispatcher extends Activity {
         int index = allocator.getIndexForApp(packageName);
         boolean isInstalled = index >= 0;
         if (!isInstalled) {
-            index = allocator.findAndAllocateIndex(packageName, packageName, (Bitmap) null);
+            index = allocator.allocatePackage(packageName, packageName);
         }
 
         // Copy the intent, without interfering with it.

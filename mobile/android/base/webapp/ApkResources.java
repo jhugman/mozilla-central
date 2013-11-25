@@ -21,21 +21,22 @@ public class ApkResources {
 
     private ApplicationInfo mInfo;
 
-    public ApkResources(String packageName) {
+    public ApkResources(Context context, String packageName) throws NameNotFoundException {
         mPackageName = packageName;
+        mInfo = context.getPackageManager().getApplicationInfo(
+                    mPackageName, PackageManager.GET_META_DATA);;
     }
 
-    private ApplicationInfo info(Context context) throws NameNotFoundException {
-        if (mInfo == null) {
-            mInfo = context.getPackageManager().getApplicationInfo(
-                    mPackageName, PackageManager.GET_META_DATA);
-        }
+    private ApplicationInfo info() {
         return mInfo;
     }
 
-    private Bundle metadata(Context context) throws NameNotFoundException {
-        // Beware the null pointer exception.
-        return info(context).metaData;
+    public String getPackageName() {
+        return mPackageName;
+    }
+
+    private Bundle metadata() {
+        return mInfo.metaData;
     }
 
     public String getManifest(Context context) {
@@ -47,16 +48,12 @@ public class ApkResources {
     }
 
 
-    public String getManifestUrl(Context context) throws NameNotFoundException {
-        return metadata(context).getString("packageName");
+    public String getManifestUrl() {
+        return metadata().getString("manifestUrl");
     }
 
-    public boolean isPackaged(Context context) {
-        try {
-            return "packaged".equals(metadata(context).getString("webapp", null));
-        } catch (NameNotFoundException e) {
-            return false;
-        }
+    public boolean isPackaged() {
+        return "packaged".equals(metadata().getString("webapp", null));
     }
 
     private String readResource(Context context, String resourceName) {
@@ -81,7 +78,15 @@ public class ApkResources {
     }
 
     public Uri getLogoUri() {
-        return Uri.parse("android.resource://" + mPackageName + "/drawable/ic_launcher");
+        return Uri.parse("android.resource://" + mPackageName + "/" + info().icon);
+    }
+
+    public String getWebAppType() {
+        return metadata().getString("webapp");
+    }
+
+    public String getAppName() {
+        return info().name;
     }
 
 }

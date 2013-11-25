@@ -37,8 +37,6 @@ import android.widget.TextView;
 public class WebAppImpl extends GeckoApp implements InstallCallback {
     private static final String LOGTAG = "GeckoWebAppImpl";
 
-    private static final String[] INSTALL_EVENT_NAMES = new String[] {"WebApps:PostInstall"};
-
     private URL mOrigin;
     private TextView mTitlebarText = null;
     private View mTitlebar = null;
@@ -70,8 +68,11 @@ public class WebAppImpl extends GeckoApp implements InstallCallback {
         }
 
         String packageName = extras.getString("packageName");
-
-        mApkResources = new ApkResources(packageName);
+        try {
+            mApkResources = new ApkResources(this, packageName);
+        } catch (NameNotFoundException e) {
+            Log.e(LOGTAG, "Can't find " + packageName + " package for webapp", e);
+        }
 
         boolean isInstalled = extras.getBoolean("isInstalled", false);
         if (isInstalled) {
@@ -95,7 +96,8 @@ public class WebAppImpl extends GeckoApp implements InstallCallback {
         }
 
         if (!isInstalled) {
-            startInstall(extras);
+            InstallHelper installHelper = new InstallHelper(getApplicationContext(), mApkResources, this);
+            installHelper.startInstall(getProfile());
             return;
         }
 
@@ -103,7 +105,7 @@ public class WebAppImpl extends GeckoApp implements InstallCallback {
         setTitle(title != null ? title : "Web App");
 
         // Try to use the origin stored in the WebAppAllocator first
-        String origin = WebAppAllocator.getInstance(this).getAppForIndex(getIndex());
+        String origin = WebAppAllocator.getInstance(this).getOrigin(getIndex());
         try {
             mOrigin = new URL(origin);
         } catch (java.net.MalformedURLException ex) {
@@ -123,6 +125,13 @@ public class WebAppImpl extends GeckoApp implements InstallCallback {
     }
 
     @Override
+    public void onResume() {
+        // TODO Ensure that Gecko hasn't been killed from under us,
+        // and if so start again.
+        super.onResume();
+    }
+
+    @Override
     protected String getURIFromIntent(Intent intent) {
         String uri = super.getURIFromIntent(intent);
         if (uri != null) {
@@ -132,31 +141,18 @@ public class WebAppImpl extends GeckoApp implements InstallCallback {
         // the synthesized APK.
 
         // TODO Translate AndroidIntents into WebActivities here.
-        return mApkResources.getManifest(this);
+        return mApkResources.getManifestUrl();
     }
 
     @Override
     protected void loadStartupTab(String uri) {
-        String action = getIntent().getAction();
-
-        // This is almost certainly redundant.
-        if (GeckoApp.ACTION_WEBAPP_PREFIX.equals(action)) {
-            // This action assumes the uri is not an installed WebApp. We will
-            // use the WebAppAllocator to register the uri with an Android
-            // process so it can run chromeless.
-            int index = WebAppAllocator.getInstance(this).findAndAllocateIndex(uri, "App", (Bitmap) null);
-            Intent appIntent = GeckoAppShell.getWebAppIntent(index, uri);
-            startActivity(appIntent);
-            finish();
-        }
+        // NOP
     }
 
     private void showSplash(boolean isInstalled) {
 
-        SharedPreferences prefs = getPreferences();
-
         // get the favicon dominant color, stored when the app was installed
-        int dominantColor = prefs.getInt(WebAppAllocator.iconKey(getIndex()), -1);
+        int dominantColor = WebAppAllocator.getInstance().getColor(getIndex());
 
         setBackgroundGradient(dominantColor);
 
@@ -179,22 +175,11 @@ public class WebAppImpl extends GeckoApp implements InstallCallback {
         }
 
         if (d != null) {
-            if (dominantColor == -1) {
-                Bitmap bitmap = ((BitmapDrawable) d).getBitmap();
-                WebAppAllocator.getInstance(getApplicationContext()).updateAppAllocation(null, getIndex(), bitmap);
-            }
-
             Animation fadein = AnimationUtils.loadAnimation(this, R.anim.grow_fade_in_center);
             fadein.setStartOffset(500);
             fadein.setDuration(1000);
             image.startAnimation(fadein);
-
         }
-    }
-
-    protected SharedPreferences getPreferences() {
-        SharedPreferences prefs = getSharedPreferences("webapps", Context.MODE_PRIVATE | Context.MODE_MULTI_PROCESS);
-        return prefs;
     }
 
     public void setBackgroundGradient(int dominantColor) {
@@ -265,7 +250,6 @@ public class WebAppImpl extends GeckoApp implements InstallCallback {
                     }
                 }
                 break;
-            case RESTORED:
             case LOADED:
                 hideSplash();
                 break;
@@ -283,58 +267,33 @@ public class WebAppImpl extends GeckoApp implements InstallCallback {
     }
 
     protected void hideSplash() {
-                if (mSplashscreen != null && mSplashscreen.getVisibility() == View.VISIBLE) {
-                    Animation fadeout = AnimationUtils.loadAnimation(this, android.R.anim.fade_out);
-                    fadeout.setAnimationListener(new Animation.AnimationListener() {
-                        @Override
-                        public void onAnimationEnd(Animation animation) {
-                          mSplashscreen.setVisibility(View.GONE);
-                        }
-                        @Override
-                        public void onAnimationRepeat(Animation animation) { }
-                        @Override
-                        public void onAnimationStart(Animation animation) { }
-                    });
-                    mSplashscreen.startAnimation(fadeout);
+        if (mSplashscreen != null && mSplashscreen.getVisibility() == View.VISIBLE) {
+            Animation fadeout = AnimationUtils.loadAnimation(this, android.R.anim.fade_out);
+            fadeout.setAnimationListener(new Animation.AnimationListener() {
+                @Override
+                public void onAnimationEnd(Animation animation) {
+                  mSplashscreen.setVisibility(View.GONE);
                 }
-    }
-
-    protected void startInstall(Bundle extras) {
-        InstallHelper installHelper = new InstallHelper(this.getApplicationContext(), mApkResources, this);
-        JSONObject message = installHelper.createInstallMessage(extras);
-
-        if (message == null) {
-            throw new NullPointerException("Cannot find package name in the calling intent to install this app");
+                @Override
+                public void onAnimationRepeat(Animation animation) { }
+                @Override
+                public void onAnimationStart(Animation animation) { }
+            });
+            mSplashscreen.startAnimation(fadeout);
         }
-
-        GeckoProfile profile = getProfile();
-        try {
-            message.putOpt("profilePath", profile.getDir());
-        } catch (JSONException e) {
-            // NOP
-        }
-
-        for (String eventName : INSTALL_EVENT_NAMES) {
-            GeckoAppShell.registerEventListener(eventName, installHelper);
-        }
-        GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Webapps:AutoInstall", message.toString()));
     }
 
     @Override
     public void installCompleted(InstallHelper installHelper, String event, JSONObject message) {
 
-        for (String eventName : INSTALL_EVENT_NAMES) {
-            GeckoAppShell.unregisterEventListener(eventName, installHelper);
-        }
-
         if (event == null) {
             return;
         }
 
-
         if (event.equals("WebApps:PostInstall")) {
             try {
-                mOrigin = new URL(message.optString("origin"));
+                String origin = message.optString("origin");
+                mOrigin = new URL(origin);
             } catch (MalformedURLException e) {
                 Log.e(LOGTAG, "Cannot decode origin", e);
             }

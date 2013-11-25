@@ -5,16 +5,14 @@
 
 package org.mozilla.gecko;
 
-import org.mozilla.gecko.gfx.BitmapUtils;
 import org.mozilla.gecko.util.ThreadUtils;
 
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.content.SharedPreferences.Editor;
-import android.graphics.Bitmap;
-import android.util.Log;
 
 public class WebAppAllocator {
+    private static final String PREFIX_ORIGIN = "webapp-origin-";
+    private static final String PREFIX_PACKAGE_NAME = "webapp-package-name-";
     private final String LOGTAG = "GeckoWebAppAllocator";
     // The number of WebApp# and WEBAPP# activites/apps/intents
     private final static int MAX_WEB_APPS = 100;
@@ -38,28 +36,29 @@ public class WebAppAllocator {
         mPrefs = context.getSharedPreferences("webapps", Context.MODE_PRIVATE | Context.MODE_MULTI_PROCESS);
     }
 
-    public static String appKey(int index) {
-        return "app" + index;
+
+
+    private static String appKey(int index) {
+        return PREFIX_PACKAGE_NAME + index;
     }
 
     public static String iconKey(int index) {
-        return "icon" + index;
+        return "web-app-color-" + index;
     }
 
-    public synchronized int findAndAllocateIndex(String app, String name, String aIconData) {
-        Bitmap icon = (aIconData != null) ? BitmapUtils.getBitmapFromDataURI(aIconData) : null;
-        return findAndAllocateIndex(app, name, icon);
+    public static String originKey(int i) {
+        return PREFIX_ORIGIN + i;
     }
 
-    public synchronized int findAndAllocateIndex(final String app, final String name, final Bitmap aIcon) {
-        int index = getIndexForApp(app);
+    public synchronized int allocatePackage(final String packageName, final String title) {
+        int index = getIndexForApp(packageName);
         if (index != -1)
             return index;
 
         for (int i = 0; i < MAX_WEB_APPS; ++i) {
             if (!mPrefs.contains(appKey(i))) {
                 // found unused index i
-                updateAppAllocation(app, i, aIcon);
+                putPackageName(i, packageName);
                 return i;
             }
         }
@@ -68,45 +67,29 @@ public class WebAppAllocator {
         return -1;
     }
 
-    public synchronized void updateAppAllocation(final String app,
-                                                 final int index,
-                                                 final Bitmap aIcon) {
-        if (aIcon != null) {
-            updateColor(app, index, aIcon);
-        } else {
-            mPrefs.edit()
-                  .putString(appKey(index), app)
-                  .putInt(iconKey(index), -1).commit();
-        }
+    public synchronized WebAppAllocator putPackageName(final int index,
+                                                 final String packageName) {
+        return commit(edit().putString(appKey(index), packageName));
     }
 
-    public void updateColor(final String app, final int index,
-            final Bitmap aIcon) {
-        ThreadUtils.getBackgroundHandler().post(new Runnable() {
-            @Override
-            public void run() {
-                int color = 0;
-                try {
-                    color = BitmapUtils.getDominantColor(aIcon);
-                } catch (Exception e) {
-                    Log.e(LOGTAG, "Exception during getDominantColor", e);
-                }
-                Editor edit = mPrefs.edit();
-                if (app != null) {
-                    edit.putString(appKey(index), app);
-                }
-                edit.putInt(iconKey(index), color).commit();
-            }
-        });
+    public WebAppAllocator updateColor(int index, int color) {
+        return commit(edit().putInt(iconKey(index), color));
     }
 
-    public synchronized int getIndexForApp(String app) {
+    public synchronized int getIndexForApp(String packageName) {
+        return findSlotForPrefix(PREFIX_PACKAGE_NAME, packageName);
+    }
+
+    public synchronized int getIndexForOrigin(String origin) {
+        return findSlotForPrefix(PREFIX_ORIGIN, origin);
+    }
+
+    protected int findSlotForPrefix(String prefix, String value) {
         for (int i = 0; i < MAX_WEB_APPS; ++i) {
-            if (mPrefs.getString(appKey(i), "").equals(app)) {
+            if (mPrefs.getString(prefix + i, "").equals(value)) {
                 return i;
             }
         }
-
         return -1;
     }
 
@@ -130,8 +113,51 @@ public class WebAppAllocator {
                 mPrefs.edit()
                     .remove(appKey(index))
                     .remove(iconKey(index))
+                    .remove(originKey(index))
                     .commit();
             }
         });
+    }
+
+    private SharedPreferences.Editor mEditor = null;
+
+    public synchronized WebAppAllocator begin() {
+        mEditor = edit();
+        return this;
+    }
+
+    public WebAppAllocator end() {
+        commit(mEditor);
+        return this;
+    }
+
+    private SharedPreferences.Editor edit() {
+        if (mEditor != null) {
+            return mEditor;
+        }
+        return mPrefs.edit();
+    }
+
+    private WebAppAllocator commit(SharedPreferences.Editor edit) {
+        if (edit == null) {
+            return this;
+        }
+        if (edit == mEditor || mEditor == null) {
+            edit.commit();
+            mEditor = null;
+        }
+        return this;
+    }
+
+    public WebAppAllocator putOrigin(int index, String origin) {
+        return commit(edit().putString(originKey(index), origin));
+    }
+
+    public String getOrigin(int index) {
+        return mPrefs.getString(originKey(index), null);
+    }
+
+    public int getColor(int index) {
+        return mPrefs.getInt(iconKey(index), -1);
     }
 }
